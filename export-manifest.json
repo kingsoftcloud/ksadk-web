@@ -1,0 +1,42 @@
+{
+  "source": "agentengine-hosted-ui",
+  "targetRepository": "https://github.com/kingsoftcloud/ksadk-web",
+  "publicDemo": "https://kingsoftcloud.github.io/ksadk-web/",
+  "exportPathCount": 159,
+  "generatedCandidateFiles": [
+    "LICENSE",
+    ".github/ISSUE_TEMPLATE/bug_report.md",
+    ".github/ISSUE_TEMPLATE/feature_request.md",
+    ".github/pull_request_template.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/pages.yml",
+    ".gitignore",
+    "CONTRIBUTING.md",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "hostedOnlyTestsExcluded": [
+    "helm-contract.test.mjs",
+    "makefile-contract.test.mjs"
+  ],
+  "ksadkOnlyTestsExcluded": [
+    "hosted-ui-sync.test.mjs",
+    "sync-static.test.mjs"
+  ],
+  "forbiddenPathsExcluded": [
+    ".dockerignore",
+    ".git/",
+    "Dockerfile",
+    "Makefile",
+    "deploy/",
+    "dist-hosted/",
+    "dist/",
+    "nginx.conf",
+    "node_modules/",
+    "sandbox-poc.html",
+    "scripts/sync-static.mjs",
+    "tests/helm-contract.test.mjs",
+    "tests/makefile-contract.test.mjs",
+    "tsconfig.tsbuildinfo"
+  ]
+}
