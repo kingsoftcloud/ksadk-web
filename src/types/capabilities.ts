@@ -1,5 +1,17 @@
 import type { RuntimeApiFormat } from './api.js';
 
+export type BuiltinToolCapability = {
+  name: string;
+  group: string;
+  description?: string;
+  risk_level: string;
+  requires_approval: boolean;
+  side_effects: string[];
+  enabled: boolean;
+  backend?: string;
+  boundary?: string;
+};
+
 export type UiCapabilities = {
   Attachments?: boolean;
   Approval?: boolean;
@@ -29,4 +41,5 @@ export type UiCapabilities = {
     Abort: boolean;
   };
   WorkspaceFiles?: boolean;
+  BuiltinTools: BuiltinToolCapability[];
 };

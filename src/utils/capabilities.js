@@ -34,6 +34,32 @@ function normalizeEnabled(value, fallback) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function normalizeBuiltinTools(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(item => asObject(item))
+    .filter(item => typeof item.name === 'string' && item.name.trim())
+    .map(item => {
+      const normalized = {
+        ...item,
+        name: item.name.trim(),
+        group: typeof item.group === 'string' ? item.group : '',
+        risk_level: typeof item.risk_level === 'string' ? item.risk_level : 'low',
+        requires_approval: Boolean(item.requires_approval),
+        side_effects: Array.isArray(item.side_effects)
+          ? item.side_effects.filter(sideEffect => typeof sideEffect === 'string')
+          : [],
+        enabled: normalizeEnabled(item.enabled, true),
+      };
+      if (typeof item.description === 'string') {
+        normalized.description = item.description;
+      }
+      return normalized;
+    });
+}
+
 export function normalizeCapabilities(bootstrap) {
   const data = bootstrap?.Data || bootstrap || {};
   const rawCapabilities = asObject(data.Capabilities);
@@ -105,6 +131,7 @@ export function normalizeCapabilities(bootstrap) {
       Resume: normalizeEnabled(runLifecycle.Resume, runLifecycleEnabled),
       Abort: normalizeEnabled(runLifecycle.Abort, runLifecycleEnabled),
     },
+    BuiltinTools: normalizeBuiltinTools(rawCapabilities.BuiltinTools),
   };
 }
 

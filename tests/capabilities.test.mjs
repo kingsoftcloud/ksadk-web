@@ -92,3 +92,43 @@ test('explicit capability objects override framework fallback', async () => {
     Label: '原生入口',
   });
 });
+
+test('capabilities normalize builtin tool metadata from bootstrap', async () => {
+  const capabilities = await loadCapabilityUtils();
+
+  assert.ok(capabilities, 'expected capability helpers to exist');
+  const normalized = capabilities.normalizeCapabilities({
+    Data: {
+      Agent: { Framework: 'langgraph' },
+      Capabilities: {
+        BuiltinTools: [
+          {
+            name: 'run_command',
+            group: 'sandbox',
+            risk_level: 'high',
+            requires_approval: true,
+            side_effects: ['sandbox_command_execution'],
+            enabled: true,
+            backend: 'e2b',
+            boundary: 'isolated_sandbox',
+          },
+          'bad-tool',
+          null,
+        ],
+      },
+    },
+  });
+
+  assert.deepEqual(normalized.BuiltinTools, [
+    {
+      name: 'run_command',
+      group: 'sandbox',
+      risk_level: 'high',
+      requires_approval: true,
+      side_effects: ['sandbox_command_execution'],
+      enabled: true,
+      backend: 'e2b',
+      boundary: 'isolated_sandbox',
+    },
+  ]);
+});
