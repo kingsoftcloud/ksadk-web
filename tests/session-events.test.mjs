@@ -740,7 +740,7 @@ test('session event utils ignore duplicate persisted events with the same event 
   );
 });
 
-test('session event utils dedupe duplicate messages with different event ids', async () => {
+test('session event utils keep repeated turns even when visible text is identical', async () => {
   const sessionEvents = await loadSessionEventUtils();
 
   assert.ok(sessionEvents, 'expected session event helpers to exist');
@@ -748,25 +748,29 @@ test('session event utils dedupe duplicate messages with different event ids', a
     {
       EventId: 'evt-user-1',
       EventType: 'user_message',
+      InvocationId: 'inv-repeat-1',
       Content: { role: 'user', parts: [{ text: '同一个问题' }] },
       Timestamp: 1,
     },
     {
-      EventId: 'evt-user-2',
-      EventType: 'user_message',
-      Content: { role: 'user', parts: [{ text: '同一个问题' }] },
+      EventId: 'evt-assistant-1',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-repeat-1',
+      Content: { role: 'model', parts: [{ text: '同一个回答' }] },
+      Metadata: { response_id: 'resp-1' },
       Timestamp: 2,
     },
     {
-      EventId: 'evt-assistant-1',
-      EventType: 'assistant_message',
-      Content: { role: 'model', parts: [{ text: '同一个回答' }] },
-      Metadata: { response_id: 'resp-1' },
+      EventId: 'evt-user-2',
+      EventType: 'user_message',
+      InvocationId: 'inv-repeat-2',
+      Content: { role: 'user', parts: [{ text: '同一个问题' }] },
       Timestamp: 3,
     },
     {
       EventId: 'evt-assistant-2',
       EventType: 'assistant_message',
+      InvocationId: 'inv-repeat-2',
       Content: { role: 'model', parts: [{ text: '同一个回答' }] },
       Metadata: { response_id: 'resp-2' },
       Timestamp: 4,
@@ -782,6 +786,8 @@ test('session event utils dedupe duplicate messages with different event ids', a
     [
       { id: 'evt-user-1', role: 'user', content: '同一个问题' },
       { id: 'evt-assistant-1', role: 'model', content: '同一个回答' },
+      { id: 'evt-user-2', role: 'user', content: '同一个问题' },
+      { id: 'evt-assistant-2', role: 'model', content: '同一个回答' },
     ],
   );
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isChunkLoadError } from '@/components/ErrorBoundary';
+import { isChunkLoadError } from '@/utils/chunk-load-error';
 
 describe('ErrorBoundary chunk load recovery', () => {
   it('recognizes stale lazy chunk loading failures', () => {

@@ -3,6 +3,7 @@ import { useEffect, useState, type RefObject } from 'react';
 import {
   Bot,
   Check,
+  ChevronDown,
   Copy,
   Paperclip,
   RefreshCcw,
@@ -81,15 +82,6 @@ function formatCompactTokenCount(value?: number | null) {
 function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerContextIndicator }) {
   const usedTokens = contextIndicator?.usedTokens;
   const contextWindowTokens = contextIndicator?.contextWindowTokens;
-  const [pulseKey, setPulseKey] = useState(0);
-
-  useEffect(() => {
-    if (!usedTokens) {
-      return undefined;
-    }
-    setPulseKey((key) => key + 1);
-    return undefined;
-  }, [usedTokens]);
 
   if (!usedTokens || !contextWindowTokens) {
     return null;
@@ -97,7 +89,7 @@ function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerCo
 
   return (
     <span
-      key={pulseKey}
+      key={Math.round(usedTokens)}
       className="token-count-pulse hidden font-mono text-slate-400 dark:text-slate-500 sm:inline"
       title={`估算 token：${Math.round(usedTokens)} / ${Math.round(contextWindowTokens)}`}
     >
@@ -530,18 +522,19 @@ function ChatMessage({
       ) : null}
 
       {message.reasoning ? (
-        <details className="group/details mb-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-600 transition-all dark:border-slate-700/30 dark:bg-slate-800/20 dark:text-slate-400">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-medium">
-            <div className="flex items-center gap-2">
+        <details className="group/details mb-3 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2 text-sm text-slate-600 transition-colors open:bg-white dark:border-slate-700/50 dark:bg-slate-900/30 dark:text-slate-400 dark:open:bg-slate-950/30">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium outline-none marker:hidden">
+            <div className="flex min-w-0 items-center gap-2">
               {isStreaming && isLastMessage && !message.content ? (
                 <RefreshCcw className="h-4 w-4 animate-spin text-emerald-500" />
               ) : (
                 <Check className="h-4 w-4 text-emerald-500" />
               )}
-              <span>思考过程</span>
+              <span className="truncate">思考过程</span>
             </div>
+            <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform group-open/details:rotate-180" />
           </summary>
-          <div className="mx-1 mt-3 border-l-2 border-slate-200 py-1 pl-4 text-[14px] leading-relaxed opacity-90 dark:border-slate-700">
+          <div className="custom-scrollbar mx-0 mt-3 max-h-[min(46vh,28rem)] overflow-y-auto border-l-2 border-slate-200 py-1 pl-4 pr-2 text-[14px] leading-relaxed opacity-90 dark:border-slate-700">
             <MessageMarkdown content={message.reasoning} />
           </div>
         </details>
@@ -668,7 +661,7 @@ export function ChatMessageList({
     <div
       ref={scrollRef}
       className={cn(
-        'relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
+        'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
       )}
     >

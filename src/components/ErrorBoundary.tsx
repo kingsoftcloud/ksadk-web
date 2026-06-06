@@ -1,4 +1,5 @@
 import React from 'react';
+import { isChunkLoadError } from '../utils/chunk-load-error.js';
 
 type ErrorBoundaryProps = {
   children: React.ReactNode;
@@ -10,11 +11,6 @@ type ErrorBoundaryState = {
 };
 
 const CHUNK_RELOAD_STORAGE_KEY = 'agentengine-ui:chunk-reload-attempted';
-
-export function isChunkLoadError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error || '');
-  return /loading chunk|chunkloaderror|failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i.test(message);
-}
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {

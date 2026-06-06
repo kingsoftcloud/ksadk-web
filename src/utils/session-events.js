@@ -244,22 +244,6 @@ function assistantOutputDedupeKey(invocationId, message) {
   ].join('\u0000');
 }
 
-function normalizedMessageContent(message) {
-  return [
-    String(message?.role || ''),
-    String(message?.content || '').replace(/\s+/g, ' ').trim(),
-    String(message?.reasoning || '').replace(/\s+/g, ' ').trim(),
-  ].join('\u0000');
-}
-
-function messageContentDedupeKey(message) {
-  const normalized = normalizedMessageContent(message);
-  const attachmentKey = (message?.attachments || [])
-    .map((attachment) => `${attachment.name || ''}|${attachment.type || ''}|${attachment.fileUri || attachment.url || ''}`)
-    .join('\u0001');
-  return `${normalized}\u0000${attachmentKey}`;
-}
-
 function stringifyToolPayload(value) {
   if (typeof value === 'string') {
     return value;
@@ -335,17 +319,6 @@ function mergeToolMaps(first = {}, second = {}) {
     };
   }
   return merged;
-}
-
-function messageVisibleContentDedupeKey(message) {
-  const attachmentKey = (message?.attachments || [])
-    .map((attachment) => `${attachment.name || ''}|${attachment.type || ''}|${attachment.fileUri || attachment.url || ''}`)
-    .join('\u0001');
-  return [
-    String(message?.role || ''),
-    String(message?.content || '').replace(/\s+/g, ' ').trim(),
-    attachmentKey,
-  ].join('\u0000');
 }
 
 function mergeMessageMetadata(existing, incoming) {
@@ -542,32 +515,21 @@ export function buildMessagesFromSessionEvents(events = []) {
 
   /** @type {Array<Message & { invocationId?: string }>} */
   const messages = [];
-  const messageContentKeys = new Set();
-  const messageVisibleKeyToIndex = new Map();
+  const responseIdToIndex = new Map();
   /** @type {(Message & { invocationId?: string }) | null} */
   let pendingReasoning = null;
   /** @type {Map<string, Message & { invocationId?: string }>} */
   const pendingToolsByInvocation = new Map();
 
   const pushMessage = (message) => {
-    const key = messageContentDedupeKey(message);
-    if (key && messageContentKeys.has(key)) {
-      return;
-    }
-    const visibleKey = messageVisibleContentDedupeKey(message);
-    const existingIndex = messageVisibleKeyToIndex.get(visibleKey);
+    const responseId = String(message?.responseId || '').trim();
+    const existingIndex = responseId ? responseIdToIndex.get(responseId) : undefined;
     if (existingIndex !== undefined) {
       messages[existingIndex] = mergeMessageMetadata(messages[existingIndex], message);
-      if (key) {
-        messageContentKeys.add(key);
-      }
       return;
     }
-    if (key) {
-      messageContentKeys.add(key);
-    }
-    if (visibleKey) {
-      messageVisibleKeyToIndex.set(visibleKey, messages.length);
+    if (responseId) {
+      responseIdToIndex.set(responseId, messages.length);
     }
     messages.push(message);
   };

@@ -38,6 +38,7 @@ export function ConnectedMessageList({
   const previewAttachment = useUIStore(s => s.previewAttachment);
   const previewImageSize = useUIStore(s => s.previewImageSize);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -53,9 +54,24 @@ export function ConnectedMessageList({
   );
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const scroller = scrollRef.current;
+    if (!scroller) return undefined;
+
+    const updateStickiness = () => {
+      const distanceFromBottom =
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      stickToBottomRef.current = distanceFromBottom < 96;
+    };
+
+    updateStickiness();
+    scroller.addEventListener('scroll', updateStickiness, { passive: true });
+    return () => scroller.removeEventListener('scroll', updateStickiness);
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || !stickToBottomRef.current) return;
+    scroller.scrollTop = scroller.scrollHeight;
   }, [messages, isStreaming]);
 
   const openAttachmentPreview = (attachment: MessageAttachment) => {

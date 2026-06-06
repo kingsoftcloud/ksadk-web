@@ -1,5 +1,4 @@
 import { useSessionStore } from '../../stores/session.js';
-import { useBootstrapStore } from '../../stores/bootstrap.js';
 import { useResponsiveViewport } from '../../hooks/useResponsiveViewport';
 import { ChatSidebar } from './ChatSidebar';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../ui/sheet';
