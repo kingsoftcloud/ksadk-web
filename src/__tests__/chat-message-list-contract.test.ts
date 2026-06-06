@@ -11,6 +11,9 @@ describe('chat message list contracts', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
 
     expect(source).toContain('stickToBottomRef');
+    expect(source).toContain('userDetachedFromBottomRef');
+    expect(source).toContain('isStreamingRef.current && scrolledUp');
+    expect(source).toContain('distanceFromBottom <= 12');
     expect(source).toContain('distanceFromBottom < 96');
     expect(source).not.toMatch(/scrollRef\.current\.scrollTop\s*=\s*scrollRef\.current\.scrollHeight/);
   });
@@ -21,5 +24,8 @@ describe('chat message list contracts', () => {
     expect(source).toContain('group-open/details:rotate-180');
     expect(source).toContain('max-h-[min(46vh,28rem)]');
     expect(source).toContain('custom-scrollbar');
+    expect(source).toContain('border-emerald-200/70');
+    expect(source).toContain('生成中');
+    expect(source).toContain('leading-7');
   });
 });

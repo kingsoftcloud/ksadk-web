@@ -39,6 +39,9 @@ export function ConnectedMessageList({
   const previewImageSize = useUIStore(s => s.previewImageSize);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const userDetachedFromBottomRef = useRef(false);
+  const previousScrollTopRef = useRef(0);
+  const isStreamingRef = useRef(isStreaming);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -54,12 +57,32 @@ export function ConnectedMessageList({
   );
 
   useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  }, [isStreaming]);
+
+  useEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return undefined;
 
     const updateStickiness = () => {
       const distanceFromBottom =
         scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      const scrolledUp = scroller.scrollTop < previousScrollTopRef.current - 2;
+      previousScrollTopRef.current = scroller.scrollTop;
+
+      if (isStreamingRef.current && scrolledUp) {
+        userDetachedFromBottomRef.current = true;
+        stickToBottomRef.current = false;
+        return;
+      }
+
+      if (userDetachedFromBottomRef.current) {
+        const returnedToBottom = distanceFromBottom <= 12;
+        userDetachedFromBottomRef.current = !returnedToBottom;
+        stickToBottomRef.current = returnedToBottom;
+        return;
+      }
+
       stickToBottomRef.current = distanceFromBottom < 96;
     };
 
@@ -72,6 +95,7 @@ export function ConnectedMessageList({
     const scroller = scrollRef.current;
     if (!scroller || !stickToBottomRef.current) return;
     scroller.scrollTop = scroller.scrollHeight;
+    previousScrollTopRef.current = scroller.scrollTop;
   }, [messages, isStreaming]);
 
   const openAttachmentPreview = (attachment: MessageAttachment) => {

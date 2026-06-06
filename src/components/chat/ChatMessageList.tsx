@@ -522,8 +522,8 @@ function ChatMessage({
       ) : null}
 
       {message.reasoning ? (
-        <details className="group/details mb-3 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2 text-sm text-slate-600 transition-colors open:bg-white dark:border-slate-700/50 dark:bg-slate-900/30 dark:text-slate-400 dark:open:bg-slate-950/30">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium outline-none marker:hidden">
+        <details className="group/details mb-3 overflow-hidden rounded-lg border border-emerald-200/70 bg-emerald-50/40 text-sm text-slate-600 transition-colors open:bg-white dark:border-emerald-900/50 dark:bg-emerald-950/10 dark:text-slate-300 dark:open:bg-slate-950/30">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-l-2 border-emerald-400 px-3 py-2 font-medium outline-none marker:hidden dark:border-emerald-500">
             <div className="flex min-w-0 items-center gap-2">
               {isStreaming && isLastMessage && !message.content ? (
                 <RefreshCcw className="h-4 w-4 animate-spin text-emerald-500" />
@@ -531,11 +531,16 @@ function ChatMessage({
                 <Check className="h-4 w-4 text-emerald-500" />
               )}
               <span className="truncate">思考过程</span>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                {isStreaming && isLastMessage && !message.content ? '生成中' : '已完成'}
+              </span>
             </div>
             <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform group-open/details:rotate-180" />
           </summary>
-          <div className="custom-scrollbar mx-0 mt-3 max-h-[min(46vh,28rem)] overflow-y-auto border-l-2 border-slate-200 py-1 pl-4 pr-2 text-[14px] leading-relaxed opacity-90 dark:border-slate-700">
-            <MessageMarkdown content={message.reasoning} />
+          <div className="border-t border-emerald-100/80 bg-white/70 dark:border-emerald-950 dark:bg-slate-950/20">
+            <div className="custom-scrollbar max-h-[min(46vh,28rem)] overflow-y-auto px-4 py-3 text-[14px] leading-7 text-slate-600 dark:text-slate-300 [&_p]:my-2 [&_pre]:my-2">
+              <MessageMarkdown content={message.reasoning} />
+            </div>
           </div>
         </details>
       ) : null}
