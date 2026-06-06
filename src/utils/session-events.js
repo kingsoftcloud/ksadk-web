@@ -480,7 +480,9 @@ export function buildMessageFromSessionEvent(event) {
  */
 export function buildMessagesFromSessionEvents(events = []) {
   const latestRunStatusByInvocation = new Map();
+  const latestRunStatusEventByInvocation = new Map();
   const outputByInvocation = new Set();
+  const userMessageByInvocation = new Set();
   const assistantOutputKeys = new Set();
   const seenEventIds = new Set();
   const normalizedEvents = Array.isArray(events) ? events : [];
@@ -498,6 +500,9 @@ export function buildMessagesFromSessionEvents(events = []) {
 
   for (const event of uniqueEvents) {
     const invocationId = String(event.InvocationId || '').trim();
+    if (invocationId && event.EventType === 'user_message') {
+      userMessageByInvocation.add(invocationId);
+    }
     if (
       invocationId &&
       ['assistant_message', 'reasoning', 'tool_call'].includes(String(event.EventType || ''))
@@ -511,6 +516,7 @@ export function buildMessagesFromSessionEvents(events = []) {
       continue;
     }
     latestRunStatusByInvocation.set(invocationId, String(event.Content?.status || '').trim());
+    latestRunStatusEventByInvocation.set(invocationId, event);
   }
 
   /** @type {Array<Message & { invocationId?: string }>} */
@@ -646,6 +652,24 @@ export function buildMessagesFromSessionEvents(events = []) {
   flushPendingReasoning();
   for (const pendingTools of pendingToolsByInvocation.values()) {
     pushMessage(pendingTools);
+  }
+  for (const [invocationId, status] of latestRunStatusByInvocation.entries()) {
+    if (
+      status !== 'in_progress' ||
+      outputByInvocation.has(invocationId) ||
+      !userMessageByInvocation.has(invocationId)
+    ) {
+      continue;
+    }
+    const event = latestRunStatusEventByInvocation.get(invocationId) || {};
+    pushMessage({
+      id: `run-placeholder-${invocationId}`,
+      role: 'model',
+      content: '',
+      status: 'running',
+      eventType: 'run_status',
+      timestamp: event.Timestamp || Date.now(),
+    });
   }
 
   return messages.map(({ invocationId: _invocationId, ...message }) => message);

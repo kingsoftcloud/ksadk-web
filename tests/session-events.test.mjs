@@ -138,6 +138,56 @@ test('session event utils merge replayed subscription events before rebuilding a
   );
 });
 
+test('session event utils restore visible placeholder for active run without persisted output', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-user-active',
+      EventType: 'user_message',
+      InvocationId: 'inv-active',
+      SeqId: 1,
+      Content: { role: 'user', parts: [{ text: '查询当前工作区状态' }] },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-run-active',
+      EventType: 'run_status',
+      InvocationId: 'inv-active',
+      SeqId: 2,
+      Content: { status: 'in_progress' },
+      Timestamp: 2,
+    },
+  ]);
+
+  assert.deepEqual(
+    messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      status: message.status,
+      eventType: message.eventType,
+    })),
+    [
+      {
+        id: 'evt-user-active',
+        role: 'user',
+        content: '查询当前工作区状态',
+        status: undefined,
+        eventType: 'user_message',
+      },
+      {
+        id: 'run-placeholder-inv-active',
+        role: 'model',
+        content: '',
+        status: 'running',
+        eventType: 'run_status',
+      },
+    ],
+  );
+});
+
 test('session event utils suppress stale running banners after assistant output exists', async () => {
   const sessionEvents = await loadSessionEventUtils();
 
