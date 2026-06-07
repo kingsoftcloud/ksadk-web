@@ -244,6 +244,31 @@ function assistantOutputDedupeKey(invocationId, message) {
   ].join('\u0000');
 }
 
+function isResponsesMirrorEvent(event) {
+  return event?.Metadata?.responses_mirror === true
+    || String(event?.Metadata?.responses_mirror || '').trim().toLowerCase() === 'true';
+}
+
+function userMessageDedupeKey(event) {
+  if (event?.EventType !== 'user_message') {
+    return '';
+  }
+  const parsed = parseMessageContent(event);
+  const attachments = (parsed.attachments || [])
+    .map((attachment) => [
+      attachment.name || '',
+      attachment.fileUri || '',
+      attachment.url || '',
+      attachment.type || '',
+    ].join('\u0001'))
+    .sort()
+    .join('\u0002');
+  return [
+    String(parsed.text || '').trim(),
+    attachments,
+  ].join('\u0000');
+}
+
 function stringifyToolPayload(value) {
   if (typeof value === 'string') {
     return value;
@@ -497,8 +522,25 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     uniqueEvents.push(event);
   }
-
+  const canonicalUserMessageKeys = new Set();
   for (const event of uniqueEvents) {
+    if (event?.EventType !== 'user_message' || isResponsesMirrorEvent(event)) {
+      continue;
+    }
+    const key = userMessageDedupeKey(event);
+    if (key) {
+      canonicalUserMessageKeys.add(key);
+    }
+  }
+  const replayEvents = uniqueEvents.filter((event) => {
+    if (event?.EventType !== 'user_message' || !isResponsesMirrorEvent(event)) {
+      return true;
+    }
+    const key = userMessageDedupeKey(event);
+    return !key || !canonicalUserMessageKeys.has(key);
+  });
+
+  for (const event of replayEvents) {
     const invocationId = String(event.InvocationId || '').trim();
     if (invocationId && event.EventType === 'user_message') {
       userMessageByInvocation.add(invocationId);
@@ -562,7 +604,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     };
   };
 
-  for (const event of uniqueEvents) {
+  for (const event of replayEvents) {
     if (event.EventType === 'run_status') {
       continue;
     }

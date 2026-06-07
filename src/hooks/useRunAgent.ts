@@ -8,6 +8,7 @@ import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { RunEngineImpl, dispatchRunEventToStores, resetDispatcherState } from '../core/run/index.js';
 import type { Session } from '../components/chat/types.js';
+import { writePersistedSessionId } from '../utils/session.js';
 
 type QueuedDraft = {
   text: string;
@@ -122,6 +123,7 @@ export function useRunAgent(ctx: RunAgentContext) {
         onSessionCreated: (sessionId: string) => {
           useSessionStore.getState().upsertSessions([{ SessionId: sessionId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
           currentSessionIdRef.current = sessionId;
+          writePersistedSessionId(agentId, sessionId);
           useSessionStore.getState().setCurrentSessionId(sessionId);
           if (targetSessionId !== sessionId) {
             enginesRef.current.set(sessionId, engine);
@@ -138,7 +140,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       }
       return accepted;
     },
-    [currentSessionIdRef, getEngine, onRunSettled],
+    [agentId, currentSessionIdRef, getEngine, onRunSettled],
   );
 
   useEffect(() => {

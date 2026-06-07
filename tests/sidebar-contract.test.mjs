@@ -60,6 +60,13 @@ test('composer run startup is scoped to the current session, not a global stream
   assert.match(messageListSource, /getSessionActivity\(currentSessionId\)/);
 });
 
+test('new run sessions are persisted before the next render effect', () => {
+  const runAgentSource = readFileSync(resolve(repoRoot, 'src/hooks/useRunAgent.ts'), 'utf8');
+
+  assert.match(runAgentSource, /writePersistedSessionId/);
+  assert.match(runAgentSource, /onSessionCreated:[\s\S]*writePersistedSessionId\(agentId,\s*sessionId\)/);
+});
+
 test('run capsule shows low-noise animated token counts without sidebar clutter', () => {
   const messageListSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
   const connectedMessageListSource = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');

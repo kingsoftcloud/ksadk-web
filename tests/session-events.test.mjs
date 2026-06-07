@@ -942,6 +942,60 @@ test('session event utils merge responses mirror assistant with canonical assist
   );
 });
 
+test('session event utils skip duplicated responses mirror user input after canonical user message', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-canonical-user',
+      EventType: 'user_message',
+      InvocationId: 'inv-mirror-user',
+      Content: { role: 'user', parts: [{ text: '检查 workspace 状态' }] },
+      Metadata: { agent_input: '检查 workspace 状态' },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-tool',
+      EventType: 'tool_call',
+      InvocationId: 'inv-mirror-user',
+      Content: { role: 'model', parts: [{ text: 'workspace_status' }] },
+      Metadata: { tool_name: 'workspace_status', tool_args: {} },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-mirror-user',
+      EventType: 'user_message',
+      Content: { role: 'user', parts: [{ text: '检查 workspace 状态' }] },
+      Metadata: {
+        agent_input: '检查 workspace 状态',
+        responses_mirror: true,
+      },
+      Timestamp: 3,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-mirror-user',
+      Content: { role: 'assistant', parts: [{ text: 'workspace 正常。' }] },
+      Metadata: { response_id: 'resp-mirror-user' },
+      Timestamp: 4,
+    },
+  ]);
+
+  assert.deepEqual(
+    messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+    })),
+    [
+      { id: 'evt-canonical-user', role: 'user', content: '检查 workspace 状态' },
+      { id: 'evt-assistant', role: 'model', content: 'workspace 正常。' },
+    ],
+  );
+});
+
 test('session event utils restore persisted tool calls and results around assistant output', async () => {
   const sessionEvents = await loadSessionEventUtils();
 
