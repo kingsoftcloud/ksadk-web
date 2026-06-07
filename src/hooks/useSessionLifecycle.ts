@@ -18,7 +18,6 @@ import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 
-const RESTORE_EMPTY_SUBSCRIPTION_TIMEOUT_MS = 8_000;
 const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
 
 type SessionLifecycleContext = {
@@ -117,9 +116,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const controller = new AbortController();
       runSubscriptionAbortRef.current = controller;
       let shouldReloadSession = false;
-      let eventCount = 0;
       let terminalStatusSeen = false;
-      let emptySubscriptionTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
       const stopRestoreSubscription = () => {
         if (runSubscriptionAbortRef.current !== controller || controller.signal.aborted) {
           return;
@@ -142,16 +139,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         const reader = stream.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let replayedEvents: SessionEventRecord[] = [];
         let mergedEvents: SessionEventRecord[] = Array.isArray(options.initialEvents)
           ? options.initialEvents
           : [];
-        emptySubscriptionTimer = globalThis.setTimeout(() => {
-          if (eventCount > 0) {
-            return;
-          }
-          stopRestoreSubscription();
-        }, RESTORE_EMPTY_SUBSCRIPTION_TIMEOUT_MS);
 
         while (!terminalStatusSeen) {
           const { value, done } = await reader.read();
@@ -176,12 +166,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             }
             try {
               const event = JSON.parse(dataString) as SessionEventRecord;
-              eventCount += 1;
-              if (emptySubscriptionTimer) {
-                globalThis.clearTimeout(emptySubscriptionTimer);
-                emptySubscriptionTimer = null;
-              }
-              replayedEvents = [...replayedEvents, event];
               mergedEvents = mergeSessionEventRecords(mergedEvents, [event]) as SessionEventRecord[];
               terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
               shouldReloadSession = shouldReloadSession || terminalStatusSeen;
@@ -199,9 +183,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       } finally {
         globalThis.clearTimeout(timeoutTimer);
-        if (emptySubscriptionTimer) {
-          globalThis.clearTimeout(emptySubscriptionTimer);
-        }
         if (runSubscriptionAbortRef.current === controller) {
           runSubscriptionAbortRef.current = null;
         }

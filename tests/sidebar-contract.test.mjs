@@ -33,6 +33,14 @@ test('restore subscription is silent and does not lock the composer', () => {
   assert.doesNotMatch(messageListSource, /输出已断开/);
 });
 
+test('restore subscription stays connected while active run has no new events yet', () => {
+  const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+
+  assert.doesNotMatch(lifecycleSource, /RESTORE_EMPTY_SUBSCRIPTION_TIMEOUT_MS/);
+  assert.doesNotMatch(lifecycleSource, /emptySubscriptionTimer/);
+  assert.match(lifecycleSource, /RESTORE_SUBSCRIPTION_TIMEOUT_MS/);
+});
+
 test('run dispatcher ignores streamed tokens for inactive sessions', () => {
   const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
   const engineSource = readFileSync(resolve(repoRoot, 'src/core/run/engine.ts'), 'utf8');
