@@ -39,6 +39,14 @@ function createApiFacade(calls: Record<string, unknown>[]): ApiFacade {
   };
 }
 
+const activeEngines = new Set<RunEngineImpl>();
+
+function createRunEngine(api: ApiFacade): RunEngineImpl {
+  const engine = new RunEngineImpl(api);
+  activeEngines.add(engine);
+  return engine;
+}
+
 async function waitForCalls(calls: Record<string, unknown>[], count = 1) {
   for (let i = 0; i < 20; i += 1) {
     if (calls.length >= count) return;
@@ -47,8 +55,16 @@ async function waitForCalls(calls: Record<string, unknown>[], count = 1) {
   throw new Error(`expected ${count} runAgent call(s), got ${calls.length}`);
 }
 
+async function waitForEngineIdle(engine: RunEngineImpl) {
+  for (let i = 0; i < 20 && engine.stage !== 'idle'; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 describe('RunEngineImpl', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all([...activeEngines].map(waitForEngineIdle));
+    activeEngines.clear();
     useStreamingStore.getState().resetRun();
     useMessageStore.getState().setMessages([]);
     useSessionStore.getState().setCurrentSessionId(null);
@@ -57,7 +73,7 @@ describe('RunEngineImpl', () => {
 
   it('uses the latest runtime config when starting a run', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -85,7 +101,7 @@ describe('RunEngineImpl', () => {
 
   it('sends ordinary hosted chat runs as Responses input while keeping legacy Messages', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -113,7 +129,7 @@ describe('RunEngineImpl', () => {
 
   it('sends uploaded attachments as Responses input_file references', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -144,7 +160,7 @@ describe('RunEngineImpl', () => {
 
   it('sends image attachments as Responses input_image data URLs', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -181,7 +197,7 @@ describe('RunEngineImpl', () => {
   it('does not warn when uploading attachments for an existing session', async () => {
     const calls: Record<string, unknown>[] = [];
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -205,7 +221,7 @@ describe('RunEngineImpl', () => {
 
   it('creates a session and continues to run the first image message', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -267,7 +283,7 @@ describe('RunEngineImpl', () => {
 
   it('reports the settled session id after a run finishes', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl(createApiFacade(calls));
+    const engine = createRunEngine(createApiFacade(calls));
     const settledSessionIds: Array<string | null> = [];
 
     engine.updateConfig({
@@ -295,9 +311,57 @@ describe('RunEngineImpl', () => {
     expect(settledSessionIds).toEqual(['session-live']);
   });
 
+  it('does not replace an existing session when the runtime returns an empty stream', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const createdSessions: string[] = [];
+    const engine = createRunEngine({
+      ...createApiFacade(calls),
+      async createSession() {
+        createdSessions.push('session-created-after-empty-stream');
+        return { SessionId: 'session-created-after-empty-stream' };
+      },
+      async runAgent(body) {
+        calls.push(body);
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        });
+      },
+    });
+    const settledSessionIds: Array<string | null> = [];
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'hermes',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+
+    engine.start({
+      text: 'continue history',
+      attachments: [],
+      sessionId: 'session-history',
+      onSettled: (sessionId) => {
+        settledSessionIds.push(sessionId);
+      },
+    });
+
+    await waitForCalls(calls);
+    for (let i = 0; i < 20 && engine.stage !== 'idle'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ SessionId: 'session-history' });
+    expect(createdSessions).toEqual([]);
+    expect(settledSessionIds).toEqual(['session-history']);
+  });
+
   it('keeps response.failed as failed instead of overwriting it as completed', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl({
+    const engine = createRunEngine({
       ...createApiFacade(calls),
       async runAgent(body) {
         calls.push(body);
@@ -343,7 +407,7 @@ describe('RunEngineImpl', () => {
 
   it('disconnects the frontend stream without adding a stopped system message', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = new RunEngineImpl({
+    const engine = createRunEngine({
       ...createApiFacade(calls),
       async runAgent(body) {
         calls.push(body);

@@ -5,11 +5,11 @@ the KSADK embedded static UI.
 
 ## Consumers
 
-- `kingsoftcloud/ksadk-python` consumes the `build:ksadk` output for
-  `ksadk/server/static`.
-- `agentengine-hosted-ui` consumes the `build:hosted` output and keeps private
-  deployment shell files such as Docker, nginx, Helm, image tags, and runtime
-  environment injection outside this repository.
+- `kingsoftcloud/ksadk-python` consumes the GitHub Release tarball and copies
+  `dist-ksadk` into `ksadk/server/static`.
+- `agentengine-hosted-ui` consumes the GitHub Release tarball as an npm
+  dependency and keeps private deployment shell files such as Docker, nginx,
+  Helm, image tags, and runtime environment injection outside this repository.
 
 ## Public Demo
 
@@ -30,14 +30,34 @@ npm test
 ```bash
 npm run build:ksadk
 npm run build:hosted
+npm run build:lib
 npm run build:all
 ```
 
 `build:ksadk` uses relative assets for the SDK embedded UI. `build:hosted`
-uses the `/chat/` base path for the hosted UI bundle.
+uses the `/chat/` base path for the hosted UI bundle. `build:lib` emits the
+package entrypoints under `dist-lib`.
+
+## Package Exports
+
+`v0.2.0` exposes these stable entrypoints:
+
+- `@kingsoftcloud/ksadk-web/components`
+- `@kingsoftcloud/ksadk-web/runtime`
+- `@kingsoftcloud/ksadk-web/capabilities`
+- `@kingsoftcloud/ksadk-web/styles`
+- `@kingsoftcloud/ksadk-web/types`
+
+Hosted UI should import the shared shell from the package and keep private
+auth, routing, feature flags, Docker, nginx, and Helm logic in its own repo.
 
 ## Release Contract
 
-Consumers should record the KSADK Web tag or commit they build from. KSADK
-release notes must mention the KSADK Web ref used to generate
+Consumers should record the KSADK Web tag and tarball URL they build from.
+KSADK release notes must mention the KSADK Web release used to generate
 `ksadk/server/static`.
+
+Release `v0.2.0` is expected to attach:
+
+- `kingsoftcloud-ksadk-web-0.2.0.tgz`
+- a checksum file for that tarball
