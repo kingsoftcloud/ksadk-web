@@ -256,6 +256,23 @@ export function resolveWorkspacePanelPresentation({ isMobile }) {
   };
 }
 
+export function createWorkspacePreviewRequestTracker() {
+  let currentVersion = 0;
+
+  return {
+    next(path) {
+      currentVersion += 1;
+      return { path, version: currentVersion };
+    },
+    invalidate() {
+      currentVersion += 1;
+    },
+    isCurrent(token) {
+      return Boolean(token) && token.version === currentVersion;
+    },
+  };
+}
+
 export function canAccessWorkspaceFiles({ workspaceFiles, accessMode }) {
   if (!workspaceFiles?.Enabled) {
     return false;

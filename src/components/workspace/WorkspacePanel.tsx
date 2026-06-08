@@ -27,6 +27,7 @@ import type { ApiFacade } from '../../core/api/types.js';
 import {
   formatWorkspaceDirectoryPathLabel,
   buildWorkspaceFileUrl,
+  createWorkspacePreviewRequestTracker,
   isWorkspaceRootPath,
   normalizeWorkspacePath,
   resolveWorkspaceEditKind,
@@ -182,6 +183,7 @@ export function WorkspacePanel({
   const getContentRef = useRef<(() => string) | null>(null);
   const lastLoadedPreviewPathRef = useRef<string | null>(null);
   const previewLoadReasonRef = useRef<'selection' | 'background-refresh'>('selection');
+  const previewRequestTrackerRef = useRef(createWorkspacePreviewRequestTracker());
 
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.Path === selectedPath) ?? null,
@@ -284,6 +286,7 @@ export function WorkspacePanel({
 
   const loadPreview = useCallback(
     async (entry: WorkspaceEntry) => {
+      const requestToken = previewRequestTrackerRef.current.next(entry.Path);
       const initialKind = resolveWorkspacePreviewKind({
         path: entry.Path,
         mimeType: entry.MimeType,
@@ -310,6 +313,9 @@ export function WorkspacePanel({
 
       try {
         const result = await api.getWorkspaceFileContent(agentId, entry.Path, { asText: false });
+        if (!previewRequestTrackerRef.current.isCurrent(requestToken)) {
+          return;
+        }
         if (result instanceof Blob) {
           const resolvedMimeType = entry.MimeType || '';
           const resolvedKind = resolveWorkspacePreviewKind({
@@ -331,6 +337,9 @@ export function WorkspacePanel({
           }
 
           const text = await result.text();
+          if (!previewRequestTrackerRef.current.isCurrent(requestToken)) {
+            return;
+          }
           const textKind = resolveWorkspacePreviewKind({
             path: entry.Path,
             mimeType: resolvedMimeType,
@@ -357,6 +366,9 @@ export function WorkspacePanel({
           });
         }
       } catch (previewError) {
+        if (!previewRequestTrackerRef.current.isCurrent(requestToken)) {
+          return;
+        }
         console.error('Failed to preview workspace file:', previewError);
         setPreviewState({
           path: entry.Path,
@@ -514,12 +526,14 @@ export function WorkspacePanel({
       formData.append('AgentId', agentId);
       formData.append('Path', selectedEntry.Path);
       await api.addWorkspaceFile(formData);
+      previewRequestTrackerRef.current.invalidate();
       setDirty(false);
       // Update previewState content so subsequent previews reflect saved content
       setPreviewState((prev) =>
         prev && prev.path === selectedEntry.Path ? { ...prev, content } : prev,
       );
-      await loadEntries(currentPath);
+      lastLoadedPreviewPathRef.current = selectedEntry.Path;
+      await loadEntries(currentPath, { background: true });
     } catch (saveError) {
       console.error('Failed to save workspace file:', saveError);
       setError(saveError instanceof Error ? saveError.message : String(saveError));

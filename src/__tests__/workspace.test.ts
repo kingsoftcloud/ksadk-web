@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildWorkspaceFileBaseUrl,
   buildWorkspaceFileUrl,
+  createWorkspacePreviewRequestTracker,
   normalizeWorkspacePath,
 } from '../utils/workspace.js';
 
@@ -47,5 +48,23 @@ describe('workspace file urls', () => {
     expect(htmlPreview).toContain("new Blob([previewSrc]");
     expect(htmlPreview).toContain('URL.createObjectURL(blob)');
     expect(htmlPreview).toContain("useState<'editor' | 'preview'>('preview')");
+  });
+
+  it('invalidates stale preview responses after saving a workspace file', () => {
+    const tracker = createWorkspacePreviewRequestTracker();
+    const oldPreview = tracker.next('notes.md');
+
+    tracker.invalidate();
+
+    expect(tracker.isCurrent(oldPreview)).toBe(false);
+  });
+
+  it('treats only the newest preview request as current', () => {
+    const tracker = createWorkspacePreviewRequestTracker();
+    const firstPreview = tracker.next('notes.md');
+    const secondPreview = tracker.next('notes.md');
+
+    expect(tracker.isCurrent(firstPreview)).toBe(false);
+    expect(tracker.isCurrent(secondPreview)).toBe(true);
   });
 });
