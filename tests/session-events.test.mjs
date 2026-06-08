@@ -188,6 +188,147 @@ test('session event utils restore visible placeholder for active run without per
   );
 });
 
+test('session event utils restore latest streaming assistant snapshot for active run', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-user',
+      EventType: 'user_message',
+      InvocationId: 'inv-streaming',
+      SeqId: 1,
+      Content: { role: 'user', parts: [{ text: '输出长文' }] },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-status-start',
+      EventType: 'run_status',
+      InvocationId: 'inv-streaming',
+      SeqId: 2,
+      Content: { status: 'in_progress' },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-tool',
+      EventType: 'tool_call',
+      InvocationId: 'inv-streaming',
+      SeqId: 3,
+      Content: { role: 'model', parts: [{ text: 'list_workspace_files' }] },
+      Metadata: { tool_name: 'list_workspace_files', tool_args: {} },
+      Timestamp: 3,
+    },
+    {
+      EventId: 'evt-snapshot-1',
+      EventType: 'assistant_stream_snapshot',
+      InvocationId: 'inv-streaming',
+      SeqId: 4,
+      Content: { role: 'assistant', parts: [{ text: '第一段正在生成。' }] },
+      Metadata: { stream_snapshot: true, snapshot_index: 1 },
+      Timestamp: 4,
+    },
+    {
+      EventId: 'evt-snapshot-2',
+      EventType: 'assistant_stream_snapshot',
+      InvocationId: 'inv-streaming',
+      SeqId: 5,
+      Content: { role: 'assistant', parts: [{ text: '第一段正在生成。第二段继续生成。' }] },
+      Metadata: { stream_snapshot: true, snapshot_index: 2 },
+      Timestamp: 5,
+    },
+  ]);
+
+  assert.deepEqual(
+    messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      eventType: message.eventType,
+      tools: message.tools ? Object.keys(message.tools) : undefined,
+    })),
+    [
+      {
+        id: 'evt-user',
+        role: 'user',
+        content: '输出长文',
+        eventType: 'user_message',
+        tools: undefined,
+      },
+      {
+        id: 'evt-snapshot-2',
+        role: 'model',
+        content: '第一段正在生成。第二段继续生成。',
+        eventType: 'assistant_stream_snapshot',
+        tools: ['list_workspace_files'],
+      },
+    ],
+  );
+});
+
+test('session event utils hide streaming assistant snapshots after final assistant output', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-user',
+      EventType: 'user_message',
+      InvocationId: 'inv-streaming-final',
+      SeqId: 1,
+      Content: { role: 'user', parts: [{ text: '输出长文' }] },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-snapshot',
+      EventType: 'assistant_stream_snapshot',
+      InvocationId: 'inv-streaming-final',
+      SeqId: 2,
+      Content: { role: 'assistant', parts: [{ text: '第一段正在生成。' }] },
+      Metadata: { stream_snapshot: true, snapshot_index: 1 },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-streaming-final',
+      SeqId: 3,
+      Content: { role: 'assistant', parts: [{ text: '第一段最终完成。' }] },
+      Timestamp: 3,
+    },
+    {
+      EventId: 'evt-status-done',
+      EventType: 'run_status',
+      InvocationId: 'inv-streaming-final',
+      SeqId: 4,
+      Content: { status: 'completed' },
+      Timestamp: 4,
+    },
+  ]);
+
+  assert.deepEqual(
+    messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      eventType: message.eventType,
+    })),
+    [
+      {
+        id: 'evt-user',
+        role: 'user',
+        content: '输出长文',
+        eventType: 'user_message',
+      },
+      {
+        id: 'evt-assistant',
+        role: 'model',
+        content: '第一段最终完成。',
+        eventType: 'assistant_message',
+      },
+    ],
+  );
+});
+
 test('session event utils suppress stale running banners after assistant output exists', async () => {
   const sessionEvents = await loadSessionEventUtils();
 

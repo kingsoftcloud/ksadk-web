@@ -269,6 +269,19 @@ function userMessageDedupeKey(event) {
   ].join('\u0000');
 }
 
+function isAssistantStreamSnapshotEvent(event) {
+  return event?.EventType === 'assistant_stream_snapshot';
+}
+
+function eventOrderValue(event) {
+  const seqId = Number(event?.SeqId || 0);
+  if (Number.isFinite(seqId) && seqId > 0) {
+    return seqId;
+  }
+  const timestamp = Number(event?.Timestamp || 0);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function stringifyToolPayload(value) {
   if (typeof value === 'string') {
     return value;
@@ -462,7 +475,11 @@ export function buildMessageFromSessionEvent(event) {
     return toolMessageFromSessionEvent(event);
   }
 
-  if (eventType !== 'user_message' && eventType !== 'assistant_message') {
+  if (
+    eventType !== 'user_message'
+    && eventType !== 'assistant_message'
+    && eventType !== 'assistant_stream_snapshot'
+  ) {
     return null;
   }
 
@@ -523,8 +540,25 @@ export function buildMessagesFromSessionEvents(events = []) {
     uniqueEvents.push(event);
   }
   const canonicalUserMessageKeys = new Set();
+  const finalAssistantInvocations = new Set();
+  const latestSnapshotByInvocation = new Map();
   for (const event of uniqueEvents) {
     if (event?.EventType !== 'user_message' || isResponsesMirrorEvent(event)) {
+      if (event?.EventType === 'assistant_message') {
+        const invocationId = String(event.InvocationId || '').trim();
+        if (invocationId) {
+          finalAssistantInvocations.add(invocationId);
+        }
+      }
+      if (isAssistantStreamSnapshotEvent(event)) {
+        const invocationId = String(event.InvocationId || '').trim();
+        if (invocationId) {
+          const existing = latestSnapshotByInvocation.get(invocationId);
+          if (!existing || eventOrderValue(event) >= eventOrderValue(existing)) {
+            latestSnapshotByInvocation.set(invocationId, event);
+          }
+        }
+      }
       continue;
     }
     const key = userMessageDedupeKey(event);
@@ -533,6 +567,16 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
   }
   const replayEvents = uniqueEvents.filter((event) => {
+    if (isAssistantStreamSnapshotEvent(event)) {
+      const invocationId = String(event.InvocationId || '').trim();
+      if (!invocationId) {
+        return true;
+      }
+      if (finalAssistantInvocations.has(invocationId)) {
+        return false;
+      }
+      return latestSnapshotByInvocation.get(invocationId) === event;
+    }
     if (event?.EventType !== 'user_message' || !isResponsesMirrorEvent(event)) {
       return true;
     }
@@ -547,7 +591,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     if (
       invocationId &&
-      ['assistant_message', 'reasoning', 'tool_call'].includes(String(event.EventType || ''))
+      ['assistant_message', 'assistant_stream_snapshot', 'reasoning', 'tool_call'].includes(String(event.EventType || ''))
     ) {
       outputByInvocation.add(invocationId);
     }
@@ -654,14 +698,17 @@ export function buildMessagesFromSessionEvents(events = []) {
       };
       continue;
     }
-    if (message.eventType === 'assistant_message' && pendingReasoning) {
+    const isAssistantOutputEvent =
+      message.eventType === 'assistant_message'
+      || message.eventType === 'assistant_stream_snapshot';
+    if (isAssistantOutputEvent && pendingReasoning) {
       const invocationId = String(event.InvocationId || '').trim();
       const outputKey = assistantOutputDedupeKey(invocationId, message);
-      if (invocationId && assistantOutputKeys.has(outputKey)) {
+      if (message.eventType === 'assistant_message' && invocationId && assistantOutputKeys.has(outputKey)) {
         pendingReasoning = null;
         continue;
       }
-      if (invocationId) {
+      if (message.eventType === 'assistant_message' && invocationId) {
         assistantOutputKeys.add(outputKey);
       }
       pushMessage({
@@ -673,13 +720,13 @@ export function buildMessagesFromSessionEvents(events = []) {
       continue;
     }
     flushPendingReasoning();
-    if (message.eventType === 'assistant_message') {
+    if (isAssistantOutputEvent) {
       const invocationId = String(event.InvocationId || '').trim();
       const outputKey = assistantOutputDedupeKey(invocationId, message);
-      if (invocationId && assistantOutputKeys.has(outputKey)) {
+      if (message.eventType === 'assistant_message' && invocationId && assistantOutputKeys.has(outputKey)) {
         continue;
       }
-      if (invocationId) {
+      if (message.eventType === 'assistant_message' && invocationId) {
         assistantOutputKeys.add(outputKey);
       }
       pushMessage({
