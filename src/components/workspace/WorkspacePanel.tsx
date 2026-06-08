@@ -661,7 +661,10 @@ export function WorkspacePanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void loadEntries(currentPath)}
+                  onClick={() => {
+                    if (!confirmUnsaved()) return;
+                    void loadEntries(currentPath);
+                  }}
                   disabled={loading}
                   className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-900"
                   title="刷新目录"

@@ -50,6 +50,13 @@ describe('workspace file urls', () => {
     expect(htmlPreview).toContain("useState<'editor' | 'preview'>('preview')");
   });
 
+  it('asks before refreshing the directory while the active file is dirty', () => {
+    const workspacePanel = readSource('components/workspace/WorkspacePanel.tsx');
+
+    expect(workspacePanel).toContain("title=\"刷新目录\"");
+    expect(workspacePanel).toContain("if (!confirmUnsaved()) return;\n                    void loadEntries(currentPath);");
+  });
+
   it('invalidates stale preview responses after saving a workspace file', () => {
     const tracker = createWorkspacePreviewRequestTracker();
     const oldPreview = tracker.next('notes.md');
