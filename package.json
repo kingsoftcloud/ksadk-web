@@ -1,17 +1,56 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run build:ksadk",
     "build:hosted": "VITE_BASE_PATH=/chat/ vite build --outDir dist-hosted",
-    "build:all": "npm run build:ksadk && npm run build:hosted",
+    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
+    "build:all": "npm run build:ksadk && npm run build:hosted && npm run build:lib",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
     "test:watch": "vitest src",
     "build:ksadk": "VITE_BASE_PATH=./ vite build --outDir dist-ksadk"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist-lib/public/runtime.d.ts",
+      "import": "./dist-lib/runtime.js"
+    },
+    "./components": {
+      "types": "./dist-lib/public/components.d.ts",
+      "import": "./dist-lib/components.js"
+    },
+    "./runtime": {
+      "types": "./dist-lib/public/runtime.d.ts",
+      "import": "./dist-lib/runtime.js"
+    },
+    "./capabilities": {
+      "types": "./dist-lib/public/capabilities.d.ts",
+      "import": "./dist-lib/capabilities.js"
+    },
+    "./styles": "./dist-lib/styles.css",
+    "./types": {
+      "types": "./dist-lib/public/types.d.ts",
+      "import": "./dist-lib/types.js"
+    }
+  },
+  "files": [
+    "dist-lib",
+    "dist-ksadk",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "sideEffects": [
+    "*.css",
+    "dist-lib/*.css"
+  ],
+  "peerDependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.2",
@@ -42,8 +81,6 @@
     "lucide-react": "^1.7.0",
     "mermaid": "^11.13.0",
     "npm-run-all": "^4.1.5",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "rehype-katex": "^7.0.1",
@@ -69,6 +106,8 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "postcss": "^8.4.38",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.4.3",
     "typescript": "~5.9.3",

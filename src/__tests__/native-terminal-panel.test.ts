@@ -36,4 +36,12 @@ describe('Native terminal panel bundle boundaries', () => {
     expect(terminalPanel).toContain("type: 'ping'");
     expect(terminalPanel).toContain('TERMINAL_KEEPALIVE_INTERVAL_MS');
   });
+
+  it('forwards xterm binary mouse reports for hosted TUI scrolling', () => {
+    const terminalPanel = readSource('components/native/NativeTerminalPanel.tsx');
+
+    expect(terminalPanel).toContain('binaryDisposable');
+    expect(terminalPanel).toContain('terminal.onBinary');
+    expect(terminalPanel).toContain('sendPtyInput(data)');
+  });
 });

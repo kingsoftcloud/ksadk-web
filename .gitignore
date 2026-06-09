@@ -2,6 +2,9 @@ node_modules/
 dist/
 dist-hosted/
 dist-ksadk/
+dist-lib/
 coverage/
 *.tsbuildinfo
+*.tgz
+*.tgz.sha256
 .DS_Store
