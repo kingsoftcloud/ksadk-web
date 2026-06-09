@@ -44,8 +44,16 @@ const LazyArtifactsPanel = React.lazy(() =>
   }))
 );
 
-export default function App() {
-  const api = apiFacade;
+export type AgentWorkbenchFeatureFlags = Record<string, boolean>;
+
+export type AgentWorkbenchProps = {
+  apiAdapter?: import('./core/api/types.js').ApiFacade;
+  featureFlags?: AgentWorkbenchFeatureFlags;
+  routeShell?: React.ComponentType<{ children: React.ReactNode }>;
+};
+
+export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWorkbenchProps = {}) {
+  const api = apiAdapter || apiFacade;
   const agentId = useBootstrapStore(s => s.agentId);
   const currentSessionId = useSessionStore(s => s.currentSessionId);
   const isStreaming = useStreamingStore(s => s.isStreaming);
@@ -244,7 +252,7 @@ export default function App() {
     window.addEventListener('pointercancel', handlePointerEnd);
   };
 
-  return (
+  const content = (
     <div className="flex h-[var(--app-height)] min-h-[var(--app-height)] overflow-hidden bg-white font-sans text-slate-800 dark:bg-slate-900 dark:text-slate-200">
       <ConnectedSidebar
         uiCapabilities={uiCapabilities}
@@ -342,4 +350,10 @@ export default function App() {
       )}
     </div>
   );
+
+  return RouteShell ? <RouteShell>{content}</RouteShell> : content;
+}
+
+export default function App() {
+  return <AgentWorkbench />;
 }

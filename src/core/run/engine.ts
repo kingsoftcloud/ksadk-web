@@ -173,7 +173,7 @@ export class RunEngineImpl implements RunEngine {
 
         const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId);
 
-        if (!streamResult.receivedData && !retriedWithNewSession) {
+        if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
           retriedWithNewSession = true;
           sessionId = await this.createSession(draft);
           if (sessionId) {
