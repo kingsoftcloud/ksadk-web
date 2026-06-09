@@ -127,6 +127,7 @@ export function NativeTerminalPanel({ capability, open, onClose }: NativeTermina
     let terminal: XtermTerminal | null = null;
     let fitAddon: XtermFitAddon | null = null;
     let inputDisposable: { dispose: () => void } | null = null;
+    let binaryDisposable: { dispose: () => void } | null = null;
     let ws: WebSocket | null = null;
     let resizeHandler: (() => void) | null = null;
     let resizeObserver: ResizeObserver | null = null;
@@ -285,11 +286,18 @@ export function NativeTerminalPanel({ capability, open, onClose }: NativeTermina
         setStatus('error');
       });
 
-      inputDisposable = terminal.onData((data) => {
+      const sendPtyInput = (data: string) => {
         const sanitized = sanitizeTerminalInputForPty(data);
         if (sanitized && ws?.readyState === WebSocket.OPEN) {
           ws.send(new TextEncoder().encode(sanitized));
         }
+      };
+
+      inputDisposable = terminal.onData((data) => {
+        sendPtyInput(data);
+      });
+      binaryDisposable = terminal.onBinary((data) => {
+        sendPtyInput(data);
       });
 
       keepaliveTimer = window.setInterval(() => {
@@ -311,6 +319,7 @@ export function NativeTerminalPanel({ capability, open, onClose }: NativeTermina
     return () => {
       disposed = true;
       inputDisposable?.dispose();
+      binaryDisposable?.dispose();
       if (resizeHandler) {
         window.removeEventListener('resize', resizeHandler);
       }

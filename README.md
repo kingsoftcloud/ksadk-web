@@ -40,7 +40,7 @@ package entrypoints under `dist-lib`.
 
 ## Package Exports
 
-`v0.2.0` exposes these stable entrypoints:
+`v0.2.1` exposes these stable entrypoints:
 
 - `@kingsoftcloud/ksadk-web/components`
 - `@kingsoftcloud/ksadk-web/runtime`
@@ -57,7 +57,7 @@ Consumers should record the KSADK Web tag and tarball URL they build from.
 KSADK release notes must mention the KSADK Web release used to generate
 `ksadk/server/static`.
 
-Release `v0.2.0` is expected to attach:
+Release `v0.2.1` is expected to attach:
 
-- `kingsoftcloud-ksadk-web-0.2.0.tgz`
+- `kingsoftcloud-ksadk-web-0.2.1.tgz`
 - a checksum file for that tarball
