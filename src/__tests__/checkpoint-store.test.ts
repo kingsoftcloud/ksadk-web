@@ -74,6 +74,15 @@ describe('checkpoint store', () => {
     ]);
   });
 
+  it('returns stable empty arrays for missing session data', () => {
+    const store = useCheckpointStore.getState();
+
+    expect(store.getSessionCheckpoints(null)).toBe(store.getSessionCheckpoints(null));
+    expect(store.getSessionCheckpoints('missing')).toBe(store.getSessionCheckpoints('missing'));
+    expect(store.getSessionToolReceipts(null)).toBe(store.getSessionToolReceipts(null));
+    expect(store.getSessionToolReceipts('missing')).toBe(store.getSessionToolReceipts('missing'));
+  });
+
   it('returns null for malformed checkpoint records', () => {
     expect(normalizeSessionCheckpoint({ CheckpointId: 'ckpt-1' })).toBeNull();
     expect(normalizeSessionCheckpoint({ RunId: 'run-1' })).toBeNull();

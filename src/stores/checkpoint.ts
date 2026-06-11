@@ -43,6 +43,9 @@ type CheckpointActions = {
   clearSessionCheckpoints: (sessionId?: string | null) => void;
 };
 
+const EMPTY_SESSION_CHECKPOINTS: SessionCheckpoint[] = [];
+const EMPTY_TOOL_RECEIPTS: ToolReceipt[] = [];
+
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -175,8 +178,8 @@ export const useCheckpointStore = create<CheckpointState & CheckpointActions>()(
   },
   getSessionCheckpoints: (sessionId) => {
     const key = String(sessionId || '');
-    if (!key) return [];
-    return get().checkpointsBySessionId[key] || [];
+    if (!key) return EMPTY_SESSION_CHECKPOINTS;
+    return get().checkpointsBySessionId[key] || EMPTY_SESSION_CHECKPOINTS;
   },
   setSessionToolReceipts: (sessionId, receipts) => set((state) => ({
     toolReceiptsBySessionId: {
@@ -191,8 +194,8 @@ export const useCheckpointStore = create<CheckpointState & CheckpointActions>()(
   })),
   getSessionToolReceipts: (sessionId) => {
     const key = String(sessionId || '');
-    if (!key) return [];
-    return get().toolReceiptsBySessionId[key] || [];
+    if (!key) return EMPTY_TOOL_RECEIPTS;
+    return get().toolReceiptsBySessionId[key] || EMPTY_TOOL_RECEIPTS;
   },
   clearSessionCheckpoints: (sessionId) => set((state) => {
     const key = String(sessionId || '');
