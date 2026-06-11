@@ -4,6 +4,6 @@ export function shouldStopReadingRunStream(actions = []) {
       return false;
     }
     const status = String(action.status || '').toLowerCase();
-    return status === 'failed' || status === 'incomplete';
+    return status === 'failed' || status === 'incomplete' || status === 'cancelled';
   });
 }

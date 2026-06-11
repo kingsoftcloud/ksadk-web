@@ -6,7 +6,11 @@ export interface ApiFacade {
 
   // Events & Run
   listSessionEvents(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{ Events: unknown[] }>;
+  listSessionCheckpoints(params: { agentId: string; sessionId: string; runId?: string }, opts?: { signal?: AbortSignal }): Promise<{ Checkpoints: unknown[] }>;
+  listToolReceipts(params: { agentId: string; sessionId: string; runId?: string; checkpointId?: string }, opts?: { signal?: AbortSignal }): Promise<{ ToolReceipts: unknown[] }>;
+  previewCheckpointResume(params: { agentId: string; sessionId: string; runId: string; checkpointId: string }, opts?: { signal?: AbortSignal }): Promise<{ Preview: unknown }>;
   runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
+  resumeRun(params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string; invocationId?: string }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   subscribeRunEvents(params: { sessionId: string; invocationId: string; afterSeqId: number }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   cancelRun(agentId: string, invocationId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
 

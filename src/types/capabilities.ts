@@ -39,6 +39,9 @@ export type UiCapabilities = {
     Enabled: boolean;
     Resume: boolean;
     Abort: boolean;
+    Checkpoints: boolean;
+    CheckpointResume: boolean;
+    CheckpointResumePreview: boolean;
   };
   WorkspaceFiles?: boolean;
   BuiltinTools: BuiltinToolCapability[];

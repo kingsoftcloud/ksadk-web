@@ -1,18 +1,20 @@
 import { create } from 'zustand';
 
-type ArtifactState = {
+export type ArtifactState = {
   content: string | null;
   type: string;
   visible: boolean;
 };
 
-type ArtifactActions = {
+export type ArtifactActions = {
   show: (content: string, type?: string) => void;
   hide: () => void;
   setContent: (content: string | null, type?: string) => void;
 };
 
-export const useArtifactStore = create<ArtifactState & ArtifactActions>()((set) => ({
+export type ArtifactStore = ArtifactState & ArtifactActions;
+
+export const useArtifactStore = create<ArtifactStore>()((set) => ({
   content: null,
   type: 'html',
   visible: false,

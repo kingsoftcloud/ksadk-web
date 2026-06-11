@@ -21,8 +21,10 @@ import { MessageMarkdown } from '../MessageMarkdown';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
+import { formatDate } from '../../utils/session-helpers.js';
 
 import type { RunActivity } from '../../stores/streaming.js';
+import type { SessionCheckpoint } from '../../stores/checkpoint.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
 
 type ChatMessageListProps = {
@@ -46,6 +48,8 @@ type ChatMessageListProps = {
   onDeleteFeedback: (message: Message) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  checkpoints?: SessionCheckpoint[];
+  onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
 };
 
@@ -190,6 +194,68 @@ function EmptyState({ agentName }: { agentName: string }) {
       <p className="mt-2 text-sm text-slate-500">
         我是 {agentName}，由 Ksyun AgentEngine 驱动
       </p>
+    </div>
+  );
+}
+
+function CheckpointPanel({
+  checkpoints,
+  isStreaming,
+  onResumeCheckpoint,
+}: {
+  checkpoints: SessionCheckpoint[];
+  isStreaming: boolean;
+  onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
+}) {
+  if (!checkpoints.length || !onResumeCheckpoint) {
+    return null;
+  }
+
+  return (
+    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="font-medium text-slate-700 dark:text-slate-200">Checkpoint</span>
+        <span className="text-slate-400">{checkpoints.length} 个可恢复点</span>
+      </div>
+      <div className="flex flex-col gap-1">
+        {checkpoints.slice(0, 3).map((checkpoint) => {
+          const disabled = isStreaming || !checkpoint.sessionId;
+          return (
+            <div
+              key={checkpoint.checkpointId}
+              className="flex min-h-8 items-center justify-between gap-2 rounded-md px-1.5 py-1 hover:bg-white dark:hover:bg-slate-800"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-slate-700 dark:text-slate-200">
+                  {checkpoint.phase || checkpoint.checkpointId}
+                </div>
+                <div className="truncate text-[11px] text-slate-400">
+                  {checkpoint.runId}
+                  {checkpoint.seqId !== undefined ? ` · seq ${checkpoint.seqId}` : ''}
+                  {checkpoint.timestamp ? ` · ${formatDate(checkpoint.timestamp)}` : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={disabled}
+                title={disabled ? '当前会话正在运行，暂不能恢复' : '从该 checkpoint 恢复'}
+                onClick={() => {
+                  if (!checkpoint.sessionId) return;
+                  onResumeCheckpoint({
+                    sessionId: checkpoint.sessionId,
+                    runId: checkpoint.runId,
+                    checkpointId: checkpoint.checkpointId,
+                  });
+                }}
+                className="inline-flex h-7 flex-shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+              >
+                <RefreshCcw className="h-3 w-3" />
+                恢复
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -660,6 +726,8 @@ export function ChatMessageList({
   onSubmitFeedback,
   onStopGeneration,
   onCancelRemote,
+  checkpoints = [],
+  onResumeCheckpoint,
   scrollRef,
 }: ChatMessageListProps) {
   return (
@@ -671,6 +739,11 @@ export function ChatMessageList({
       )}
     >
       <div className={cn('mx-auto flex w-full max-w-[64rem] flex-col', activity ? 'pb-10 sm:pb-10' : 'pb-6 sm:pb-8')}>
+        <CheckpointPanel
+          checkpoints={checkpoints}
+          isStreaming={isStreaming}
+          onResumeCheckpoint={onResumeCheckpoint}
+        />
         {messages.length === 0 ? (
         <EmptyState agentName={agentName} />
         ) : (

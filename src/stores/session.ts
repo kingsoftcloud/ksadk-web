@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 import type { Session } from '../components/chat/types.js';
 
-type SessionState = {
+export type SessionState = {
   sessions: Session[];
   currentSessionId: string | null;
 };
 
-type SessionActions = {
+export type SessionActions = {
   setSessions: (sessions: Session[]) => void;
   setCurrentSessionId: (id: string | null) => void;
   upsertSessions: (incoming: Session[]) => void;
@@ -40,7 +40,9 @@ function upsertSessions(current: Session[], incoming: Session[]): Session[] {
   );
 }
 
-export const useSessionStore = create<SessionState & SessionActions>()((set) => ({
+export type SessionStore = SessionState & SessionActions;
+
+export const useSessionStore = create<SessionStore>()((set) => ({
   sessions: [],
   currentSessionId: null,
   setSessions: (sessions) => set({ sessions }),

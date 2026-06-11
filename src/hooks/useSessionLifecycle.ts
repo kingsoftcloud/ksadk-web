@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
 import { useUIStore } from '../stores/ui.js';
+import { useCheckpointStore } from '../stores/checkpoint.js';
 import { CancelledError } from '../api/client.js';
 import { findActiveRunIds } from '../utils/run-state.js';
 import {
@@ -207,6 +208,32 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       try {
         const data = await api.listSessionEvents(sessionId);
+        if (uiCapabilities.RunLifecycle.Enabled && uiCapabilities.RunLifecycle.Checkpoints) {
+          void api.listSessionCheckpoints({
+            agentId: agentIdRef.current,
+            sessionId,
+          }).then((checkpointData) => {
+            useCheckpointStore
+              .getState()
+              .setSessionCheckpoints(sessionId, checkpointData.Checkpoints || []);
+          }).catch((error) => {
+            console.warn('[SessionLifecycle] checkpoint load failed:', error);
+            useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
+          });
+          void api.listToolReceipts({
+            agentId: agentIdRef.current,
+            sessionId,
+          }).then((receiptData) => {
+            useCheckpointStore
+              .getState()
+              .setSessionToolReceipts(sessionId, receiptData.ToolReceipts || []);
+          }).catch((error) => {
+            console.warn('[SessionLifecycle] tool receipt load failed:', error);
+            useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
+          });
+        } else {
+          useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
+        }
         const eventsData = data as { Events?: SessionEventRecord[] };
         if (eventsData?.Events) {
           const events = eventsData.Events;
@@ -232,6 +259,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           }
         } else {
           useMessageStore.getState().setMessages([]);
+          useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
+          useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
         }
       } catch (error) {
         console.error('Failed to load session events:', error);
@@ -244,6 +273,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       resetCompaction,
       subscribeRunEvents,
       uiCapabilities.RunLifecycle.Enabled,
+      uiCapabilities.RunLifecycle.Checkpoints,
       uiCapabilities.RunLifecycle.Resume,
     ],
   );
@@ -268,6 +298,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           currentSessionIdRef.current = null;
           useSessionStore.getState().setCurrentSessionId(null);
           useMessageStore.getState().setMessages([]);
+          useCheckpointStore.getState().clearSessionCheckpoints();
         }
       } catch (error) {
         if (error instanceof CancelledError) return;
@@ -297,6 +328,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         currentSessionIdRef.current = newId;
         useSessionStore.getState().setCurrentSessionId(newId);
         useMessageStore.getState().setMessages([]);
+        useCheckpointStore.getState().setSessionCheckpoints(newId, []);
+        useCheckpointStore.getState().setSessionToolReceipts(newId, []);
         if (isMobile) {
           useUIStore.getState().setMobileSidebarOpen(false);
           useUIStore.getState().setMobileActionsOpen(false);
@@ -317,6 +350,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (currentSessionIdRef.current === sessionId) {
           currentSessionIdRef.current = null;
           useMessageStore.getState().setMessages([]);
+          useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
           useSessionStore.getState().setCurrentSessionId(null);
           void fetchSessions(agentId);
         }

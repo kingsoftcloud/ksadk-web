@@ -130,6 +130,9 @@ export function normalizeCapabilities(bootstrap) {
       Enabled: runLifecycleEnabled,
       Resume: normalizeEnabled(runLifecycle.Resume, runLifecycleEnabled),
       Abort: normalizeEnabled(runLifecycle.Abort, runLifecycleEnabled),
+      Checkpoints: normalizeEnabled(runLifecycle.Checkpoints, false),
+      CheckpointResume: normalizeEnabled(runLifecycle.CheckpointResume, false),
+      CheckpointResumePreview: normalizeEnabled(runLifecycle.CheckpointResumePreview, false),
     },
     BuiltinTools: normalizeBuiltinTools(rawCapabilities.BuiltinTools),
   };

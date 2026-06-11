@@ -7,6 +7,11 @@ import { useSessionStore } from '../../stores/session.js';
 import { ChatComposer } from './ChatComposer';
 import { mergeAttachmentFiles, extractClipboardFiles } from '../../utils/attachment.js';
 import { buildComposerContextIndicator } from '../../utils/context.js';
+import type { ModelStore } from '../../stores/model.js';
+import type { SessionStore } from '../../stores/session.js';
+import type { StreamingStore } from '../../stores/streaming.js';
+import type { UIStore } from '../../stores/ui.js';
+import type { ComposerContextIndicator } from './types';
 
 type ConnectedComposerProps = {
   composerMaxHeight: number;
@@ -23,27 +28,27 @@ export function ConnectedComposer({
   cancelRemote,
   isMobile,
 }: ConnectedComposerProps) {
-  const input = useUIStore(s => s.input);
-  const attachments = useUIStore(s => s.attachments);
-  const currentSessionId = useSessionStore(s => s.currentSessionId);
-  const isStreaming = useStreamingStore(s => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
-  const queuedDrafts = useUIStore(s => s.queuedDrafts);
+  const input = useUIStore((s: UIStore) => s.input);
+  const attachments = useUIStore((s: UIStore) => s.attachments);
+  const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
+  const queuedDrafts = useUIStore((s: UIStore) => s.queuedDrafts);
   const messages = useMessageStore(s => s.messages);
-  const availableModels = useModelStore(s => s.availableModels);
-  const selectedModel = useModelStore(s => s.selectedModel);
+  const availableModels = useModelStore((s: ModelStore) => s.availableModels);
+  const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
   );
-  const composerContextIndicator = useMemo(
+  const composerContextIndicator = useMemo<ComposerContextIndicator>(
     () =>
       buildComposerContextIndicator({
         messages,
         draftInput: input,
         selectedModel: selectedModelMetadata,
-      }),
+      }) as ComposerContextIndicator,
     [input, messages, selectedModelMetadata],
   );
 

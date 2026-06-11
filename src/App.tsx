@@ -5,6 +5,12 @@ import { useModelStore } from './stores/model.js';
 import { useStreamingStore } from './stores/streaming.js';
 import { useSessionStore } from './stores/session.js';
 import { useArtifactStore } from './stores/artifact.js';
+import type { BootstrapStore } from './stores/bootstrap.js';
+import type { SessionStore } from './stores/session.js';
+import type { StreamingStore } from './stores/streaming.js';
+import type { UIStore } from './stores/ui.js';
+import type { ModelStore } from './stores/model.js';
+import type { ArtifactStore } from './stores/artifact.js';
 
 import { resolveComposerMaxHeight } from './utils/mobile-layout.js';
 import {
@@ -54,27 +60,27 @@ export type AgentWorkbenchProps = {
 
 export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWorkbenchProps = {}) {
   const api = apiAdapter || apiFacade;
-  const agentId = useBootstrapStore(s => s.agentId);
-  const currentSessionId = useSessionStore(s => s.currentSessionId);
-  const isStreaming = useStreamingStore(s => s.isStreaming);
-  const sidebarOpen = useUIStore(s => s.sidebarOpen);
-  const mobileSidebarOpen = useUIStore(s => s.mobileSidebarOpen);
-  const mobileActionsOpen = useUIStore(s => s.mobileActionsOpen);
-  const agentName = useBootstrapStore(s => s.agentName);
-  const selectedModel = useModelStore(s => s.selectedModel);
-  const availableModels = useModelStore(s => s.availableModels);
-  const modelSource = useModelStore(s => s.modelSource);
-  const modelCatalogLoaded = useModelStore(s => s.modelCatalogLoaded);
-  const thinkingMode = useModelStore(s => s.thinkingMode);
-  const agentFramework = useBootstrapStore(s => s.agentFramework);
-  const workspaceFiles = useBootstrapStore(s => s.workspaceFiles) as BootstrapWorkspaceFiles | null;
-  const accessMode = useBootstrapStore(s => s.accessMode);
-  const workspacePanelOpen = useUIStore(s => s.workspacePanelOpen);
-  const workspacePanelWidth = useUIStore(s => s.workspacePanelWidth);
-  const workspacePanelFullscreen = useUIStore(s => s.workspacePanelFullscreen);
-  const apiFormats = useBootstrapStore(s => s.apiFormats) as RuntimeApiFormat[];
-  const uiCapabilities = useBootstrapStore(s => s.capabilities) as UiCapabilities;
-  const artifactVisible = useArtifactStore(s => s.visible && Boolean(s.content));
+  const agentId = useBootstrapStore((s: BootstrapStore) => s.agentId);
+  const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isStreaming);
+  const sidebarOpen = useUIStore((s: UIStore) => s.sidebarOpen);
+  const mobileSidebarOpen = useUIStore((s: UIStore) => s.mobileSidebarOpen);
+  const mobileActionsOpen = useUIStore((s: UIStore) => s.mobileActionsOpen);
+  const agentName = useBootstrapStore((s: BootstrapStore) => s.agentName);
+  const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
+  const availableModels = useModelStore((s: ModelStore) => s.availableModels);
+  const modelSource = useModelStore((s: ModelStore) => s.modelSource);
+  const modelCatalogLoaded = useModelStore((s: ModelStore) => s.modelCatalogLoaded);
+  const thinkingMode = useModelStore((s: ModelStore) => s.thinkingMode);
+  const agentFramework = useBootstrapStore((s: BootstrapStore) => s.agentFramework);
+  const workspaceFiles = useBootstrapStore((s: BootstrapStore) => s.workspaceFiles) as BootstrapWorkspaceFiles | null;
+  const accessMode = useBootstrapStore((s: BootstrapStore) => s.accessMode);
+  const workspacePanelOpen = useUIStore((s: UIStore) => s.workspacePanelOpen);
+  const workspacePanelWidth = useUIStore((s: UIStore) => s.workspacePanelWidth);
+  const workspacePanelFullscreen = useUIStore((s: UIStore) => s.workspacePanelFullscreen);
+  const apiFormats = useBootstrapStore((s: BootstrapStore) => s.apiFormats) as RuntimeApiFormat[];
+  const uiCapabilities = useBootstrapStore((s: BootstrapStore) => s.capabilities) as UiCapabilities;
+  const artifactVisible = useArtifactStore((s: ArtifactStore) => s.visible && Boolean(s.content));
   const queuedDraftRef = useRef<Array<{ text: string; attachments: File[] }>>([]);
   const disconnectRunRef = useRef<(() => void) | null>(null);
 
@@ -120,7 +126,7 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
     [agentIdRef, currentSessionIdRef, fetchSessions, loadSession],
   );
 
-  const { submitDraft, stopGeneration, disconnectRun } = useRunAgent({
+  const { submitDraft, stopGeneration, disconnectRun, resumeCheckpoint } = useRunAgent({
     agentId,
     currentSessionId,
     agentFramework,
@@ -316,6 +322,12 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
               onRespondToApproval={respondToApproval}
               onStopGeneration={handleStopGeneration}
               onCancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
+              checkpointResumeEnabled={
+                uiCapabilities.RunLifecycle.Enabled &&
+                uiCapabilities.RunLifecycle.Checkpoints &&
+                uiCapabilities.RunLifecycle.CheckpointResume
+              }
+              onResumeCheckpoint={resumeCheckpoint}
             />
         <ConnectedComposer
           composerMaxHeight={composerMaxHeight}

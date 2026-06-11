@@ -12,6 +12,12 @@ function createApiFacade(calls: Record<string, unknown>[]): ApiFacade {
     async createSession() { return { SessionId: 'session-1' }; },
     async deleteSession() {},
     async listSessionEvents() { return { Events: [] }; },
+    async listSessionCheckpoints() { return { Checkpoints: [] }; },
+    async listToolReceipts() { return { ToolReceipts: [] }; },
+    async previewCheckpointResume(params) {
+      calls.push({ preview: params });
+      return { Preview: { Risk: { Level: 'medium', DuplicateSideEffectRisk: true } } };
+    },
     async runAgent(body) {
       calls.push(body);
       return new ReadableStream<Uint8Array>({
@@ -21,8 +27,21 @@ function createApiFacade(calls: Record<string, unknown>[]): ApiFacade {
         },
       });
     },
+    async resumeRun(params) {
+      calls.push(params);
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('event: response.completed\ndata: {"status":"completed","output_text":"resumed"}\n\n'));
+          controller.close();
+        },
+      });
+    },
     async subscribeRunEvents() {
       return new ReadableStream<Uint8Array>();
+    },
+    async cancelRun(agentId, invocationId) {
+      calls.push({ cancel: { agentId, invocationId } });
+      return { Cancelled: true, Found: true, Status: 'cancelling' };
     },
     async getResponseFeedback() { return null; },
     async upsertResponseFeedback() { return null; },
@@ -81,6 +100,7 @@ describe('RunEngineImpl', () => {
       agentFramework: 'langgraph',
       selectedModel: 'model-live',
       thinkingMode: 'disabled',
+      checkpointResumePreviewEnabled: true,
     });
 
     engine.start({
@@ -96,6 +116,39 @@ describe('RunEngineImpl', () => {
       SessionId: 'session-live',
       Model: 'model-live',
       ModelOptions: { thinking: { type: 'disabled' } },
+    });
+  });
+
+  it('skips checkpoint resume preview when the capability is disabled', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: 'model-live',
+      thinkingMode: 'disabled',
+      checkpointResumePreviewEnabled: false,
+    });
+
+    const accepted = engine.resumeCheckpoint({
+      sessionId: 'session-live',
+      runId: 'run-1',
+      checkpointId: 'ckpt-1',
+    });
+
+    expect(accepted).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      agentId: 'agent-live',
+      sessionId: 'session-live',
+      runId: 'run-1',
+      checkpointId: 'ckpt-1',
+      invocationId: expect.stringMatching(/^run_/),
     });
   });
 
@@ -217,6 +270,85 @@ describe('RunEngineImpl', () => {
 
     expect(warnSpy).not.toHaveBeenCalledWith('[RunEngine] Invalid transition: idle → uploading-files');
     warnSpy.mockRestore();
+  });
+
+  it('resumes from a checkpoint through the dedicated ResumeRun action', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    const activities: string[] = [];
+    engine.subscribe((event) => {
+      if (event.type === 'activity') {
+        activities.push(event.phase);
+      }
+    });
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: 'model-live',
+      thinkingMode: 'disabled',
+      checkpointResumePreviewEnabled: true,
+    });
+
+    const accepted = engine.resumeCheckpoint({
+      sessionId: 'session-live',
+      runId: 'run-1',
+      checkpointId: 'ckpt-1',
+    });
+
+    expect(accepted).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+
+    expect(calls[0]).toEqual({
+      preview: {
+        agentId: 'agent-live',
+        sessionId: 'session-live',
+        runId: 'run-1',
+        checkpointId: 'ckpt-1',
+      },
+    });
+    expect(calls[1]).toEqual({
+      agentId: 'agent-live',
+      sessionId: 'session-live',
+      runId: 'run-1',
+      checkpointId: 'ckpt-1',
+      invocationId: expect.stringMatching(/^run_/),
+    });
+    expect(activities).toContain('恢复预览完成：medium 风险');
+    expect(activities).toContain('从 checkpoint 恢复运行');
+  });
+
+  it('sets a cancellable invocation id while resuming from a checkpoint', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: 'model-live',
+      thinkingMode: 'disabled',
+    });
+
+    const accepted = engine.resumeCheckpoint({
+      sessionId: 'session-live',
+      runId: 'run-1',
+      checkpointId: 'ckpt-1',
+    });
+
+    expect(accepted).toBe(true);
+    await waitForCalls(calls);
+    const resumeCall = calls.find((call) => 'checkpointId' in call && 'invocationId' in call);
+    const invocationId = String(resumeCall?.invocationId || '');
+    expect(invocationId).toMatch(/^run_/);
+    expect(useStreamingStore.getState().currentRunId).toBe(invocationId);
+
+    await engine.cancelRemote(invocationId);
+    expect(calls.at(-1)).toEqual({
+      cancel: { agentId: 'agent-live', invocationId },
+    });
   });
 
   it('creates a session and continues to run the first image message', async () => {
@@ -405,6 +537,49 @@ describe('RunEngineImpl', () => {
     expect(messages.at(-1)?.content).toContain('image_url is only supported by certain models');
   });
 
+  it('treats response.cancelled as a cancelled run instead of a failure', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine({
+      ...createApiFacade(calls),
+      async runAgent(body) {
+        calls.push(body);
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(
+              'event: response.cancelled\n'
+              + 'data: {"status":"cancelled"}\n\n',
+            ));
+          },
+        });
+      },
+    });
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    engine.start({
+      text: 'cancel me',
+      attachments: [],
+      sessionId: 'session-live',
+    });
+
+    await waitForCalls(calls);
+    for (let i = 0; i < 20 && engine.stage !== 'idle'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const activity = useStreamingStore.getState().getSessionActivity('session-live');
+    expect(activity?.status).toBe('stopped');
+    expect(activity?.phase).toBe('运行已取消');
+  });
+
   it('disconnects the frontend stream without adding a stopped system message', async () => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine({
@@ -440,5 +615,46 @@ describe('RunEngineImpl', () => {
     expect(engine.stage).toBe('idle');
     expect(useStreamingStore.getState().isStreaming).toBe(false);
     expect(useMessageStore.getState().messages.some((message) => message.role === 'system')).toBe(false);
+  });
+
+  it('passes a stable invocation id to RunAgent and uses it for remote cancel', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine({
+      ...createApiFacade(calls),
+      async runAgent(body) {
+        calls.push(body);
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"type":"response.in_progress"}\n\n'));
+          },
+        });
+      },
+    });
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+
+    engine.start({
+      text: 'long run',
+      attachments: [],
+      sessionId: 'session-live',
+    });
+
+    await waitForCalls(calls);
+    const invocationId = String(calls[0].InvocationId || '');
+
+    expect(invocationId).toMatch(/^run_/);
+    expect(useStreamingStore.getState().currentRunId).toBe(invocationId);
+
+    await engine.cancelRemote(invocationId);
+
+    expect(calls.at(-1)).toEqual({
+      cancel: { agentId: 'agent-live', invocationId },
+    });
   });
 });

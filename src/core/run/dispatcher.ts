@@ -30,6 +30,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
     case 'activity':
       useStreamingStore.getState().updateActivity({
         sessionId: event.sessionId,
+        source: event.source,
         status: event.status,
         phase: event.phase,
         detail: event.detail,

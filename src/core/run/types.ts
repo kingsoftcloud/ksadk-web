@@ -12,6 +12,7 @@ export type RunEvent =
       type: 'activity';
       sessionId?: string | null;
       phase: string;
+      source?: 'run' | 'restore';
       status?: 'connecting' | 'running' | 'waiting' | 'stopped' | 'completed' | 'failed';
       detail?: string;
       countEvent?: boolean;
@@ -36,6 +37,7 @@ export type RunEngineConfig = {
   agentFramework: string;
   selectedModel: string;
   thinkingMode: string;
+  checkpointResumePreviewEnabled?: boolean;
 };
 
 export interface RunEngine {
@@ -59,6 +61,13 @@ export interface RunEngine {
     afterSeqId: number;
     onSessionReloadNeeded?: () => void;
   }): void;
+  resumeCheckpoint(params: {
+    sessionId: string;
+    runId: string;
+    checkpointId: string;
+    resumeAttemptId?: string;
+    onSettled?: (sessionId: string | null) => void;
+  }): boolean;
   readonly stage: RunStage;
   subscribe(listener: (event: RunEvent) => void): () => void;
 }
