@@ -3,6 +3,7 @@ import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
 import { useUIStore } from '../stores/ui.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
+import { useBootstrapStore } from '../stores/bootstrap.js';
 import { CancelledError } from '../api/client.js';
 import { findActiveRunIds } from '../utils/run-state.js';
 import {
@@ -208,7 +209,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       try {
         const data = await api.listSessionEvents(sessionId);
-        if (uiCapabilities.RunLifecycle.Enabled && uiCapabilities.RunLifecycle.Checkpoints) {
+        const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
+        if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
           void api.listSessionCheckpoints({
             agentId: agentIdRef.current,
             sessionId,
@@ -246,8 +248,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           });
           const lastSeqId = maxSeqIdFromEvents(events);
           if (
-            uiCapabilities.RunLifecycle.Enabled &&
-            uiCapabilities.RunLifecycle.Resume &&
+            runtimeCapabilities.RunLifecycle.Enabled &&
+            runtimeCapabilities.RunLifecycle.Resume &&
             activeRuns[0]
           ) {
             void subscribeRunEvents({

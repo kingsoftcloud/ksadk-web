@@ -51,4 +51,12 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
   });
+
+  it('uses current bootstrap capabilities when loading restored sessions', () => {
+    const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+
+    expect(lifecycleSource).toContain('useBootstrapStore.getState().capabilities');
+    expect(lifecycleSource).toContain('runtimeCapabilities.RunLifecycle.Enabled');
+    expect(lifecycleSource).toContain('runtimeCapabilities.RunLifecycle.Checkpoints');
+  });
 });
