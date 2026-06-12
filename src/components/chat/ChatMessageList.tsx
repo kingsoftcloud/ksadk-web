@@ -198,6 +198,30 @@ function EmptyState({ agentName }: { agentName: string }) {
   );
 }
 
+function formatCheckpointPhase(phase?: string) {
+  const normalized = String(phase || '').trim();
+  if (!normalized) return '保存运行状态';
+
+  const labels: Record<string, string> = {
+    stream: '流式执行中',
+    running: '运行中',
+    interrupted: '已中断',
+    cancelled: '已取消',
+    completed: '已完成',
+    before_tool: '工具执行前',
+    after_tool: '工具执行后',
+  };
+
+  return labels[normalized] || normalized;
+}
+
+function shortIdentifier(value?: string, prefix = 8, suffix = 4) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text.length <= prefix + suffix + 1) return text;
+  return `${text.slice(0, prefix)}...${text.slice(-suffix)}`;
+}
+
 function CheckpointPanel({
   checkpoints,
   isStreaming,
@@ -212,31 +236,48 @@ function CheckpointPanel({
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="font-medium text-slate-700 dark:text-slate-200">Checkpoint</span>
-        <span className="text-slate-400">{checkpoints.length} 个可恢复点</span>
+    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-xs text-slate-600 shadow-sm shadow-slate-900/[0.03] dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium text-slate-800 dark:text-slate-100">Checkpoint 恢复</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">选择一个保存点继续运行</div>
+        </div>
+        <span className="flex-shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-950/40 dark:text-slate-300 dark:ring-slate-700">
+          共 {checkpoints.length} 个
+        </span>
       </div>
-      <div className="flex flex-col gap-1">
-        {checkpoints.slice(0, 3).map((checkpoint) => {
+      <div className="custom-scrollbar flex max-h-[19rem] flex-col gap-1 overflow-y-auto pr-1">
+        {checkpoints.map((checkpoint, index) => {
           const disabled = isStreaming || !checkpoint.sessionId;
+          const checkpointOrdinal = index + 1;
+          const checkpointLabel = index === 0 ? '最新恢复点' : `恢复点 #${checkpointOrdinal}`;
+          const phaseLabel = formatCheckpointPhase(checkpoint.phase);
+          const checkpointShortId = shortIdentifier(checkpoint.checkpointId);
+          const runShortId = shortIdentifier(checkpoint.runId, 10, 4);
           return (
             <div
               key={checkpoint.checkpointId}
-              className="flex min-h-8 items-center justify-between gap-2 rounded-md px-1.5 py-1 hover:bg-white dark:hover:bg-slate-800"
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border border-transparent px-2 py-2 transition hover:border-slate-200 hover:bg-white dark:hover:border-slate-700 dark:hover:bg-slate-800"
             >
               <div className="min-w-0">
-                <div className="truncate text-slate-700 dark:text-slate-200">
-                  {checkpoint.phase || checkpoint.checkpointId}
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex-shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+                    {checkpointLabel}
+                  </span>
+                  <span className="truncate font-medium text-slate-700 dark:text-slate-200">
+                    {phaseLabel}
+                  </span>
                 </div>
-                <div className="truncate text-[11px] text-slate-400">
-                  {checkpoint.runId}
-                  {checkpoint.seqId !== undefined ? ` · seq ${checkpoint.seqId}` : ''}
-                  {checkpoint.timestamp ? ` · ${formatDate(checkpoint.timestamp)}` : ''}
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
+                  {checkpoint.seqId !== undefined ? <span>seq {checkpoint.seqId}</span> : null}
+                  {checkpoint.timestamp ? <span>{formatDate(checkpoint.timestamp)}</span> : null}
+                  {checkpointShortId ? <span title={checkpoint.checkpointId}>ckpt {checkpointShortId}</span> : null}
+                  {runShortId ? <span title={checkpoint.runId}>run {runShortId}</span> : null}
                 </div>
               </div>
               <button
                 type="button"
+                aria-label={`恢复到${checkpointLabel}`}
                 disabled={disabled}
                 title={disabled ? '当前会话正在运行，暂不能恢复' : '从该 checkpoint 恢复'}
                 onClick={() => {
@@ -247,7 +288,7 @@ function CheckpointPanel({
                     checkpointId: checkpoint.checkpointId,
                   });
                 }}
-                className="inline-flex h-7 flex-shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
               >
                 <RefreshCcw className="h-3 w-3" />
                 恢复

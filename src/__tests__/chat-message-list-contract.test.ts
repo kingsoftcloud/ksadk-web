@@ -43,6 +43,15 @@ describe('chat message list contracts', () => {
     expect(sessionEventsSource).not.toContain('run_resume');
   });
 
+  it('renders all checkpoint resume entries instead of truncating the visible list', () => {
+    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(listSource).not.toContain('checkpoints.slice(0, 3)');
+    expect(listSource).toContain('checkpoints.map((checkpoint, index)');
+    expect(listSource).toContain("index === 0 ? '最新恢复点'");
+    expect(listSource).toContain('custom-scrollbar');
+  });
+
   it('loads checkpoint metadata as best effort without blocking session history', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
