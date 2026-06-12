@@ -239,8 +239,8 @@ function CheckpointPanel({
     <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-xs text-slate-600 shadow-sm shadow-slate-900/[0.03] dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="font-medium text-slate-800 dark:text-slate-100">Checkpoint 恢复</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">选择一个保存点继续运行</div>
+          <div className="font-medium text-slate-800 dark:text-slate-100">会话恢复区</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">停止后可从任一保存点继续执行</div>
         </div>
         <span className="flex-shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-950/40 dark:text-slate-300 dark:ring-slate-700">
           共 {checkpoints.length} 个

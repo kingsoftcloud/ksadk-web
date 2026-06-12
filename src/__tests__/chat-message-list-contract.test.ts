@@ -47,6 +47,9 @@ describe('chat message list contracts', () => {
     const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 
     expect(listSource).not.toContain('checkpoints.slice(0, 3)');
+    expect(listSource).not.toContain('个可恢复点');
+    expect(listSource).toContain('会话恢复区');
+    expect(listSource).toContain('停止后可从任一保存点继续执行');
     expect(listSource).toContain('checkpoints.map((checkpoint, index)');
     expect(listSource).toContain("index === 0 ? '最新恢复点'");
     expect(listSource).toContain('custom-scrollbar');
