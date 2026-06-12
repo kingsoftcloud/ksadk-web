@@ -162,7 +162,8 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
       }
     }
     handleStopGeneration();
-  }, [api, agentId, handleStopGeneration]);
+    refreshSettledRun(currentSessionIdRef.current);
+  }, [api, agentId, currentSessionIdRef, handleStopGeneration, refreshSettledRun]);
 
   const { submitResponseFeedback, deleteResponseFeedback, respondToApproval } = useFeedback({
     agentId,

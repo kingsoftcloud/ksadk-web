@@ -27,4 +27,13 @@ describe('ChatComposer interaction contract', () => {
     expect(source).not.toContain('不支持图片输入');
     expect(source).toContain('void submitDraft(draftText, draftAttachments)');
   });
+
+  it('refreshes the active session after runtime cancel so checkpoint controls can appear', () => {
+    const source = readSource('App.tsx');
+    const cancelHandlerStart = source.indexOf('const handleCancelRemote = useCallback');
+    const cancelHandlerEnd = source.indexOf('const { submitResponseFeedback', cancelHandlerStart);
+    const cancelHandler = source.slice(cancelHandlerStart, cancelHandlerEnd);
+
+    expect(cancelHandler).toContain('refreshSettledRun(currentSessionIdRef.current)');
+  });
 });
