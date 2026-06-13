@@ -29,6 +29,12 @@ describe('checkpoint store', () => {
         RunId: 'run-1',
         SeqId: 14,
         Timestamp: '2026-06-10T10:05:00Z',
+        Metadata: {
+          stage: '清洗聚合指标',
+          summary: 'GMV、转化率和退款率已经聚合完成',
+          next_action: '继续生成复盘报告',
+          status: 'completed',
+        },
       },
       { CheckpointId: '', RunId: 'run-1', SeqId: 15 },
     ]);
@@ -38,6 +44,10 @@ describe('checkpoint store', () => {
         checkpointId: 'ckpt-2',
         runId: 'run-1',
         seqId: 14,
+        stage: '清洗聚合指标',
+        summary: 'GMV、转化率和退款率已经聚合完成',
+        nextAction: '继续生成复盘报告',
+        status: 'completed',
       }),
       expect.objectContaining({
         checkpointId: 'ckpt-1',
@@ -71,6 +81,88 @@ describe('checkpoint store', () => {
         seqId: 20,
         phase: 'after_tool',
       }),
+    ]);
+  });
+
+  it('normalizes raw run checkpoint events from background subscriptions', () => {
+    const store = useCheckpointStore.getState();
+
+    store.upsertSessionCheckpoint('session-1', {
+      EventType: 'run_checkpoint',
+      SessionId: 'session-1',
+      InvocationId: 'longtask_run-1',
+      SeqId: 32,
+      Timestamp: '2026-06-10T10:08:00Z',
+      Content: {
+        status: 'checkpointed',
+        run_id: 'run-1',
+        checkpoint_id: 'ckpt-raw-1',
+        framework: 'langgraph',
+        phase: 'after_tool',
+      },
+      Metadata: {
+        run_id: 'run-1',
+        checkpoint_id: 'ckpt-raw-1',
+        framework: 'langgraph',
+        framework_ref: {
+          langgraph: {
+            thread_id: 'tenant:agent:session-1:run-1',
+            checkpoint_id: 'ckpt-raw-1',
+          },
+        },
+        phase: 'after_tool',
+        stage: '清洗聚合指标',
+        summary: '核心指标已经聚合完成',
+        next_action: '继续生成复盘报告',
+        status: 'completed',
+      },
+    });
+
+    expect(store.getSessionCheckpoints('session-1')).toEqual([
+      expect.objectContaining({
+        checkpointId: 'ckpt-raw-1',
+        runId: 'run-1',
+        sessionId: 'session-1',
+        invocationId: 'longtask_run-1',
+        seqId: 32,
+        framework: 'langgraph',
+        frameworkRef: {
+          langgraph: {
+            thread_id: 'tenant:agent:session-1:run-1',
+            checkpoint_id: 'ckpt-raw-1',
+          },
+        },
+        phase: 'after_tool',
+        stage: '清洗聚合指标',
+        summary: '核心指标已经聚合完成',
+        nextAction: '继续生成复盘报告',
+        status: 'completed',
+      }),
+    ]);
+  });
+
+  it('keeps the checkpoint panel focused on the newest run in a session', () => {
+    const store = useCheckpointStore.getState();
+
+    store.setSessionCheckpoints('session-1', [
+      { CheckpointId: 'old-1', RunId: 'run-old', SeqId: 10 },
+      { CheckpointId: 'old-2', RunId: 'run-old', SeqId: 11 },
+      { CheckpointId: 'new-1', RunId: 'run-new', SeqId: 20 },
+    ]);
+
+    expect(store.getSessionCheckpoints('session-1')).toEqual([
+      expect.objectContaining({ checkpointId: 'new-1', runId: 'run-new' }),
+    ]);
+
+    store.upsertSessionCheckpoint('session-1', {
+      CheckpointId: 'new-2',
+      RunId: 'run-new',
+      SeqId: 21,
+    });
+
+    expect(store.getSessionCheckpoints('session-1')).toEqual([
+      expect.objectContaining({ checkpointId: 'new-2', runId: 'run-new' }),
+      expect.objectContaining({ checkpointId: 'new-1', runId: 'run-new' }),
     ]);
   });
 

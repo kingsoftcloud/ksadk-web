@@ -2,10 +2,14 @@ import type { RunEvent } from './types.js';
 import { useMessageStore } from '../../stores/message.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useSessionStore } from '../../stores/session.js';
+import { useCheckpointStore } from '../../stores/checkpoint.js';
 import { buildCompactionMessage } from '../../utils/session-events.js';
 import type { Message } from '../../components/chat/types.js';
 
 let assistantCreated = false;
+
+const TERMINAL_COMPLETE_STATUSES = new Set(['completed']);
+const TERMINAL_ERROR_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'incomplete']);
 
 function ensureAssistantMessage(id: string) {
   if (assistantCreated) return;
@@ -14,6 +18,31 @@ function ensureAssistantMessage(id: string) {
     ...prev,
     { id, role: 'model', content: '', timestamp: Date.now(), reasoning: '' },
   ]);
+}
+
+function settleRunningToolsForTerminalStatus(status: string) {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  const nextStatus = TERMINAL_COMPLETE_STATUSES.has(normalizedStatus)
+    ? 'completed'
+    : TERMINAL_ERROR_STATUSES.has(normalizedStatus)
+      ? 'error'
+      : null;
+  if (!nextStatus) return;
+
+  useMessageStore.getState().patchMessages((prev) =>
+    prev.map((msg) => {
+      if (!msg.tools) return msg;
+      let changed = false;
+      const tools = Object.fromEntries(
+        Object.entries(msg.tools).map(([name, tool]) => {
+          if (tool.status !== 'running') return [name, tool];
+          changed = true;
+          return [name, { ...tool, status: nextStatus }];
+        }),
+      );
+      return changed ? { ...msg, tools } : msg;
+    }),
+  );
 }
 
 export function dispatchRunEventToStores(event: RunEvent) {
@@ -201,8 +230,40 @@ export function dispatchRunEventToStores(event: RunEvent) {
       break;
 
     case 'terminal':
-      // Terminal is informational; state already reset by stage_changed or stream_ended
+      settleRunningToolsForTerminalStatus(event.status);
       break;
+
+    case 'stream_event': {
+      if (event.event.EventType === 'run_checkpoint') {
+        useCheckpointStore.getState().upsertSessionCheckpoint(event.sessionId || event.event.SessionId, event.event);
+      }
+      if (event.event.EventType === 'run_status') {
+        const status = String((event.event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+        if (status === 'completed') {
+          useStreamingStore.getState().updateActivity({
+            sessionId: event.sessionId || event.event.SessionId,
+            status: 'completed',
+            phase: '后台长任务已完成',
+            countEvent: false,
+          });
+        } else if (status === 'cancelled' || status === 'canceled' || status === 'aborted') {
+          useStreamingStore.getState().updateActivity({
+            sessionId: event.sessionId || event.event.SessionId,
+            status: 'stopped',
+            phase: '后台长任务已取消',
+            countEvent: false,
+          });
+        } else if (status === 'failed' || status === 'error') {
+          useStreamingStore.getState().updateActivity({
+            sessionId: event.sessionId || event.event.SessionId,
+            status: 'failed',
+            phase: '后台长任务失败',
+            countEvent: false,
+          });
+        }
+      }
+      break;
+    }
   }
 }
 

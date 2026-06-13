@@ -17,6 +17,14 @@ type StreamConsumeResult = {
   terminalStatus?: string;
 };
 
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted']);
+
+function terminalStatusFromSessionEvent(event: SessionEventRecord): string | null {
+  if (event.EventType !== 'run_status') return null;
+  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  return TERMINAL_RUN_STATUSES.has(rawStatus) ? rawStatus : null;
+}
+
 function activityForTransportEvent(eventName: string, data: unknown): { phase: string; status?: 'running' | 'waiting' | 'completed' | 'failed'; detail?: string } | null {
   const eventType = String((data as Record<string, unknown> | null)?.type || eventName || '').trim();
   if (eventType === 'response.created') {
@@ -301,10 +309,12 @@ export class RunEngineImpl implements RunEngine {
     this.abortController?.abort();
     this.abortController = new AbortController();
     this.activeSessionId = params.sessionId;
+    useStreamingStore.getState().setCurrentRunId(params.invocationId);
     this.setStage('connecting');
     this.emit({ type: 'activity', phase: '恢复运行事件订阅', status: 'connecting', countEvent: false });
 
     (async () => {
+      let terminalStatus: string | null = null;
       try {
         const stream = await this.api.subscribeRunEvents(
           {
@@ -336,12 +346,19 @@ export class RunEngineImpl implements RunEngine {
               if (event.eventName === '__done__') continue;
               this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
               this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
+              terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
             }
           }
         }
 
         this.setStage('completing');
-        this.emit({ type: 'activity', phase: '恢复订阅结束', status: 'completed', countEvent: false });
+        if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') {
+          this.emit({ type: 'activity', phase: '后台长任务已取消', status: 'stopped', countEvent: false });
+        } else if (terminalStatus === 'failed' || terminalStatus === 'error') {
+          this.emit({ type: 'activity', phase: '后台长任务失败', status: 'failed', countEvent: false });
+        } else {
+          this.emit({ type: 'activity', phase: '后台长任务已完成', status: 'completed', countEvent: false });
+        }
         this.emit({ type: 'stream_ended' });
         params.onSessionReloadNeeded?.();
       } catch (error) {

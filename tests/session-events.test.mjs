@@ -1210,3 +1210,39 @@ test('session event utils restore persisted tool calls and results around assist
     ],
   );
 });
+
+test('session event utils settle running tool calls when invocation completed', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-tool-call',
+      EventType: 'tool_call',
+      InvocationId: 'inv-tool-terminal',
+      Content: { role: 'model', parts: [{ text: 'run_code' }] },
+      Metadata: {
+        tool_name: 'run_code',
+        tool_args: { code: 'print(42)' },
+      },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-tool-terminal',
+      Content: { role: 'model', parts: [{ text: 'done' }] },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-run-status',
+      EventType: 'run_status',
+      InvocationId: 'inv-tool-terminal',
+      Content: { status: 'completed' },
+      Timestamp: 3,
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].tools.run_code.status, 'completed');
+});

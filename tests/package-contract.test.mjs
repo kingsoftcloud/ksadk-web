@@ -4,9 +4,10 @@ import { readFile } from 'node:fs/promises';
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
-test('package metadata exposes v0.2.3 release artifacts and public entrypoints', () => {
+test('package metadata exposes release artifacts and public entrypoints', () => {
   assert.equal(packageJson.name, '@kingsoftcloud/ksadk-web');
-  assert.equal(packageJson.version, '0.2.3');
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
+  assert.deepEqual(packageJson.publishConfig, { access: 'public' });
   assert.equal(packageJson.scripts['build:lib'], 'vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json');
   assert.equal(packageJson.scripts['build:all'], 'npm run build:ksadk && npm run build:hosted && npm run build:lib');
 

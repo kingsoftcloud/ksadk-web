@@ -12,6 +12,7 @@ import {
   maxSeqIdFromEvents,
   mergeSessionEventRecords,
 } from '../utils/session-events.js';
+import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
 import { upsertSessions } from '../utils/session-helpers.js';
@@ -21,6 +22,24 @@ import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 
 const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
+
+function terminalActivityForRunEvent(event: SessionEventRecord): {
+  status: 'completed' | 'failed' | 'stopped';
+  phase: string;
+} | null {
+  if (event.EventType !== 'run_status') return null;
+  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  if (rawStatus === 'completed') {
+    return { status: 'completed', phase: '后台长任务已完成' };
+  }
+  if (rawStatus === 'cancelled' || rawStatus === 'canceled' || rawStatus === 'aborted') {
+    return { status: 'stopped', phase: '后台长任务已取消' };
+  }
+  if (rawStatus === 'failed' || rawStatus === 'error') {
+    return { status: 'failed', phase: '后台长任务失败' };
+  }
+  return null;
+}
 
 type SessionLifecycleContext = {
   agentId: string;
@@ -144,6 +163,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         let mergedEvents: SessionEventRecord[] = Array.isArray(options.initialEvents)
           ? options.initialEvents
           : [];
+        useStreamingStore.getState().setCurrentRunId(options.invocationId);
+        useStreamingStore.getState().updateActivity({
+          sessionId: options.sessionId,
+          status: 'running',
+          phase: '后台长任务运行中',
+          detail: options.invocationId,
+          countEvent: false,
+        });
 
         while (!terminalStatusSeen) {
           const { value, done } = await reader.read();
@@ -171,6 +198,19 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               mergedEvents = mergeSessionEventRecords(mergedEvents, [event]) as SessionEventRecord[];
               terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
               shouldReloadSession = shouldReloadSession || terminalStatusSeen;
+              if (event.EventType === 'run_checkpoint') {
+                useCheckpointStore.getState().upsertSessionCheckpoint(options.sessionId, event);
+              }
+              const terminalActivity = terminalActivityForRunEvent(event);
+              if (terminalActivity) {
+                useStreamingStore.getState().updateActivity({
+                  sessionId: options.sessionId,
+                  status: terminalActivity.status,
+                  phase: terminalActivity.phase,
+                  detail: options.invocationId,
+                  countEvent: false,
+                });
+              }
               const history = buildMessagesFromSessionEvents(mergedEvents);
               useMessageStore.getState().setMessages(history);
             } catch (error) {
@@ -188,6 +228,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (runSubscriptionAbortRef.current === controller) {
           runSubscriptionAbortRef.current = null;
         }
+        useStreamingStore.getState().setCurrentRunId('');
         if (shouldReloadSession && currentSessionIdRef.current === options.sessionId) {
           void loadSessionRef.current?.(options.sessionId);
         }

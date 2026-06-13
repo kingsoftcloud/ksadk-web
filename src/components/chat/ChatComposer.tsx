@@ -51,6 +51,7 @@ export function ChatComposer({
   textareaRef,
 }: ChatComposerProps) {
   const placeholderText = isMobile ? '发送消息...' : '发送消息... (Shift + Enter 换行)';
+  const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成';
 
   const handleDrop = (event: DragEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -205,7 +206,7 @@ export function ChatComposer({
                     ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white'
                     : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600',
                 )}
-                title={isStreaming ? '停止生成' : '发送消息'}
+                title={isStreaming ? activeStopTitle : '发送消息'}
               >
                 {isStreaming ? <StopCircle className="h-4 w-4" /> : <Send className="ml-0.5 h-4 w-4" />}
               </button>

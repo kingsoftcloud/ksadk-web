@@ -44,6 +44,9 @@
     "LICENSE",
     "package.json"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": [
     "*.css",
     "dist-lib/*.css"

@@ -157,13 +157,26 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
     if (invocationId) {
       try {
         await api.cancelRun(agentId, invocationId);
+        useStreamingStore.getState().updateActivity({
+          sessionId: currentSessionIdRef.current,
+          status: 'waiting',
+          phase: '取消请求已发送',
+          detail: '等待运行时停在最近 checkpoint',
+          countEvent: false,
+        });
       } catch (err) {
         console.warn('[App] cancelRun failed:', err);
+        useStreamingStore.getState().updateActivity({
+          sessionId: currentSessionIdRef.current,
+          status: 'failed',
+          phase: '取消请求失败',
+          detail: err instanceof Error ? err.message : String(err),
+          countEvent: false,
+        });
       }
     }
-    handleStopGeneration();
     refreshSettledRun(currentSessionIdRef.current);
-  }, [api, agentId, currentSessionIdRef, handleStopGeneration, refreshSettledRun]);
+  }, [api, agentId, currentSessionIdRef, refreshSettledRun]);
 
   const { submitResponseFeedback, deleteResponseFeedback, respondToApproval } = useFeedback({
     agentId,

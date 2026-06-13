@@ -16,7 +16,8 @@ describe('ChatComposer interaction contract', () => {
     expect(source).not.toContain('停止接收');
     expect(source).not.toContain('取消运行');
     expect(source).not.toContain('终止后台');
-    expect(source).toContain("title={isStreaming ? '停止生成' : '发送消息'}");
+    expect(source).toContain("const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成'");
+    expect(source).toContain("title={isStreaming ? activeStopTitle : '发送消息'}");
     expect(source).toContain('isStreaming ? <StopCircle');
   });
 
@@ -35,5 +36,7 @@ describe('ChatComposer interaction contract', () => {
     const cancelHandler = source.slice(cancelHandlerStart, cancelHandlerEnd);
 
     expect(cancelHandler).toContain('refreshSettledRun(currentSessionIdRef.current)');
+    expect(cancelHandler).toContain('取消请求已发送');
+    expect(cancelHandler).not.toContain('handleStopGeneration()');
   });
 });

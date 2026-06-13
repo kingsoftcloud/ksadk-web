@@ -10,6 +10,10 @@ export type SessionCheckpoint = {
   framework?: string;
   frameworkRef?: Record<string, unknown>;
   phase?: string;
+  stage?: string;
+  summary?: string;
+  nextAction?: string;
+  status?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -95,12 +99,40 @@ function sortToolReceipts(receipts: ToolReceipt[]) {
   });
 }
 
+function latestRunId(checkpoints: SessionCheckpoint[]) {
+  return sortCheckpoints(checkpoints)[0]?.runId || '';
+}
+
+function keepLatestRun(checkpoints: SessionCheckpoint[]) {
+  const runId = latestRunId(checkpoints);
+  if (!runId) return [];
+  return checkpoints.filter((checkpoint) => checkpoint.runId === runId);
+}
+
 export function normalizeSessionCheckpoint(value: unknown): SessionCheckpoint | null {
   const raw = optionalRecord(value);
   if (!raw) return null;
 
-  const checkpointId = text(raw.CheckpointId ?? raw.checkpointId ?? raw.checkpoint_id);
-  const runId = text(raw.RunId ?? raw.runId ?? raw.run_id);
+  const metadata = optionalRecord(raw.Metadata ?? raw.metadata);
+  const content = optionalRecord(raw.Content ?? raw.content);
+  const checkpointId = text(
+    raw.CheckpointId
+      ?? raw.checkpointId
+      ?? raw.checkpoint_id
+      ?? metadata?.checkpoint_id
+      ?? metadata?.checkpointId
+      ?? content?.checkpoint_id
+      ?? content?.checkpointId,
+  );
+  const runId = text(
+    raw.RunId
+      ?? raw.runId
+      ?? raw.run_id
+      ?? metadata?.run_id
+      ?? metadata?.runId
+      ?? content?.run_id
+      ?? content?.runId,
+  );
   if (!checkpointId || !runId) return null;
 
   return {
@@ -110,10 +142,14 @@ export function normalizeSessionCheckpoint(value: unknown): SessionCheckpoint | 
     invocationId: text(raw.InvocationId ?? raw.invocationId ?? raw.invocation_id) || undefined,
     seqId: optionalNumber(raw.SeqId ?? raw.seqId ?? raw.seq_id),
     timestamp: optionalTimestamp(raw.Timestamp ?? raw.timestamp ?? raw.CreatedAt ?? raw.createdAt),
-    framework: text(raw.Framework ?? raw.framework) || undefined,
-    frameworkRef: optionalRecord(raw.FrameworkRef ?? raw.frameworkRef ?? raw.framework_ref),
-    phase: text(raw.Phase ?? raw.phase) || undefined,
-    metadata: optionalRecord(raw.Metadata ?? raw.metadata),
+    framework: text(raw.Framework ?? raw.framework ?? metadata?.framework ?? content?.framework) || undefined,
+    frameworkRef: optionalRecord(raw.FrameworkRef ?? raw.frameworkRef ?? raw.framework_ref ?? metadata?.framework_ref ?? metadata?.frameworkRef),
+    phase: text(raw.Phase ?? raw.phase ?? metadata?.phase ?? content?.phase) || undefined,
+    stage: text(raw.Stage ?? raw.stage ?? metadata?.stage ?? metadata?.title) || undefined,
+    summary: text(raw.Summary ?? raw.summary ?? metadata?.summary ?? metadata?.description) || undefined,
+    nextAction: text(raw.NextAction ?? raw.nextAction ?? raw.next_action ?? metadata?.nextAction ?? metadata?.next_action) || undefined,
+    status: text(raw.Status ?? raw.status ?? metadata?.status ?? content?.status) || undefined,
+    metadata,
   };
 }
 
@@ -150,10 +186,10 @@ export const useCheckpointStore = create<CheckpointState & CheckpointActions>()(
     checkpointsBySessionId: {
       ...state.checkpointsBySessionId,
       [sessionId]: sortCheckpoints(
-        checkpoints
+        keepLatestRun(checkpoints
           .map(normalizeSessionCheckpoint)
           .filter(isSessionCheckpoint)
-          .map((item) => ({ ...item, sessionId: item.sessionId || sessionId })),
+          .map((item) => ({ ...item, sessionId: item.sessionId || sessionId }))),
       ),
     },
   })),
@@ -168,10 +204,11 @@ export const useCheckpointStore = create<CheckpointState & CheckpointActions>()(
         ...existing.get(normalized.checkpointId),
         ...normalized,
       });
+      const latestRunCheckpoints = keepLatestRun([...existing.values()]);
       return {
         checkpointsBySessionId: {
           ...state.checkpointsBySessionId,
-          [sessionId]: sortCheckpoints([...existing.values()]),
+          [sessionId]: sortCheckpoints(latestRunCheckpoints),
         },
       };
     });

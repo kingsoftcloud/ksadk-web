@@ -4,6 +4,7 @@ import type { ApiFacade } from '../core/api/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useMessageStore } from '../stores/message.js';
 import { useSessionStore } from '../stores/session.js';
+import { useCheckpointStore } from '../stores/checkpoint.js';
 import { dispatchRunEventToStores, resetDispatcherState } from '../core/run/dispatcher.js';
 
 function createApiFacade(calls: Record<string, unknown>[]): ApiFacade {
@@ -87,6 +88,7 @@ describe('RunEngineImpl', () => {
     useStreamingStore.getState().resetRun();
     useMessageStore.getState().setMessages([]);
     useSessionStore.getState().setCurrentSessionId(null);
+    useCheckpointStore.getState().clearSessionCheckpoints();
     resetDispatcherState();
   });
 
@@ -411,6 +413,111 @@ describe('RunEngineImpl', () => {
       status: 'waiting',
       detail: '正在接收流式事件',
     });
+  });
+
+  it('settles running tools when a run reaches a terminal status', () => {
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    dispatchRunEventToStores({
+      type: 'tool_upsert',
+      messageId: 'assistant-1',
+      name: 'run_code',
+      args: '{"code":"print(42)"}',
+      status: 'running',
+      sessionId: 'session-live',
+    });
+
+    dispatchRunEventToStores({
+      type: 'terminal',
+      status: 'completed',
+      sessionId: 'session-live',
+    });
+
+    const messages = useMessageStore.getState().messages;
+    expect(messages[0].tools?.run_code.status).toBe('completed');
+  });
+
+  it('stores checkpoint records delivered by a background run subscription', () => {
+    useSessionStore.getState().setCurrentSessionId('session-live');
+
+    dispatchRunEventToStores({
+      type: 'stream_event',
+      sessionId: 'session-live',
+      event: {
+        EventId: 'event-ckpt-1',
+        SessionId: 'session-live',
+        InvocationId: 'longtask_run-1',
+        EventType: 'run_checkpoint',
+        SeqId: 12,
+        Timestamp: '2026-06-10T10:00:00Z',
+        Content: {
+          status: 'checkpointed',
+          run_id: 'run-1',
+          checkpoint_id: 'ckpt-1',
+          framework: 'langgraph',
+        },
+        Metadata: {
+          run_id: 'run-1',
+          checkpoint_id: 'ckpt-1',
+          framework: 'langgraph',
+          framework_ref: {
+            langgraph: {
+              thread_id: 'session-live:run-1',
+              checkpoint_id: 'ckpt-1',
+            },
+          },
+          stage: '拉取业务数据',
+          summary: '第一个业务安全点已保存',
+          next_action: '继续清洗聚合指标',
+          status: 'completed',
+        },
+      },
+    });
+
+    expect(useCheckpointStore.getState().getSessionCheckpoints('session-live')).toEqual([
+      expect.objectContaining({
+        checkpointId: 'ckpt-1',
+        runId: 'run-1',
+        sessionId: 'session-live',
+        invocationId: 'longtask_run-1',
+        stage: '拉取业务数据',
+        nextAction: '继续清洗聚合指标',
+      }),
+    ]);
+  });
+
+  it('marks background run cancellation from subscribed run status without clearing checkpoints', () => {
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    useStreamingStore.getState().updateActivity({
+      sessionId: 'session-live',
+      status: 'running',
+      phase: '后台长任务运行中',
+    });
+    useCheckpointStore.getState().upsertSessionCheckpoint('session-live', {
+      CheckpointId: 'ckpt-1',
+      RunId: 'run-1',
+      SessionId: 'session-live',
+    });
+
+    dispatchRunEventToStores({
+      type: 'stream_event',
+      sessionId: 'session-live',
+      event: {
+        EventId: 'event-status-1',
+        SessionId: 'session-live',
+        InvocationId: 'longtask_run-1',
+        EventType: 'run_status',
+        SeqId: 13,
+        Timestamp: '2026-06-10T10:00:03Z',
+        Content: { status: 'cancelled' },
+        Metadata: { status: 'cancelled' },
+      },
+    });
+
+    expect(useStreamingStore.getState().getSessionActivity('session-live')).toMatchObject({
+      status: 'stopped',
+      phase: '后台长任务已取消',
+    });
+    expect(useCheckpointStore.getState().getSessionCheckpoints('session-live')).toHaveLength(1);
   });
 
   it('reports the settled session id after a run finishes', async () => {
