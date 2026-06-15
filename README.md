@@ -73,6 +73,10 @@ npm run build:all
 npm pack --dry-run --access public
 ```
 
+The publish workflow checks whether `package.json`'s exact version is already
+present on npm. Existing versions are skipped because npm packages are
+immutable; publish a new patch version for any package-content change.
+
 Hosted UI and KSADK static sync consume the latest released
 `@kingsoftcloud/ksadk-web` package by default. Release builds should record the
 resolved package version and lockfile integrity; set an explicit version only

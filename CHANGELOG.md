@@ -14,3 +14,5 @@
 - Build release artifacts for `dist-ksadk`, `dist-hosted`, and `dist-lib`.
 - Add GitHub Actions npm publishing through Trusted Publishing so releases can
   be pushed without long-lived npm tokens.
+- Make the npm publish workflow idempotent when the exact version already
+  exists on npm.
