@@ -147,27 +147,28 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
   }, [disconnectRun]);
 
   const handleStopGeneration = useCallback(() => {
+    const sessionId = currentSessionIdRef.current;
     runSubscriptionAbortRef.current?.abort();
     useStreamingStore.getState().stopActivity();
+    useStreamingStore.getState().stopSessionActivity(sessionId);
     stopGeneration();
-  }, [runSubscriptionAbortRef, stopGeneration]);
+  }, [currentSessionIdRef, runSubscriptionAbortRef, stopGeneration]);
 
   const handleCancelRemote = useCallback(async () => {
-    const invocationId = useStreamingStore.getState().currentRunId;
+    const sessionId = currentSessionIdRef.current;
+    const streamingState = useStreamingStore.getState();
+    const invocationId = streamingState.currentRunId || streamingState.getSessionActivity(sessionId)?.runId || '';
     if (invocationId) {
       try {
         await api.cancelRun(agentId, invocationId);
-        useStreamingStore.getState().updateActivity({
-          sessionId: currentSessionIdRef.current,
-          status: 'waiting',
-          phase: '取消请求已发送',
-          detail: '等待运行时停在最近 checkpoint',
-          countEvent: false,
-        });
+        useStreamingStore.getState().stopSessionActivity(
+          sessionId,
+          '取消请求已发送，后台运行会停在最近 checkpoint。',
+        );
       } catch (err) {
         console.warn('[App] cancelRun failed:', err);
         useStreamingStore.getState().updateActivity({
-          sessionId: currentSessionIdRef.current,
+          sessionId,
           status: 'failed',
           phase: '取消请求失败',
           detail: err instanceof Error ? err.message : String(err),
@@ -175,7 +176,7 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
         });
       }
     }
-    refreshSettledRun(currentSessionIdRef.current);
+    refreshSettledRun(sessionId);
   }, [api, agentId, currentSessionIdRef, refreshSettledRun]);
 
   const { submitResponseFeedback, deleteResponseFeedback, respondToApproval } = useFeedback({

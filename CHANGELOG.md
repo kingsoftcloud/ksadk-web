@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.8 - 2026-06-15
+
+- Stop the active session activity banner when the user stops generation, so
+  completed foreground UI no longer leaves a session marked as still running.
+- Use the session-scoped run id when cancelling a background long task, then
+  settle that session activity instead of leaving it in a waiting state.
+- Add regression coverage for session-scoped streaming activity cleanup.
+
 ## 0.2.7 - 2026-06-15
 
 - Prepare the public `@kingsoftcloud/ksadk-web` package for shared consumption

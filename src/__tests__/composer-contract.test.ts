@@ -35,8 +35,20 @@ describe('ChatComposer interaction contract', () => {
     const cancelHandlerEnd = source.indexOf('const { submitResponseFeedback', cancelHandlerStart);
     const cancelHandler = source.slice(cancelHandlerStart, cancelHandlerEnd);
 
-    expect(cancelHandler).toContain('refreshSettledRun(currentSessionIdRef.current)');
+    expect(cancelHandler).toContain('const sessionId = currentSessionIdRef.current');
+    expect(cancelHandler).toContain('refreshSettledRun(sessionId)');
     expect(cancelHandler).toContain('取消请求已发送');
+    expect(cancelHandler).toMatch(/stopSessionActivity\(\s*sessionId/);
+    expect(cancelHandler).not.toContain("status: 'waiting'");
     expect(cancelHandler).not.toContain('handleStopGeneration()');
+  });
+
+  it('settles the active session banner when the user stops generation', () => {
+    const source = readSource('App.tsx');
+    const stopHandlerStart = source.indexOf('const handleStopGeneration = useCallback');
+    const stopHandlerEnd = source.indexOf('const handleCancelRemote', stopHandlerStart);
+    const stopHandler = source.slice(stopHandlerStart, stopHandlerEnd);
+
+    expect(stopHandler).toMatch(/stopSessionActivity\(\s*sessionId/);
   });
 });
