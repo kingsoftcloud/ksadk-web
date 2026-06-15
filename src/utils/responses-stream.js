@@ -269,6 +269,12 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     ];
   }
 
+  if (eventType === 'response.cancelled') {
+    return [
+      { type: 'terminal', status: 'cancelled' },
+    ];
+  }
+
   if (eventType === 'response.approval_request' || eventType === 'response.ksadk.approval_request') {
     const interruptInfo = data?.interrupt_info && typeof data.interrupt_info === 'object' ? data.interrupt_info : {};
     return [

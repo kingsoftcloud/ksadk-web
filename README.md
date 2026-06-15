@@ -5,11 +5,11 @@ the KSADK embedded static UI.
 
 ## Consumers
 
-- `kingsoftcloud/ksadk-python` consumes the GitHub Release tarball and copies
-  `dist-ksadk` into `ksadk/server/static`.
-- `agentengine-hosted-ui` consumes the GitHub Release tarball as an npm
-  dependency and keeps private deployment shell files such as Docker, nginx,
-  Helm, image tags, and runtime environment injection outside this repository.
+- `kingsoftcloud/ksadk-python` consumes `@kingsoftcloud/ksadk-web@latest` by
+  default and copies `dist-ksadk` into `ksadk/server/static`.
+- `agentengine-hosted-ui` consumes `@kingsoftcloud/ksadk-web@latest` by default
+  and keeps private deployment shell files such as Docker, nginx, Helm, image
+  tags, and runtime environment injection outside this repository.
 
 ## Public Demo
 
@@ -40,7 +40,7 @@ package entrypoints under `dist-lib`.
 
 ## Package Exports
 
-`v0.2.1` exposes these stable entrypoints:
+The npm package exposes these stable entrypoints:
 
 - `@kingsoftcloud/ksadk-web/components`
 - `@kingsoftcloud/ksadk-web/runtime`
@@ -53,11 +53,27 @@ auth, routing, feature flags, Docker, nginx, and Helm logic in its own repo.
 
 ## Release Contract
 
-Consumers should record the KSADK Web tag and tarball URL they build from.
-KSADK release notes must mention the KSADK Web release used to generate
+Consumers should record the resolved KSADK Web package version and lockfile
+integrity they build from. KSADK release notes must mention the KSADK Web
+release used to generate
 `ksadk/server/static`.
 
-Release `v0.2.1` is expected to attach:
+Npm releases are published by GitHub Actions using npm Trusted Publishing.
+The workflow is `.github/workflows/publish-npm.yml` and is triggered by a
+published GitHub Release or manual `workflow_dispatch`. Do not store npm tokens
+in repository secrets for the normal release path.
 
-- `kingsoftcloud-ksadk-web-0.2.1.tgz`
-- a checksum file for that tarball
+Before creating a release or dispatching the workflow, verify the payload:
+
+```bash
+npm ci
+npm test
+node --test tests/*.test.mjs
+npm run build:all
+npm pack --dry-run --access public
+```
+
+Hosted UI and KSADK static sync consume the latest released
+`@kingsoftcloud/ksadk-web` package by default. Release builds should record the
+resolved package version and lockfile integrity; set an explicit version only
+when rollback or release-freeze requires it.

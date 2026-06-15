@@ -1,6 +1,6 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.2.1",
+  "version": "0.2.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -41,9 +41,13 @@
     "dist-lib",
     "dist-ksadk",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "package.json"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": [
     "*.css",
     "dist-lib/*.css"

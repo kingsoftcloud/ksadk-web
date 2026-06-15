@@ -44,6 +44,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     currentSessionIdRef,
     queuedDraftRef,
     onRunSettled,
+    uiCapabilities,
   } = ctx;
 
   const configureEngine = useCallback((engine: RunEngineImpl) => {
@@ -53,8 +54,9 @@ export function useRunAgent(ctx: RunAgentContext) {
       agentFramework,
       selectedModel,
       thinkingMode,
+      checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
     });
-  }, [agentId, apiFormats, agentFramework, selectedModel, thinkingMode]);
+  }, [agentId, apiFormats, agentFramework, selectedModel, thinkingMode, uiCapabilities.RunLifecycle?.CheckpointResumePreview]);
 
   const getEngine = useCallback((sessionId: string | null | undefined) => {
     const key = String(sessionId || 'new-session');
@@ -200,9 +202,35 @@ export function useRunAgent(ctx: RunAgentContext) {
     engine.disconnect();
   }, [currentSessionIdRef, getEngine]);
 
+  const resumeCheckpoint = useCallback(
+    (params: { sessionId: string; runId: string; checkpointId: string }) => {
+      const engine = getEngine(params.sessionId);
+      if (engine.stage !== 'idle') {
+        return false;
+      }
+
+      resetDispatcherState();
+      useUIStore.getState().setMobileActionsOpen(false);
+      useStreamingStore.getState().setSessionStreaming(params.sessionId, true);
+
+      const accepted = engine.resumeCheckpoint({
+        ...params,
+        onSettled: (sessionId) => {
+          onRunSettled?.(sessionId);
+          drainQueueRef.current();
+        },
+      });
+      if (!accepted) {
+        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
+      }
+      return accepted;
+    },
+    [getEngine, onRunSettled],
+  );
+
   const resetCompaction = useCallback(() => {
     resetDispatcherState();
   }, []);
 
-  return { submitDraft, stopGeneration, disconnectRun, resetCompaction };
+  return { submitDraft, stopGeneration, disconnectRun, resumeCheckpoint, resetCompaction };
 }

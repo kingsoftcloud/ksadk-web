@@ -3,7 +3,7 @@ import { normalizeCapabilities } from '../utils/capabilities.js';
 import type { RuntimeApiFormat } from '../types/api.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 
-type BootstrapState = {
+export type BootstrapState = {
   agentId: string;
   agentName: string;
   agentFramework: string;
@@ -13,7 +13,7 @@ type BootstrapState = {
   workspaceFiles: Record<string, unknown> | null;
 };
 
-type BootstrapActions = {
+export type BootstrapActions = {
   setAgentId: (id: string) => void;
   setAgentName: (name: string) => void;
   setAgentFramework: (framework: string) => void;
@@ -23,7 +23,9 @@ type BootstrapActions = {
   setWorkspaceFiles: (files: Record<string, unknown> | null) => void;
 };
 
-export const useBootstrapStore = create<BootstrapState & BootstrapActions>()((set) => ({
+export type BootstrapStore = BootstrapState & BootstrapActions;
+
+export const useBootstrapStore = create<BootstrapStore>()((set) => ({
   agentId: 'default-agent',
   agentName: 'Agent',
   agentFramework: '',

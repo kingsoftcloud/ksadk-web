@@ -1210,3 +1210,83 @@ test('session event utils restore persisted tool calls and results around assist
     ],
   );
 });
+
+test('session event utils settle running tool calls when invocation completed', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-tool-call',
+      EventType: 'tool_call',
+      InvocationId: 'inv-tool-terminal',
+      Content: { role: 'model', parts: [{ text: 'run_code' }] },
+      Metadata: {
+        tool_name: 'run_code',
+        tool_args: { code: 'print(42)' },
+      },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-tool-terminal',
+      Content: { role: 'model', parts: [{ text: 'done' }] },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-run-status',
+      EventType: 'run_status',
+      InvocationId: 'inv-tool-terminal',
+      Content: { status: 'completed' },
+      Timestamp: 3,
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].tools.run_code.status, 'completed');
+});
+
+test('session event utils restore explicit failed tool results as errors', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-tool-call',
+      EventType: 'tool_call',
+      InvocationId: 'inv-tool-error',
+      Content: { role: 'model', parts: [{ text: 'run_command' }] },
+      Metadata: {
+        tool_name: 'run_command',
+        tool_args: { command: 'python3 --version' },
+      },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-tool-result',
+      EventType: 'tool_result',
+      InvocationId: 'inv-tool-error',
+      Content: { role: 'tool', parts: [{ text: '{"ok":false}' }] },
+      Metadata: {
+        tool_name: 'run_command',
+        tool_output: {
+          ok: false,
+          error_type: 'SandboxException',
+          error_message: '404: template not found',
+        },
+      },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-tool-error',
+      Content: { role: 'model', parts: [{ text: 'Sandbox 返回了 404。' }] },
+      Timestamp: 3,
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].tools.run_command.status, 'error');
+});

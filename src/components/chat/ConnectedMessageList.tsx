@@ -4,10 +4,15 @@ import { useStreamingStore } from '../../stores/streaming.js';
 import { useMessageStore } from '../../stores/message.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useModelStore } from '../../stores/model.js';
+import { useCheckpointStore } from '../../stores/checkpoint.js';
 import { ChatMessageList } from './ChatMessageList';
 import { AttachmentPreview } from './AttachmentPreview';
 import { buildComposerContextIndicator } from '../../utils/context.js';
-import type { Message, MessageAttachment } from './types';
+import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
+import type { ModelStore } from '../../stores/model.js';
+import type { SessionStore } from '../../stores/session.js';
+import type { StreamingStore } from '../../stores/streaming.js';
+import type { UIStore } from '../../stores/ui.js';
 
 type ConnectedMessageListProps = {
   agentName: string;
@@ -17,6 +22,8 @@ type ConnectedMessageListProps = {
   onRespondToApproval: (options: { approvalRequestId: string; approve: boolean; previousResponseId?: string }) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  checkpointResumeEnabled?: boolean;
+  onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
 };
 
 export function ConnectedMessageList({
@@ -27,16 +34,19 @@ export function ConnectedMessageList({
   onRespondToApproval,
   onStopGeneration,
   onCancelRemote,
+  checkpointResumeEnabled = false,
+  onResumeCheckpoint,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
-  const currentSessionId = useSessionStore(s => s.currentSessionId);
-  const isStreaming = useStreamingStore(s => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
-  const activity = useStreamingStore(s => s.getSessionActivity(currentSessionId));
-  const input = useUIStore(s => s.input);
-  const availableModels = useModelStore(s => s.availableModels);
-  const selectedModel = useModelStore(s => s.selectedModel);
-  const previewAttachment = useUIStore(s => s.previewAttachment);
-  const previewImageSize = useUIStore(s => s.previewImageSize);
+  const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
+  const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
+  const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
+  const input = useUIStore((s: UIStore) => s.input);
+  const availableModels = useModelStore((s: ModelStore) => s.availableModels);
+  const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
+  const previewAttachment = useUIStore((s: UIStore) => s.previewAttachment);
+  const previewImageSize = useUIStore((s: UIStore) => s.previewImageSize);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const userDetachedFromBottomRef = useRef(false);
@@ -46,13 +56,13 @@ export function ConnectedMessageList({
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
   );
-  const contextIndicator = useMemo(
+  const contextIndicator = useMemo<ComposerContextIndicator>(
     () =>
       buildComposerContextIndicator({
         messages,
         draftInput: input,
         selectedModel: selectedModelMetadata,
-      }),
+      }) as ComposerContextIndicator,
     [input, messages, selectedModelMetadata],
   );
 
@@ -123,6 +133,8 @@ export function ConnectedMessageList({
         onSubmitFeedback={onSubmitFeedback}
         onStopGeneration={onStopGeneration}
         onCancelRemote={onCancelRemote}
+        checkpoints={checkpointResumeEnabled ? checkpoints : []}
+        onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}
       />
       <AttachmentPreview

@@ -8,7 +8,7 @@ type ToastEntry = {
   createdAt: number;
 };
 
-type UIState = {
+export type UIState = {
   sidebarOpen: boolean;
   mobileSidebarOpen: boolean;
   mobileActionsOpen: boolean;
@@ -23,7 +23,7 @@ type UIState = {
   toasts: ToastEntry[];
 };
 
-type UIActions = {
+export type UIActions = {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   toggleMobileSidebar: () => void;
@@ -46,7 +46,9 @@ function applyUpdater<T>(value: T, updater: T | ((prev: T) => T)): T {
   return typeof updater === 'function' ? (updater as (prev: T) => T)(value) : updater;
 }
 
-export const useUIStore = create<UIState & UIActions>()((set) => ({
+export type UIStore = UIState & UIActions;
+
+export const useUIStore = create<UIStore>()((set) => ({
   sidebarOpen: true,
   mobileSidebarOpen: false,
   mobileActionsOpen: false,

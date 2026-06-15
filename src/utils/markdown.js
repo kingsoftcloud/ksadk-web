@@ -83,6 +83,9 @@ function normalizeTableGroups(block) {
   const normalizedLines = [];
 
   for (const line of block.split('\n')) {
+    if (/^\s*\|\s*$/.test(line)) {
+      continue;
+    }
     const singlePipeProse = line.match(/^(\s*)\|\s*([^|]+)$/);
     if (singlePipeProse) {
       normalizedLines.push(`${singlePipeProse[1]}${singlePipeProse[2].trim()}`);

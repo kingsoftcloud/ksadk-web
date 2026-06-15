@@ -8,7 +8,7 @@ const mockCapabilities: UiCapabilities = {
   HostedChat: { Enabled: true, ApiFormats: ['responses'] },
   NativeDashboard: { Enabled: false },
   NativeTerminal: { Enabled: true, Mode: 'tui', Protocol: 'ks-terminal.v1', Path: '/_ksadk/terminal/ws' },
-  RunLifecycle: { Enabled: true, Resume: true, Abort: true },
+  RunLifecycle: { Enabled: true, Resume: true, Abort: true, Checkpoints: true, CheckpointResume: true },
   WorkspaceFiles: true,
   Thinking: true,
 };

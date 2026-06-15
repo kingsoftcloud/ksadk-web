@@ -2,6 +2,7 @@ import {
   createResponsesStreamState,
   normalizeResponsesStreamEvent,
 } from './responses-stream.js';
+import { isFailedToolOutput } from './tool-display.js';
 
 /**
  * @typedef {import('../components/chat/types.js').Message} Message
@@ -206,7 +207,7 @@ function buildResponsesOutputEnhancements(event) {
         ...(tools[action.name] || { name: action.name, args: '' }),
         name: action.name,
         output: action.output,
-        status: 'completed',
+        status: isFailedToolOutput(action.output) ? 'error' : 'completed',
       };
     }
   }
@@ -311,20 +312,23 @@ function toolMessageFromSessionEvent(event) {
   const existing = {
     name,
     args: '',
-    status: eventType === 'tool_result' ? 'completed' : 'running',
+    status: 'running',
   };
   const tool =
     eventType === 'tool_result'
-      ? {
-          ...existing,
-          output: stringifyToolPayload(
+      ? (() => {
+          const output = stringifyToolPayload(
             event.Metadata?.tool_output
               ?? event.Metadata?.output
               ?? event.Metadata?.result
               ?? textFromUnknown(event.Content?.parts),
-          ),
-          status: 'completed',
-        }
+          );
+          return {
+            ...existing,
+            output,
+            status: isFailedToolOutput(output) ? 'error' : 'completed',
+          };
+        })()
       : {
           ...existing,
           args: stringifyToolPayload(
@@ -357,6 +361,30 @@ function mergeToolMaps(first = {}, second = {}) {
     };
   }
   return merged;
+}
+
+function settleToolMapsForRunStatus(tools = {}, runStatus = '') {
+  const normalized = String(runStatus || '').trim().toLowerCase();
+  const nextStatus = normalized === 'completed'
+    ? 'completed'
+    : RUN_TERMINAL_STATUSES.has(normalized)
+      ? 'error'
+      : '';
+  if (!nextStatus) {
+    return tools;
+  }
+
+  let changed = false;
+  const settled = {};
+  for (const [name, tool] of Object.entries(tools || {})) {
+    if (tool?.status === 'running') {
+      changed = true;
+      settled[name] = { ...tool, status: nextStatus };
+    } else {
+      settled[name] = tool;
+    }
+  }
+  return changed ? settled : tools;
 }
 
 function mergeMessageMetadata(existing, incoming) {
@@ -644,7 +672,10 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     pendingToolsByInvocation.delete(normalizedInvocationId);
     return {
-      tools: pendingTools.tools,
+      tools: settleToolMapsForRunStatus(
+        pendingTools.tools,
+        latestRunStatusByInvocation.get(normalizedInvocationId),
+      ),
     };
   };
 
@@ -739,8 +770,14 @@ export function buildMessagesFromSessionEvents(events = []) {
   }
 
   flushPendingReasoning();
-  for (const pendingTools of pendingToolsByInvocation.values()) {
-    pushMessage(pendingTools);
+  for (const [invocationId, pendingTools] of pendingToolsByInvocation.entries()) {
+    pushMessage({
+      ...pendingTools,
+      tools: settleToolMapsForRunStatus(
+        pendingTools.tools,
+        latestRunStatusByInvocation.get(invocationId),
+      ),
+    });
   }
   for (const [invocationId, status] of latestRunStatusByInvocation.entries()) {
     if (

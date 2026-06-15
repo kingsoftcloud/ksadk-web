@@ -13,7 +13,7 @@ export type RunActivity = {
   eventCount: number;
 };
 
-type StreamingState = {
+export type StreamingState = {
   isStreaming: boolean;
   currentRunId: string;
   stopRequested: boolean;
@@ -21,7 +21,7 @@ type StreamingState = {
   sessionActivities: Record<string, RunActivity>;
 };
 
-type StreamingActions = {
+export type StreamingActions = {
   setStreaming: (streaming: boolean) => void;
   setSessionStreaming: (sessionId: string | null | undefined, streaming: boolean) => void;
   isSessionStreaming: (sessionId: string | null | undefined) => boolean;
@@ -37,6 +37,7 @@ type StreamingActions = {
   }) => void;
   updateActivity: (activity: {
     sessionId?: string | null;
+    source?: RunActivity['source'];
     status?: RunActivityStatus;
     phase?: string;
     detail?: string;
@@ -49,7 +50,13 @@ type StreamingActions = {
   resetRun: () => void;
 };
 
-export const useStreamingStore = create<StreamingState & StreamingActions>()((set) => ({
+export type StreamingStore = StreamingState & StreamingActions;
+
+const isActivityActive = (activity: RunActivity | null | undefined): boolean => (
+  Boolean(activity && activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped')
+);
+
+export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   isStreaming: false,
   currentRunId: '',
   stopRequested: false,
@@ -62,24 +69,24 @@ export const useStreamingStore = create<StreamingState & StreamingActions>()((se
     if (!streaming) {
       const current = state.sessionActivities[key];
       if (!current) {
-        return { isStreaming: Object.values(state.sessionActivities).some((activity) => activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped') };
+        return { isStreaming: Object.values(state.sessionActivities).some(isActivityActive) };
       }
       return {
         isStreaming: Object.entries(state.sessionActivities).some(([id, activity]) => (
-          id !== key && activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped'
+          id !== key && isActivityActive(activity)
         )),
       };
     }
     return { isStreaming: true };
   }),
   isSessionStreaming: (sessionId) => {
-    const activity = useStreamingStore.getState().getSessionActivity(sessionId);
-    return Boolean(activity && activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped');
+    const activity = get().getSessionActivity(sessionId);
+    return isActivityActive(activity);
   },
   getSessionActivity: (sessionId) => {
     const key = String(sessionId || '');
     if (!key) return null;
-    return useStreamingStore.getState().sessionActivities[key] || null;
+    return get().sessionActivities[key] || null;
   },
   setCurrentRunId: (runId) => set({ currentRunId: runId }),
   requestStop: () => set({ stopRequested: true }),
@@ -102,6 +109,7 @@ export const useStreamingStore = create<StreamingState & StreamingActions>()((se
     const nextActivity = current
       ? {
           ...current,
+          source: activity.source || current.source,
           status: activity.status || current.status,
           phase: activity.phase || current.phase,
           detail: activity.detail === undefined ? current.detail : activity.detail,
@@ -109,7 +117,7 @@ export const useStreamingStore = create<StreamingState & StreamingActions>()((se
           eventCount: current.eventCount + (activity.countEvent === false ? 0 : 1),
         }
       : {
-          source: 'run' as const,
+          source: activity.source || 'run' as const,
           status: activity.status || 'running',
           phase: activity.phase || '正在运行',
           detail: activity.detail,

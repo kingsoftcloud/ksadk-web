@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
 import { useUIStore } from '../stores/ui.js';
+import { useCheckpointStore } from '../stores/checkpoint.js';
+import { useBootstrapStore } from '../stores/bootstrap.js';
 import { CancelledError } from '../api/client.js';
 import { findActiveRunIds } from '../utils/run-state.js';
 import {
@@ -10,6 +12,7 @@ import {
   maxSeqIdFromEvents,
   mergeSessionEventRecords,
 } from '../utils/session-events.js';
+import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
 import { upsertSessions } from '../utils/session-helpers.js';
@@ -19,6 +22,24 @@ import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 
 const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
+
+function terminalActivityForRunEvent(event: SessionEventRecord): {
+  status: 'completed' | 'failed' | 'stopped';
+  phase: string;
+} | null {
+  if (event.EventType !== 'run_status') return null;
+  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  if (rawStatus === 'completed') {
+    return { status: 'completed', phase: '后台长任务已完成' };
+  }
+  if (rawStatus === 'cancelled' || rawStatus === 'canceled' || rawStatus === 'aborted') {
+    return { status: 'stopped', phase: '后台长任务已取消' };
+  }
+  if (rawStatus === 'failed' || rawStatus === 'error') {
+    return { status: 'failed', phase: '后台长任务失败' };
+  }
+  return null;
+}
 
 type SessionLifecycleContext = {
   agentId: string;
@@ -142,6 +163,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         let mergedEvents: SessionEventRecord[] = Array.isArray(options.initialEvents)
           ? options.initialEvents
           : [];
+        useStreamingStore.getState().setCurrentRunId(options.invocationId);
+        useStreamingStore.getState().updateActivity({
+          sessionId: options.sessionId,
+          status: 'running',
+          phase: '后台长任务运行中',
+          detail: options.invocationId,
+          countEvent: false,
+        });
 
         while (!terminalStatusSeen) {
           const { value, done } = await reader.read();
@@ -169,6 +198,19 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               mergedEvents = mergeSessionEventRecords(mergedEvents, [event]) as SessionEventRecord[];
               terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
               shouldReloadSession = shouldReloadSession || terminalStatusSeen;
+              if (event.EventType === 'run_checkpoint') {
+                useCheckpointStore.getState().upsertSessionCheckpoint(options.sessionId, event);
+              }
+              const terminalActivity = terminalActivityForRunEvent(event);
+              if (terminalActivity) {
+                useStreamingStore.getState().updateActivity({
+                  sessionId: options.sessionId,
+                  status: terminalActivity.status,
+                  phase: terminalActivity.phase,
+                  detail: options.invocationId,
+                  countEvent: false,
+                });
+              }
               const history = buildMessagesFromSessionEvents(mergedEvents);
               useMessageStore.getState().setMessages(history);
             } catch (error) {
@@ -186,6 +228,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (runSubscriptionAbortRef.current === controller) {
           runSubscriptionAbortRef.current = null;
         }
+        useStreamingStore.getState().setCurrentRunId('');
         if (shouldReloadSession && currentSessionIdRef.current === options.sessionId) {
           void loadSessionRef.current?.(options.sessionId);
         }
@@ -207,6 +250,33 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       try {
         const data = await api.listSessionEvents(sessionId);
+        const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
+        if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
+          void api.listSessionCheckpoints({
+            agentId: agentIdRef.current,
+            sessionId,
+          }).then((checkpointData) => {
+            useCheckpointStore
+              .getState()
+              .setSessionCheckpoints(sessionId, checkpointData.Checkpoints || []);
+          }).catch((error) => {
+            console.warn('[SessionLifecycle] checkpoint load failed:', error);
+            useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
+          });
+          void api.listToolReceipts({
+            agentId: agentIdRef.current,
+            sessionId,
+          }).then((receiptData) => {
+            useCheckpointStore
+              .getState()
+              .setSessionToolReceipts(sessionId, receiptData.ToolReceipts || []);
+          }).catch((error) => {
+            console.warn('[SessionLifecycle] tool receipt load failed:', error);
+            useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
+          });
+        } else {
+          useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
+        }
         const eventsData = data as { Events?: SessionEventRecord[] };
         if (eventsData?.Events) {
           const events = eventsData.Events;
@@ -219,8 +289,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           });
           const lastSeqId = maxSeqIdFromEvents(events);
           if (
-            uiCapabilities.RunLifecycle.Enabled &&
-            uiCapabilities.RunLifecycle.Resume &&
+            runtimeCapabilities.RunLifecycle.Enabled &&
+            runtimeCapabilities.RunLifecycle.Resume &&
             activeRuns[0]
           ) {
             void subscribeRunEvents({
@@ -232,6 +302,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           }
         } else {
           useMessageStore.getState().setMessages([]);
+          useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
+          useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
         }
       } catch (error) {
         console.error('Failed to load session events:', error);
@@ -244,6 +316,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       resetCompaction,
       subscribeRunEvents,
       uiCapabilities.RunLifecycle.Enabled,
+      uiCapabilities.RunLifecycle.Checkpoints,
       uiCapabilities.RunLifecycle.Resume,
     ],
   );
@@ -268,6 +341,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           currentSessionIdRef.current = null;
           useSessionStore.getState().setCurrentSessionId(null);
           useMessageStore.getState().setMessages([]);
+          useCheckpointStore.getState().clearSessionCheckpoints();
         }
       } catch (error) {
         if (error instanceof CancelledError) return;
@@ -297,6 +371,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         currentSessionIdRef.current = newId;
         useSessionStore.getState().setCurrentSessionId(newId);
         useMessageStore.getState().setMessages([]);
+        useCheckpointStore.getState().setSessionCheckpoints(newId, []);
+        useCheckpointStore.getState().setSessionToolReceipts(newId, []);
         if (isMobile) {
           useUIStore.getState().setMobileSidebarOpen(false);
           useUIStore.getState().setMobileActionsOpen(false);
@@ -317,6 +393,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (currentSessionIdRef.current === sessionId) {
           currentSessionIdRef.current = null;
           useMessageStore.getState().setMessages([]);
+          useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
           useSessionStore.getState().setCurrentSessionId(null);
           void fetchSessions(agentId);
         }

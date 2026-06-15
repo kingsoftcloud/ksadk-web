@@ -3,6 +3,7 @@ import { postJsonAction, streamGetAction } from '../../api/client.js';
 import { listSessions as listSessionsApi, createSession as createSessionApi, deleteSession as deleteSessionApi } from '../../api/session.js';
 import { listSessionEvents as listSessionEventsApi } from '../../api/events.js';
 import { runAgent as runAgentApi } from '../../api/run.js';
+import { listSessionCheckpoints as listSessionCheckpointsApi, listToolReceipts as listToolReceiptsApi, previewCheckpointResume as previewCheckpointResumeApi, resumeRun as resumeRunApi } from '../../api/checkpoints.js';
 import { listWorkspaceFiles as listWorkspaceFilesApi, addWorkspaceFile as addWorkspaceFileApi, deleteWorkspaceFile as deleteWorkspaceFileApi, getWorkspaceFileContent as getFileContentApi } from '../../api/workspace.js';
 import { listAgentModels as listAgentModelsApi } from '../../api/model.js';
 import { getAgentUiBootstrap as getBootstrapApi } from '../../api/bootstrap.js';
@@ -29,8 +30,36 @@ export class ApiFacadeImpl implements ApiFacade {
     return listSessionEventsApi(sessionId) as Promise<{ Events: unknown[] }>;
   }
 
+  async listSessionCheckpoints(
+    params: { agentId: string; sessionId: string; runId?: string },
+    opts?: { signal?: AbortSignal },
+  ) {
+    return listSessionCheckpointsApi(params, opts) as Promise<{ Checkpoints: unknown[] }>;
+  }
+
+  async previewCheckpointResume(
+    params: { agentId: string; sessionId: string; runId: string; checkpointId: string },
+    opts?: { signal?: AbortSignal },
+  ) {
+    return previewCheckpointResumeApi(params, opts) as Promise<{ Preview: unknown }>;
+  }
+
+  async listToolReceipts(
+    params: { agentId: string; sessionId: string; runId?: string; checkpointId?: string },
+    opts?: { signal?: AbortSignal },
+  ) {
+    return listToolReceiptsApi(params, opts) as Promise<{ ToolReceipts: unknown[] }>;
+  }
+
   async runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }) {
     return runAgentApi(body, opts);
+  }
+
+  async resumeRun(
+    params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string },
+    opts?: { signal?: AbortSignal },
+  ) {
+    return resumeRunApi(params, opts);
   }
 
   async subscribeRunEvents(

@@ -18,3 +18,16 @@ test('tool display formats nested JSON strings and decodes Chinese escapes', asy
     '[\n  {\n    "type": "input_text",\n    "text": {\n      "success": true,\n      "analysis": "根据截图显示"\n    }\n  }\n]',
   );
 });
+
+test('tool display marks explicit tool error payloads as failed', async () => {
+  const toolDisplay = await loadToolDisplayUtils();
+
+  assert.ok(toolDisplay, 'expected tool display helpers to exist');
+  assert.equal(
+    toolDisplay.isFailedToolOutput(
+      '{"ok":false,"error_type":"SandboxException","error_message":"404: template not found"}',
+    ),
+    true,
+  );
+  assert.equal(toolDisplay.isFailedToolOutput('{"ok":true,"stdout":"42"}'), false);
+});

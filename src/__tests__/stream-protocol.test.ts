@@ -22,4 +22,13 @@ describe('StreamProtocol factory', () => {
     const state = protocol.createState();
     expect(typeof state).toBe('object');
   });
+
+  it('normalizes response.cancelled as a terminal cancelled action', () => {
+    const protocol = createProtocol('responses');
+    const state = protocol.createState();
+
+    expect(protocol.parse({ eventName: 'response.cancelled', data: { status: 'cancelled' } }, state)).toEqual([
+      { type: 'terminal', status: 'cancelled' },
+    ]);
+  });
 });

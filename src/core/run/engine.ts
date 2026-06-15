@@ -17,6 +17,14 @@ type StreamConsumeResult = {
   terminalStatus?: string;
 };
 
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted']);
+
+function terminalStatusFromSessionEvent(event: SessionEventRecord): string | null {
+  if (event.EventType !== 'run_status') return null;
+  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  return TERMINAL_RUN_STATUSES.has(rawStatus) ? rawStatus : null;
+}
+
 function activityForTransportEvent(eventName: string, data: unknown): { phase: string; status?: 'running' | 'waiting' | 'completed' | 'failed'; detail?: string } | null {
   const eventType = String((data as Record<string, unknown> | null)?.type || eventName || '').trim();
   if (eventType === 'response.created') {
@@ -57,6 +65,14 @@ function activityForTransportEvent(eventName: string, data: unknown): { phase: s
     return { phase: '运行中断', status: 'failed' };
   }
   return null;
+}
+
+function createInvocationId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return `run_${cryptoApi.randomUUID()}`;
+  }
+  return `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 const VALID_TRANSITIONS: Record<RunStage, RunStage[]> = {
@@ -163,7 +179,17 @@ export class RunEngineImpl implements RunEngine {
         const protocol = createProtocol(apiFormat);
         const protocolState = protocol.createState();
 
-        const body = this.buildRequestBody(sessionId, apiFormat, isResponsesResume, draft, fileParts);
+        const invocationId = createInvocationId();
+        useStreamingStore.getState().setCurrentRunId(invocationId);
+
+        const body = this.buildRequestBody(
+          sessionId,
+          apiFormat,
+          isResponsesResume,
+          draft,
+          fileParts,
+          invocationId,
+        );
 
         const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
         this.setStage('streaming');
@@ -188,6 +214,19 @@ export class RunEngineImpl implements RunEngine {
             const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId);
             streamResult.terminalStatus = retryResult.terminalStatus;
           }
+        }
+
+        if (streamResult.terminalStatus === 'cancelled') {
+          this.setStage('stopping');
+          useStreamingStore.getState().stopActivity('运行时已取消本次执行。');
+          this.emit({
+            type: 'activity',
+            phase: '运行已取消',
+            status: 'stopped',
+            countEvent: false,
+          });
+          this.setStage('cancelled');
+          return;
         }
 
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
@@ -234,6 +273,7 @@ export class RunEngineImpl implements RunEngine {
     this.setStage('stopping');
     this.abortController?.abort();
     useStreamingStore.getState().stopActivity();
+    useStreamingStore.getState().setCurrentRunId('');
     this.setStage('cancelled');
     this.emit({
       type: 'system_message',
@@ -269,10 +309,12 @@ export class RunEngineImpl implements RunEngine {
     this.abortController?.abort();
     this.abortController = new AbortController();
     this.activeSessionId = params.sessionId;
+    useStreamingStore.getState().setCurrentRunId(params.invocationId);
     this.setStage('connecting');
     this.emit({ type: 'activity', phase: '恢复运行事件订阅', status: 'connecting', countEvent: false });
 
     (async () => {
+      let terminalStatus: string | null = null;
       try {
         const stream = await this.api.subscribeRunEvents(
           {
@@ -304,12 +346,19 @@ export class RunEngineImpl implements RunEngine {
               if (event.eventName === '__done__') continue;
               this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
               this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
+              terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
             }
           }
         }
 
         this.setStage('completing');
-        this.emit({ type: 'activity', phase: '恢复订阅结束', status: 'completed', countEvent: false });
+        if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') {
+          this.emit({ type: 'activity', phase: '后台长任务已取消', status: 'stopped', countEvent: false });
+        } else if (terminalStatus === 'failed' || terminalStatus === 'error') {
+          this.emit({ type: 'activity', phase: '后台长任务失败', status: 'failed', countEvent: false });
+        } else {
+          this.emit({ type: 'activity', phase: '后台长任务已完成', status: 'completed', countEvent: false });
+        }
         this.emit({ type: 'stream_ended' });
         params.onSessionReloadNeeded?.();
       } catch (error) {
@@ -319,10 +368,132 @@ export class RunEngineImpl implements RunEngine {
         }
       } finally {
         useStreamingStore.getState().setStreaming(false);
+        useStreamingStore.getState().setCurrentRunId('');
         this.setStage('idle');
         this.activeSessionId = null;
       }
     })();
+  }
+
+  resumeCheckpoint(params: {
+    sessionId: string;
+    runId: string;
+    checkpointId: string;
+    resumeAttemptId?: string;
+    onSettled?: (sessionId: string | null) => void;
+  }): boolean {
+    if (this._stage !== 'idle') return false;
+
+    this.abortController = new AbortController();
+    this.activeSessionId = params.sessionId;
+    const invocationId = createInvocationId();
+    useStreamingStore.getState().setCurrentRunId(invocationId);
+
+    (async () => {
+      try {
+        this.setStage('connecting');
+        this.emit({
+          type: 'activity',
+          source: 'restore',
+          phase: '从 checkpoint 恢复运行',
+          status: 'connecting',
+          countEvent: false,
+        });
+        if (this.config.checkpointResumePreviewEnabled) {
+          try {
+            const preview = await this.api.previewCheckpointResume(
+              {
+                agentId: this.config.agentId,
+                sessionId: params.sessionId,
+                runId: params.runId,
+                checkpointId: params.checkpointId,
+              },
+              { signal: this.abortController?.signal },
+            );
+            const risk = ((preview.Preview as { Risk?: { Level?: unknown } } | undefined)?.Risk?.Level || 'unknown');
+            this.emit({
+              type: 'activity',
+              source: 'restore',
+              phase: `恢复预览完成：${String(risk)} 风险`,
+              status: 'waiting',
+              countEvent: false,
+            });
+          } catch (error) {
+            console.warn('[RunEngine] checkpoint resume preview failed:', error);
+          }
+        }
+        const stream = await this.api.resumeRun(
+          {
+            agentId: this.config.agentId,
+            sessionId: params.sessionId,
+            runId: params.runId,
+            checkpointId: params.checkpointId,
+            resumeAttemptId: params.resumeAttemptId,
+            invocationId,
+          },
+          { signal: this.abortController?.signal },
+        );
+        const protocol = createProtocol('responses');
+        const protocolState = protocol.createState();
+        this.setStage('streaming');
+        this.emit({
+          type: 'activity',
+          source: 'restore',
+          phase: '等待恢复输出',
+          status: 'waiting',
+          countEvent: false,
+        });
+        const assistantMessageId = `msg-${Date.now()}`;
+        const streamResult = await this.consumeStream(
+          stream,
+          protocol,
+          protocolState,
+          assistantMessageId,
+        );
+        if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
+          if (streamResult.terminalStatus === 'cancelled') {
+            this.setStage('stopping');
+            useStreamingStore.getState().stopActivity('运行时已取消本次恢复。');
+            this.emit({
+              type: 'activity',
+              source: 'restore',
+              phase: '恢复已取消',
+              status: 'stopped',
+              countEvent: false,
+            });
+            this.setStage('cancelled');
+            return;
+          }
+          this.setStage('error');
+          this.emit({
+            type: 'activity',
+            source: 'restore',
+            phase: streamResult.terminalStatus === 'incomplete' ? '恢复中断' : '恢复失败',
+            status: 'failed',
+            countEvent: false,
+          });
+          return;
+        }
+        this.setStage('completing');
+        this.emit({ type: 'activity', source: 'restore', phase: '恢复完成', status: 'completed', countEvent: false });
+        this.emit({ type: 'stream_ended' });
+      } catch (error) {
+        const isAbort = error instanceof DOMException && error.name === 'AbortError';
+        if (!isAbort) {
+          console.error('[RunEngine] resumeCheckpoint() error:', error);
+          this.setStage('error');
+          this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
+        }
+      } finally {
+        useStreamingStore.getState().setStreaming(false);
+        useStreamingStore.getState().setCurrentRunId('');
+        this.setStage('idle');
+        this.activeSessionId = null;
+        params.onSettled?.(params.sessionId);
+      }
+    })();
+
+    return true;
   }
 
   private async createSession(draft: {
@@ -401,10 +572,12 @@ export class RunEngineImpl implements RunEngine {
     isResponsesResume: boolean,
     draft: { text: string; responsesInput?: unknown; previousResponseId?: string },
     fileParts: Array<Record<string, unknown>>,
+    invocationId: string,
   ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       AgentId: this.config.agentId,
       SessionId: sessionId,
+      InvocationId: invocationId,
       Stream: true,
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,

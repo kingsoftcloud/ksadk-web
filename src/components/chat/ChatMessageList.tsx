@@ -21,8 +21,10 @@ import { MessageMarkdown } from '../MessageMarkdown';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
+import { formatDate } from '../../utils/session-helpers.js';
 
 import type { RunActivity } from '../../stores/streaming.js';
+import type { SessionCheckpoint } from '../../stores/checkpoint.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
 
 type ChatMessageListProps = {
@@ -46,6 +48,8 @@ type ChatMessageListProps = {
   onDeleteFeedback: (message: Message) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  checkpoints?: SessionCheckpoint[];
+  onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
 };
 
@@ -164,6 +168,8 @@ function RunActivityBanner({
             {onCancelRemote ? (
               <button
                 type="button"
+                aria-label="取消运行并保留恢复点"
+                title="取消运行并保留最近 checkpoint"
                 onClick={onCancelRemote}
                 className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:text-slate-500 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
               >
@@ -190,6 +196,180 @@ function EmptyState({ agentName }: { agentName: string }) {
       <p className="mt-2 text-sm text-slate-500">
         我是 {agentName}，由 Ksyun AgentEngine 驱动
       </p>
+    </div>
+  );
+}
+
+function formatCheckpointPhase(phase?: string) {
+  const normalized = String(phase || '').trim();
+  if (!normalized) return '保存运行状态';
+
+  const labels: Record<string, string> = {
+    stream: '流式执行中',
+    running: '运行中',
+    interrupted: '已中断',
+    cancelled: '已取消',
+    completed: '已完成',
+    before_tool: '工具执行前',
+    after_tool: '工具执行后',
+  };
+
+  return labels[normalized] || normalized;
+}
+
+function checkpointStatusLabel(status?: string) {
+  const normalized = String(status || '').trim().toLowerCase();
+  const labels: Record<string, string> = {
+    completed: '已完成',
+    checkpointed: '已保存',
+    running: '执行中',
+    ready_to_resume: '可恢复',
+    cancelled: '已取消',
+    canceled: '已取消',
+    failed: '失败',
+    pending: '等待中',
+  };
+  return labels[normalized] || '';
+}
+
+function checkpointStepLabel(index: number, checkpoint: SessionCheckpoint) {
+  if (checkpoint.stage) return checkpoint.stage;
+  if (checkpoint.phase && !['stream', 'running', 'interrupted', 'cancelled', 'completed', 'before_tool', 'after_tool'].includes(checkpoint.phase)) {
+    return checkpoint.phase;
+  }
+  return index === 0 ? '最新状态快照' : `状态快照 #${index + 1}`;
+}
+
+function checkpointStageBadge(index: number, total: number) {
+  const current = Math.max(1, total - index);
+  return `第 ${current}/${Math.max(1, total)} 阶段`;
+}
+
+function shortIdentifier(value?: string, prefix = 8, suffix = 4) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text.length <= prefix + suffix + 1) return text;
+  return `${text.slice(0, prefix)}...${text.slice(-suffix)}`;
+}
+
+function CheckpointPanel({
+  checkpoints,
+  isStreaming,
+  onResumeCheckpoint,
+}: {
+  checkpoints: SessionCheckpoint[];
+  isStreaming: boolean;
+  onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
+}) {
+  if (!checkpoints.length || !onResumeCheckpoint) {
+    return null;
+  }
+
+  const completedCount = checkpoints.filter(checkpoint => {
+    const status = String(checkpoint.status || '').trim().toLowerCase();
+    return status === 'completed' || status === 'checkpointed' || status === 'ready_to_resume';
+  }).length;
+
+  return (
+    <div className="mb-4 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600 shadow-sm shadow-slate-900/[0.04] dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium text-slate-800 dark:text-slate-100">会话恢复区</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">选择 LangGraph 状态快照，从对应图状态继续</div>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-1.5">
+          {completedCount > 0 ? (
+            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-950/25 dark:text-emerald-300 dark:ring-emerald-900/50">
+              已捕获 {completedCount} 个快照
+            </span>
+          ) : null}
+          <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-950/40 dark:text-slate-300 dark:ring-slate-700">
+            共 {checkpoints.length} 个
+          </span>
+        </div>
+      </div>
+      <div className="custom-scrollbar flex max-h-[24rem] flex-col gap-1.5 overflow-y-auto pr-1">
+        {checkpoints.map((checkpoint, index) => {
+          const disabled = isStreaming || !checkpoint.sessionId;
+          const checkpointLabel = checkpointStageBadge(index, checkpoints.length);
+          const stepLabel = checkpointStepLabel(index, checkpoint);
+          const phaseLabel = formatCheckpointPhase(checkpoint.phase);
+          const statusLabel = checkpointStatusLabel(checkpoint.status) || (index === 0 ? '推荐' : '');
+          const checkpointShortId = shortIdentifier(checkpoint.checkpointId);
+          const runShortId = shortIdentifier(checkpoint.runId, 10, 4);
+          const debugTitle = [
+            checkpoint.timestamp ? `时间：${formatDate(checkpoint.timestamp)}` : '',
+            checkpointShortId ? `checkpoint：${checkpoint.checkpointId}` : '',
+            runShortId ? `run：${checkpoint.runId}` : '',
+          ].filter(Boolean).join('\n');
+          return (
+            <div
+              key={checkpoint.checkpointId}
+              className="grid min-h-[4.35rem] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-slate-200/70 bg-slate-50/70 px-2.5 py-2 transition hover:border-blue-200 hover:bg-blue-50/40 dark:border-slate-700/70 dark:bg-slate-950/30 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+              title={debugTitle || undefined}
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-emerald-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-emerald-300 dark:ring-slate-700">
+                <Check className="h-3.5 w-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex-shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+                    {checkpointLabel}
+                  </span>
+                  {index === 0 ? (
+                    <span className="flex-shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-blue-600 ring-1 ring-blue-100 dark:bg-slate-950/40 dark:text-blue-300 dark:ring-blue-900/50">
+                      最新
+                    </span>
+                  ) : null}
+                  {statusLabel ? (
+                    <span className="flex-shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-300">
+                      {statusLabel}
+                    </span>
+                  ) : null}
+                  <span className="truncate font-medium text-slate-800 dark:text-slate-100">{stepLabel}</span>
+                </div>
+                {checkpoint.summary ? (
+                  <div className="mt-1 truncate text-[12px] leading-5 text-slate-600 dark:text-slate-300">
+                    {checkpoint.summary}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-slate-400">
+                    {phaseLabel}
+                  </div>
+                )}
+                <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-slate-400">
+                  {checkpoint.nextAction ? (
+                    <span className="truncate text-blue-600 dark:text-blue-300">
+                      恢复后阶段：{checkpoint.nextAction}
+                    </span>
+                  ) : (
+                    <span className="truncate">{phaseLabel}</span>
+                  )}
+                  {checkpoint.timestamp ? <span className="hidden flex-shrink-0 sm:inline">{formatDate(checkpoint.timestamp)}</span> : null}
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label={`恢复到${checkpointLabel}`}
+                disabled={disabled}
+                title={disabled ? '当前会话正在运行，暂不能恢复' : '从该 LangGraph checkpoint 恢复'}
+                onClick={() => {
+                  if (!checkpoint.sessionId) return;
+                  onResumeCheckpoint({
+                    sessionId: checkpoint.sessionId,
+                    runId: checkpoint.runId,
+                    checkpointId: checkpoint.checkpointId,
+                  });
+                }}
+                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+              >
+                <RefreshCcw className="h-3 w-3" />
+                恢复
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -308,7 +488,7 @@ function ToolPayloadBlock({
   value,
 }: {
   label: string;
-  tone: 'input' | 'output';
+  tone: 'input' | 'output' | 'error';
   value: string;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -333,7 +513,11 @@ function ToolPayloadBlock({
         <div
           className={cn(
             'text-xs font-semibold uppercase',
-            tone === 'input' ? 'text-blue-500' : 'text-emerald-500',
+            tone === 'input'
+              ? 'text-blue-500'
+              : tone === 'error'
+                ? 'text-rose-500'
+                : 'text-emerald-500',
           )}
         >
           {label}
@@ -554,6 +738,8 @@ function ChatMessage({
                 'group/details mb-3 rounded-xl border px-3 py-2.5 text-sm transition-all',
                 tool.status === 'paused'
                   ? 'border-amber-200 bg-amber-50/50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200'
+                  : tool.status === 'error'
+                    ? 'border-rose-200 bg-rose-50/40 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200'
                   : 'border-blue-200 bg-blue-50/30 text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-400',
               )}
             >
@@ -563,16 +749,29 @@ function ChatMessage({
                     <RefreshCcw className="h-4 w-4 animate-spin text-blue-500" />
                   ) : tool.status === 'paused' ? (
                     <ShieldCheck className="h-4 w-4 text-amber-500" />
+                  ) : tool.status === 'error' ? (
+                    <XCircle className="h-4 w-4 text-rose-500" />
                   ) : (
                     <Check className="h-4 w-4 text-emerald-500" />
                   )}
-                  <span>{tool.status === 'paused' ? '等待审批：' : '工具调用：'}{tool.name}</span>
+                  <span>
+                    {tool.status === 'paused'
+                      ? '等待审批：'
+                      : tool.status === 'error'
+                        ? '工具调用失败：'
+                        : '工具调用：'}
+                    {tool.name}
+                  </span>
                 </div>
               </summary>
               <div
                 className={cn(
                   'mx-1 mt-3 flex flex-col gap-3 border-l-2 py-1 pl-4 font-mono text-[13px] leading-relaxed opacity-90',
-                  tool.status === 'paused' ? 'border-amber-200 dark:border-amber-800' : 'border-blue-200 dark:border-blue-800',
+                  tool.status === 'paused'
+                    ? 'border-amber-200 dark:border-amber-800'
+                    : tool.status === 'error'
+                      ? 'border-rose-200 dark:border-rose-800'
+                      : 'border-blue-200 dark:border-blue-800',
                 )}
               >
                 {tool.status === 'paused' && tool.approvalRequestId ? (
@@ -621,7 +820,11 @@ function ChatMessage({
                   <ToolPayloadBlock label="入参 (Args)" tone="input" value={tool.args} />
                 ) : null}
                 {tool.output ? (
-                  <ToolPayloadBlock label="输出 (Output)" tone="output" value={tool.output} />
+                  <ToolPayloadBlock
+                    label="输出 (Output)"
+                    tone={tool.status === 'error' ? 'error' : 'output'}
+                    value={tool.output}
+                  />
                 ) : null}
               </div>
             </details>
@@ -660,6 +863,8 @@ export function ChatMessageList({
   onSubmitFeedback,
   onStopGeneration,
   onCancelRemote,
+  checkpoints = [],
+  onResumeCheckpoint,
   scrollRef,
 }: ChatMessageListProps) {
   return (
@@ -671,6 +876,11 @@ export function ChatMessageList({
       )}
     >
       <div className={cn('mx-auto flex w-full max-w-[64rem] flex-col', activity ? 'pb-10 sm:pb-10' : 'pb-6 sm:pb-8')}>
+        <CheckpointPanel
+          checkpoints={checkpoints}
+          isStreaming={isStreaming}
+          onResumeCheckpoint={onResumeCheckpoint}
+        />
         {messages.length === 0 ? (
         <EmptyState agentName={agentName} />
         ) : (

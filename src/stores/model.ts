@@ -3,7 +3,7 @@ import type { ModelCatalogItem } from '../components/chat/types';
 
 export type ThinkingMode = 'auto' | 'enabled' | 'disabled';
 
-type ModelState = {
+export type ModelState = {
   availableModels: ModelCatalogItem[];
   selectedModel: string;
   modelSource: string;
@@ -11,7 +11,7 @@ type ModelState = {
   thinkingMode: ThinkingMode;
 };
 
-type ModelActions = {
+export type ModelActions = {
   upsertModels: (incoming: ModelCatalogItem[]) => void;
   setSelectedModel: (id: string) => void;
   setModelSource: (source: string) => void;
@@ -32,7 +32,9 @@ function upsertModelOptions(current: ModelCatalogItem[], incoming: ModelCatalogI
   return Array.from(merged.values()).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export const useModelStore = create<ModelState & ModelActions>()((set) => ({
+export type ModelStore = ModelState & ModelActions;
+
+export const useModelStore = create<ModelStore>()((set) => ({
   availableModels: [],
   selectedModel: '',
   modelSource: '',
