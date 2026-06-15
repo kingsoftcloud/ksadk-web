@@ -41,6 +41,7 @@
     "dist-lib",
     "dist-ksadk",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "package.json"
   ],

@@ -436,6 +436,29 @@ describe('RunEngineImpl', () => {
     expect(messages[0].tools?.run_code.status).toBe('completed');
   });
 
+  it('marks explicit failed tool result payloads as tool errors', () => {
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    dispatchRunEventToStores({
+      type: 'tool_upsert',
+      messageId: 'assistant-1',
+      name: 'run_code',
+      args: '{"code":"print(42)"}',
+      status: 'running',
+      sessionId: 'session-live',
+    });
+
+    dispatchRunEventToStores({
+      type: 'tool_result',
+      messageId: 'assistant-1',
+      name: 'run_code',
+      output: '{"ok":false,"error_type":"SandboxException","error_message":"404: template not found"}',
+      sessionId: 'session-live',
+    });
+
+    const messages = useMessageStore.getState().messages;
+    expect(messages[0].tools?.run_code.status).toBe('error');
+  });
+
   it('stores checkpoint records delivered by a background run subscription', () => {
     useSessionStore.getState().setCurrentSessionId('session-live');
 

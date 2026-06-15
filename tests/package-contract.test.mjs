@@ -29,6 +29,7 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.ok(packageJson.files.includes('dist-lib'));
   assert.ok(packageJson.files.includes('dist-ksadk'));
   assert.ok(packageJson.files.includes('README.md'));
+  assert.ok(packageJson.files.includes('CHANGELOG.md'));
   assert.ok(packageJson.files.includes('LICENSE'));
 });
 

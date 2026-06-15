@@ -488,7 +488,7 @@ function ToolPayloadBlock({
   value,
 }: {
   label: string;
-  tone: 'input' | 'output';
+  tone: 'input' | 'output' | 'error';
   value: string;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -513,7 +513,11 @@ function ToolPayloadBlock({
         <div
           className={cn(
             'text-xs font-semibold uppercase',
-            tone === 'input' ? 'text-blue-500' : 'text-emerald-500',
+            tone === 'input'
+              ? 'text-blue-500'
+              : tone === 'error'
+                ? 'text-rose-500'
+                : 'text-emerald-500',
           )}
         >
           {label}
@@ -734,6 +738,8 @@ function ChatMessage({
                 'group/details mb-3 rounded-xl border px-3 py-2.5 text-sm transition-all',
                 tool.status === 'paused'
                   ? 'border-amber-200 bg-amber-50/50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200'
+                  : tool.status === 'error'
+                    ? 'border-rose-200 bg-rose-50/40 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200'
                   : 'border-blue-200 bg-blue-50/30 text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-400',
               )}
             >
@@ -743,16 +749,29 @@ function ChatMessage({
                     <RefreshCcw className="h-4 w-4 animate-spin text-blue-500" />
                   ) : tool.status === 'paused' ? (
                     <ShieldCheck className="h-4 w-4 text-amber-500" />
+                  ) : tool.status === 'error' ? (
+                    <XCircle className="h-4 w-4 text-rose-500" />
                   ) : (
                     <Check className="h-4 w-4 text-emerald-500" />
                   )}
-                  <span>{tool.status === 'paused' ? '等待审批：' : '工具调用：'}{tool.name}</span>
+                  <span>
+                    {tool.status === 'paused'
+                      ? '等待审批：'
+                      : tool.status === 'error'
+                        ? '工具调用失败：'
+                        : '工具调用：'}
+                    {tool.name}
+                  </span>
                 </div>
               </summary>
               <div
                 className={cn(
                   'mx-1 mt-3 flex flex-col gap-3 border-l-2 py-1 pl-4 font-mono text-[13px] leading-relaxed opacity-90',
-                  tool.status === 'paused' ? 'border-amber-200 dark:border-amber-800' : 'border-blue-200 dark:border-blue-800',
+                  tool.status === 'paused'
+                    ? 'border-amber-200 dark:border-amber-800'
+                    : tool.status === 'error'
+                      ? 'border-rose-200 dark:border-rose-800'
+                      : 'border-blue-200 dark:border-blue-800',
                 )}
               >
                 {tool.status === 'paused' && tool.approvalRequestId ? (
@@ -801,7 +820,11 @@ function ChatMessage({
                   <ToolPayloadBlock label="入参 (Args)" tone="input" value={tool.args} />
                 ) : null}
                 {tool.output ? (
-                  <ToolPayloadBlock label="输出 (Output)" tone="output" value={tool.output} />
+                  <ToolPayloadBlock
+                    label="输出 (Output)"
+                    tone={tool.status === 'error' ? 'error' : 'output'}
+                    value={tool.output}
+                  />
                 ) : null}
               </div>
             </details>

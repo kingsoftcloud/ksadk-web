@@ -128,6 +128,25 @@ test('preprocessMarkdown repairs header-only pipe tables from model output', () 
   assert.match(normalized, /\| 美股 \| 小幅收涨（纳指 \+ 0\.27%） \| 4月29日收盘 \|/);
 });
 
+test('preprocessMarkdown removes isolated pipe noise before GFM tables', () => {
+  const raw = [
+    '当前 Skill Space 下共有 2 个可用的 Skill，详情如下：',
+    '',
+    '|',
+    '',
+    '| Skill 名称 | 版本 | 说明 |',
+    '| --- | --- | --- |',
+    '| kingsoft-ppt-dark-botanical11 | v1 | 深色科技风 HTML 演示文稿生成器 |',
+    '| ppt-translator | v1 | PPT 翻译工具 |',
+  ].join('\n');
+
+  const normalized = preprocessMarkdown(raw);
+
+  assert.doesNotMatch(normalized, /\n\|\n/);
+  assert.match(normalized, /\| Skill 名称 \| 版本 \| 说明 \|\n\| --- \| --- \| --- \|/);
+  assert.match(normalized, /详情如下：\n\n\| Skill 名称/);
+});
+
 test('preprocessMarkdown repairs malformed packed market tables', () => {
   const raw = [
     '| 指数 | 当前 | 涨跌 | 涨幅 |',

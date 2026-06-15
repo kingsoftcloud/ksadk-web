@@ -2,6 +2,7 @@ import {
   createResponsesStreamState,
   normalizeResponsesStreamEvent,
 } from './responses-stream.js';
+import { isFailedToolOutput } from './tool-display.js';
 
 /**
  * @typedef {import('../components/chat/types.js').Message} Message
@@ -206,7 +207,7 @@ function buildResponsesOutputEnhancements(event) {
         ...(tools[action.name] || { name: action.name, args: '' }),
         name: action.name,
         output: action.output,
-        status: 'completed',
+        status: isFailedToolOutput(action.output) ? 'error' : 'completed',
       };
     }
   }
@@ -311,20 +312,23 @@ function toolMessageFromSessionEvent(event) {
   const existing = {
     name,
     args: '',
-    status: eventType === 'tool_result' ? 'completed' : 'running',
+    status: 'running',
   };
   const tool =
     eventType === 'tool_result'
-      ? {
-          ...existing,
-          output: stringifyToolPayload(
+      ? (() => {
+          const output = stringifyToolPayload(
             event.Metadata?.tool_output
               ?? event.Metadata?.output
               ?? event.Metadata?.result
               ?? textFromUnknown(event.Content?.parts),
-          ),
-          status: 'completed',
-        }
+          );
+          return {
+            ...existing,
+            output,
+            status: isFailedToolOutput(output) ? 'error' : 'completed',
+          };
+        })()
       : {
           ...existing,
           args: stringifyToolPayload(

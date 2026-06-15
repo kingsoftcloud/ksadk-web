@@ -4,6 +4,7 @@ import { useStreamingStore } from '../../stores/streaming.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useCheckpointStore } from '../../stores/checkpoint.js';
 import { buildCompactionMessage } from '../../utils/session-events.js';
+import { isFailedToolOutput } from '../../utils/tool-display.js';
 import type { Message } from '../../components/chat/types.js';
 
 let assistantCreated = false;
@@ -147,7 +148,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
               [event.name]: {
                 ...(msg.tools?.[event.name] || { name: event.name, args: '' }),
                 output: event.output,
-                status: 'completed',
+                status: isFailedToolOutput(event.output) ? 'error' : 'completed',
               },
             },
           };

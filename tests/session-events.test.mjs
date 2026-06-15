@@ -1246,3 +1246,47 @@ test('session event utils settle running tool calls when invocation completed', 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].tools.run_code.status, 'completed');
 });
+
+test('session event utils restore explicit failed tool results as errors', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-tool-call',
+      EventType: 'tool_call',
+      InvocationId: 'inv-tool-error',
+      Content: { role: 'model', parts: [{ text: 'run_command' }] },
+      Metadata: {
+        tool_name: 'run_command',
+        tool_args: { command: 'python3 --version' },
+      },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-tool-result',
+      EventType: 'tool_result',
+      InvocationId: 'inv-tool-error',
+      Content: { role: 'tool', parts: [{ text: '{"ok":false}' }] },
+      Metadata: {
+        tool_name: 'run_command',
+        tool_output: {
+          ok: false,
+          error_type: 'SandboxException',
+          error_message: '404: template not found',
+        },
+      },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-tool-error',
+      Content: { role: 'model', parts: [{ text: 'Sandbox 返回了 404。' }] },
+      Timestamp: 3,
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].tools.run_command.status, 'error');
+});
