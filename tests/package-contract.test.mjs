@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const publishWorkflow = await readFile(new URL('../.github/workflows/publish-npm.yml', import.meta.url), 'utf8');
 
 test('package metadata exposes release artifacts and public entrypoints', () => {
   assert.equal(packageJson.name, '@kingsoftcloud/ksadk-web');
@@ -40,4 +41,10 @@ test('react is a peer dependency for hosted-ui consumers', () => {
   assert.equal(packageJson.devDependencies['react-dom'], '^19.2.4');
   assert.equal(packageJson.dependencies.react, undefined);
   assert.equal(packageJson.dependencies['react-dom'], undefined);
+});
+
+test('npm publishing uses trusted publishing instead of repository tokens', () => {
+  assert.match(publishWorkflow, /id-token:\s+write/);
+  assert.match(publishWorkflow, /npm publish --access public --provenance/);
+  assert.doesNotMatch(publishWorkflow, /NODE_AUTH_TOKEN|NPM_TOKEN/);
 });

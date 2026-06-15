@@ -58,12 +58,19 @@ integrity they build from. KSADK release notes must mention the KSADK Web
 release used to generate
 `ksadk/server/static`.
 
-For npm publishing, run the full build and verify the publish payload first:
+Npm releases are published by GitHub Actions using npm Trusted Publishing.
+The workflow is `.github/workflows/publish-npm.yml` and is triggered by a
+published GitHub Release or manual `workflow_dispatch`. Do not store npm tokens
+in repository secrets for the normal release path.
+
+Before creating a release or dispatching the workflow, verify the payload:
 
 ```bash
+npm ci
+npm test
+node --test tests/*.test.mjs
 npm run build:all
-npm pack --dry-run
-npm publish --access public
+npm pack --dry-run --access public
 ```
 
 Hosted UI and KSADK static sync consume the latest released

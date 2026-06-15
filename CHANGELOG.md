@@ -12,3 +12,5 @@
 - Improve Markdown preprocessing for malformed model-generated GFM tables,
   including isolated pipe noise before table headers.
 - Build release artifacts for `dist-ksadk`, `dist-hosted`, and `dist-lib`.
+- Add GitHub Actions npm publishing through Trusted Publishing so releases can
+  be pushed without long-lived npm tokens.
