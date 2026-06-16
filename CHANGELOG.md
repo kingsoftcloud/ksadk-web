@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.9 - 2026-06-16
+
+- Treat `save_memory` results with `status: accepted_not_extracted` as an
+  accepted intermediate state instead of rendering them as failed tool calls.
+- Preserve the same non-failed rendering when restoring tool results from
+  persisted session history.
+
 ## 0.2.8 - 2026-06-15
 
 - Stop the active session activity banner when the user stops generation, so
