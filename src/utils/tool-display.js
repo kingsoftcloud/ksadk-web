@@ -77,6 +77,11 @@ function hasNonEmptyErrorValue(value) {
   return true;
 }
 
+function isNonFailureIntermediateStatus(value) {
+  const status = String(value?.status || '').trim().toLowerCase();
+  return status === 'accepted_not_extracted';
+}
+
 function hasFailureMarker(value, depth = 0) {
   if (!value || depth > 4) {
     return false;
@@ -89,6 +94,10 @@ function hasFailureMarker(value, depth = 0) {
     return value.some((item) => hasFailureMarker(item, depth + 1));
   }
   if (typeof value !== 'object') {
+    return false;
+  }
+
+  if (isNonFailureIntermediateStatus(value)) {
     return false;
   }
 

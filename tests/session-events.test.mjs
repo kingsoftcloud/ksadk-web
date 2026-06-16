@@ -1290,3 +1290,49 @@ test('session event utils restore explicit failed tool results as errors', async
   assert.equal(messages.length, 1);
   assert.equal(messages[0].tools.run_command.status, 'error');
 });
+
+test('session event utils restore accepted memory saves as completed tools', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-tool-call',
+      EventType: 'tool_call',
+      InvocationId: 'inv-memory-accepted',
+      Content: { role: 'model', parts: [{ text: 'save_memory' }] },
+      Metadata: {
+        tool_name: 'save_memory',
+        tool_args: { content: 'favorite_breakfast: 武汉热干面' },
+      },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-tool-result',
+      EventType: 'tool_result',
+      InvocationId: 'inv-memory-accepted',
+      Content: { role: 'tool', parts: [{ text: '{"ok":false}' }] },
+      Metadata: {
+        tool_name: 'save_memory',
+        tool_output: {
+          ok: false,
+          status: 'accepted_not_extracted',
+          message: '记忆保存请求已被后端受理，但尚未抽取成可检索记忆。',
+          session_state: 0,
+          session_id: '337abed10c4147ab',
+        },
+      },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-assistant',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-memory-accepted',
+      Content: { role: 'model', parts: [{ text: '已经提交了记忆保存请求。' }] },
+      Timestamp: 3,
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].tools.save_memory.status, 'completed');
+});
