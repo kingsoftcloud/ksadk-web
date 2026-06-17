@@ -44,4 +44,42 @@ describe('Native terminal panel bundle boundaries', () => {
     expect(terminalPanel).toContain('terminal.onBinary');
     expect(terminalPanel).toContain('sendPtyInput(data)');
   });
+
+  it('auto-creates one tui session when opened with an empty session list', () => {
+    const terminalPanel = readSource('components/native/NativeTerminalPanel.tsx');
+
+    expect(terminalPanel).toContain('autoCreateWhenEmpty?: boolean');
+    expect(terminalPanel).toContain('autoCreateWhenEmpty = true');
+    expect(terminalPanel).toContain('const refreshSessionsRef = useRef<(() => Promise<void>) | null>(null)');
+    expect(terminalPanel).toContain('const autoCreateAttemptedRef = useRef(false)');
+    expect(terminalPanel).toContain('buildCreateTerminalSessionPayload({ mode: capability.Mode || \'tui\' })');
+    expect(terminalPanel).toContain('normalized.length === 0');
+    expect(terminalPanel).toContain('!autoCreateAttemptedRef.current');
+    expect(terminalPanel).toContain('await createTerminalSession()');
+  });
+
+  it('does not retry auto-create loops after close or failed creation', () => {
+    const terminalPanel = readSource('components/native/NativeTerminalPanel.tsx');
+
+    expect(terminalPanel).toContain('autoCreateAttemptedRef.current = true');
+    expect(terminalPanel).toContain('if (!open || !capability.Enabled) {');
+    expect(terminalPanel).toContain('autoCreateAttemptedRef.current = false');
+    expect(terminalPanel).toContain('if (!response.ok) {');
+    expect(terminalPanel).toContain("setStatus('error')");
+  });
+
+  it('exposes hosted route surfaces through AgentWorkbench', () => {
+    const app = readSource('App.tsx');
+    const runtime = readSource('public/runtime.ts');
+
+    expect(app).toContain("export type AgentWorkbenchInitialSurface = 'chat' | 'tui' | 'workspace'");
+    expect(app).toContain('initialSurface?: AgentWorkbenchInitialSurface');
+    expect(app).toContain("initialSurface = 'chat'");
+    expect(app).toContain("initialSurface !== 'workspace'");
+    expect(app).toContain('setWorkspacePanelOpen(true)');
+    expect(app).toContain('setWorkspacePanelFullscreen(true)');
+    expect(app).toContain("initialSurface === 'tui'");
+    expect(app).toContain('LazyNativeTerminalPanel');
+    expect(runtime).toContain('AgentWorkbenchProps');
+  });
 });

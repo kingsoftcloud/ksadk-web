@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useRef } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useUIStore } from './stores/ui.js';
 import { useBootstrapStore } from './stores/bootstrap.js';
 import { useModelStore } from './stores/model.js';
@@ -50,15 +50,23 @@ const LazyArtifactsPanel = React.lazy(() =>
   }))
 );
 
+const LazyNativeTerminalPanel = React.lazy(() =>
+  import('./components/native/NativeTerminalPanel.js').then((module) => ({
+    default: module.NativeTerminalPanel,
+  })),
+);
+
 export type AgentWorkbenchFeatureFlags = Record<string, boolean>;
+export type AgentWorkbenchInitialSurface = 'chat' | 'tui' | 'workspace';
 
 export type AgentWorkbenchProps = {
   apiAdapter?: import('./core/api/types.js').ApiFacade;
   featureFlags?: AgentWorkbenchFeatureFlags;
+  initialSurface?: AgentWorkbenchInitialSurface;
   routeShell?: React.ComponentType<{ children: React.ReactNode }>;
 };
 
-export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWorkbenchProps = {}) {
+export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell: RouteShell }: AgentWorkbenchProps = {}) {
   const api = apiAdapter || apiFacade;
   const agentId = useBootstrapStore((s: BootstrapStore) => s.agentId);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -239,6 +247,21 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
     availableModels.find((model) => model.id === selectedModel) || null;
   const selectedModelLabel = selectedModelMetadata?.display_name || selectedModel || '';
   const desktopSidebarVisible = !isMobile && sidebarOpen && hostedChatEnabled;
+  const initialSurfaceAppliedRef = useRef(false);
+  const [initialTuiPanelOpen, setInitialTuiPanelOpen] = useState(initialSurface === 'tui');
+  const initialTuiOpen = initialTuiPanelOpen && Boolean(uiCapabilities.NativeTerminal?.Enabled);
+
+  useEffect(() => {
+    if (initialSurfaceAppliedRef.current) {
+      return;
+    }
+    if (initialSurface !== 'workspace' || !workspaceEnabled) {
+      return;
+    }
+    initialSurfaceAppliedRef.current = true;
+    useUIStore.getState().setWorkspacePanelOpen(true);
+    useUIStore.getState().setWorkspacePanelFullscreen(true);
+  }, [initialSurface, workspaceEnabled]);
 
   const closeWorkspacePanel = () => {
     useUIStore.getState().setWorkspacePanelFullscreen(false);
@@ -375,6 +398,16 @@ export function AgentWorkbench({ apiAdapter, routeShell: RouteShell }: AgentWork
           <LazyArtifactsPanel />
         </Suspense>
       )}
+
+      {initialTuiOpen ? (
+        <Suspense fallback={null}>
+          <LazyNativeTerminalPanel
+            capability={uiCapabilities.NativeTerminal}
+            open={true}
+            onClose={() => setInitialTuiPanelOpen(false)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 

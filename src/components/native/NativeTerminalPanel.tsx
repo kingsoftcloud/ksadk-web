@@ -46,6 +46,7 @@ type NativeTerminalPanelProps = {
   capability: NativeTerminalCapability;
   open: boolean;
   onClose: () => void;
+  autoCreateWhenEmpty?: boolean;
 };
 
 type TerminalStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
@@ -74,7 +75,12 @@ async function readJson(response: Response) {
   }
 }
 
-export function NativeTerminalPanel({ capability, open, onClose }: NativeTerminalPanelProps) {
+export function NativeTerminalPanel({
+  capability,
+  open,
+  onClose,
+  autoCreateWhenEmpty = true,
+}: NativeTerminalPanelProps) {
   const [status, setStatus] = useState<TerminalStatus>('idle');
   const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
@@ -84,11 +90,35 @@ export function NativeTerminalPanel({ capability, open, onClose }: NativeTermina
   const terminalRef = useRef<XtermTerminal | null>(null);
   const fitAddonRef = useRef<XtermFitAddon | null>(null);
   const terminalSessionsRef = useRef<TerminalSession[]>([]);
+  const refreshSessionsRef = useRef<(() => Promise<void>) | null>(null);
+  const autoCreateAttemptedRef = useRef(false);
 
   const activeSession = useMemo(
     () => terminalSessions.find((session) => session.terminal_session_id === activeTerminalSessionId) || null,
     [activeTerminalSessionId, terminalSessions],
   );
+
+  const createTerminalSession = useCallback(async () => {
+    autoCreateAttemptedRef.current = true;
+    setStatus('connecting');
+    const response = await fetch(TERMINAL_SESSIONS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildCreateTerminalSessionPayload({ mode: capability.Mode || 'tui' })),
+    });
+    if (!response.ok) {
+      setStatus('error');
+      return;
+    }
+    const payload = await readJson(response);
+    const session = payload?.session;
+    if (!session?.terminal_session_id) {
+      setStatus('error');
+      return;
+    }
+    await refreshSessionsRef.current?.();
+    setActiveTerminalSessionId(session.terminal_session_id);
+  }, [capability.Mode]);
 
   const refreshSessions = useCallback(async () => {
     setLoadingSessions(true);
@@ -106,16 +136,30 @@ export function NativeTerminalPanel({ capability, open, onClose }: NativeTermina
         }
         return normalized[0]?.terminal_session_id || null;
       });
+      if (open && capability.Enabled && autoCreateWhenEmpty && normalized.length === 0 && !autoCreateAttemptedRef.current) {
+        autoCreateAttemptedRef.current = true;
+        await createTerminalSession();
+      }
     } catch {
       setStatus('error');
     } finally {
       setLoadingSessions(false);
     }
-  }, []);
+  }, [autoCreateWhenEmpty, capability.Enabled, createTerminalSession, open]);
 
   useEffect(() => {
     terminalSessionsRef.current = terminalSessions;
   }, [terminalSessions]);
+
+  useEffect(() => {
+    refreshSessionsRef.current = refreshSessions;
+  }, [refreshSessions]);
+
+  useEffect(() => {
+    if (!open || !capability.Enabled) {
+      autoCreateAttemptedRef.current = false;
+    }
+  }, [capability.Enabled, open]);
 
   const attachTerminalSession = useCallback(async (session: TerminalSession) => {
     if (!containerRef.current) {
@@ -367,27 +411,6 @@ export function NativeTerminalPanel({ capability, open, onClose }: NativeTermina
       cleanup();
     };
   }, [activeTerminalSessionId, attachTerminalSession, open]);
-
-  const createTerminalSession = async () => {
-    setStatus('connecting');
-    const response = await fetch(TERMINAL_SESSIONS_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildCreateTerminalSessionPayload({ mode: capability.Mode || 'tui' })),
-    });
-    if (!response.ok) {
-      setStatus('error');
-      return;
-    }
-    const payload = await readJson(response);
-    const session = payload?.session;
-    if (!session?.terminal_session_id) {
-      setStatus('error');
-      return;
-    }
-    await refreshSessions();
-    setActiveTerminalSessionId(session.terminal_session_id);
-  };
 
   const closeTerminalSession = async (terminalSessionId: string) => {
     const remainingSessions = terminalSessions.filter(
