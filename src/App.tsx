@@ -97,7 +97,9 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
 
   const {
     fetchSessions,
+    loadMoreSessions,
     loadSession,
+    loadOlderSessionEvents,
     createNewSession,
     deleteSession,
     currentSessionIdRef,
@@ -303,6 +305,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
         createNewSession={createNewSession}
         deleteSession={deleteSession}
         loadSession={loadSession}
+        loadMoreSessions={loadMoreSessions}
       />
 
       <main className="relative flex min-w-0 flex-1 flex-col bg-white dark:bg-slate-900">
@@ -366,6 +369,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
                 uiCapabilities.RunLifecycle.CheckpointResume
               }
               onResumeCheckpoint={resumeCheckpoint}
+              onLoadOlderSessionEvents={loadOlderSessionEvents}
             />
         <ConnectedComposer
           composerMaxHeight={composerMaxHeight}

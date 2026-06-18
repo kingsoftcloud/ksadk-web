@@ -15,6 +15,9 @@ type SessionPayload = {
 
 type ListSessionsResponse = {
   Sessions: SessionPayload[];
+  Total?: number;
+  Page?: number;
+  PageSize?: number;
 };
 
 type CreateSessionResponse = {
@@ -23,11 +26,29 @@ type CreateSessionResponse = {
 
 export type { SessionPayload };
 
-export async function listSessions(agentId: string, opts?: { signal?: AbortSignal }): Promise<SessionPayload[]> {
+export type ListSessionsOptions = {
+  page?: number;
+  pageSize?: number;
+  signal?: AbortSignal;
+};
+
+export async function listSessions(
+  agentId: string,
+  opts?: ListSessionsOptions,
+): Promise<ListSessionsResponse> {
   const data = await postJsonAction<ListSessionsResponse>('ListSessions', {
     AgentId: agentId,
+    Page: opts?.page,
+    PageSize: opts?.pageSize,
   }, opts);
-  return data.Sessions ?? [];
+  return {
+    Sessions: data.Sessions ?? [],
+    Total: Number.isFinite(Number(data.Total)) ? Number(data.Total) : data.Sessions?.length ?? 0,
+    Page: Number.isFinite(Number(data.Page)) ? Number(data.Page) : opts?.page ?? 1,
+    PageSize: Number.isFinite(Number(data.PageSize))
+      ? Number(data.PageSize)
+      : opts?.pageSize ?? data.Sessions?.length ?? 0,
+  };
 }
 
 export async function createSession(agentId: string, opts?: { signal?: AbortSignal }): Promise<SessionPayload> {

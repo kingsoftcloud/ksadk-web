@@ -68,11 +68,17 @@ function isSessionRunningWithOptions(session, options = {}) {
 
 export function normalizeSidebarSessions(sessions = [], query = '', options = {}) {
   const needle = normalizeText(query);
+  const pinnedSessionIds = new Set(Array.isArray(options.pinnedSessionIds) ? options.pinnedSessionIds : []);
   return (Array.isArray(sessions) ? sessions : [])
     .filter((session) => session?.SessionId)
     .filter((session) => !needle || sessionSearchText(session).includes(needle))
     .slice()
     .sort((left, right) => {
+      const leftPinned = pinnedSessionIds.has(left.SessionId) ? 1 : 0;
+      const rightPinned = pinnedSessionIds.has(right.SessionId) ? 1 : 0;
+      if (leftPinned !== rightPinned) {
+        return rightPinned - leftPinned;
+      }
       const leftActive = isSessionRunningWithOptions(left, options) ? 1 : 0;
       const rightActive = isSessionRunningWithOptions(right, options) ? 1 : 0;
       if (leftActive !== rightActive) {

@@ -24,6 +24,7 @@ type ConnectedMessageListProps = {
   onCancelRemote?: () => void;
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
+  onLoadOlderSessionEvents?: (sessionId: string) => Promise<void>;
 };
 
 export function ConnectedMessageList({
@@ -36,12 +37,16 @@ export function ConnectedMessageList({
   onCancelRemote,
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
+  onLoadOlderSessionEvents,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
   const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
   const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
+  const currentEventCache = useSessionStore((s: SessionStore) =>
+    currentSessionId ? s.eventCache[currentSessionId] : null,
+  );
   const input = useUIStore((s: UIStore) => s.input);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
   const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
@@ -52,6 +57,7 @@ export function ConnectedMessageList({
   const userDetachedFromBottomRef = useRef(false);
   const previousScrollTopRef = useRef(0);
   const isStreamingRef = useRef(isStreaming);
+  const loadingOlderRef = useRef(false);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -80,6 +86,32 @@ export function ConnectedMessageList({
       const scrolledUp = scroller.scrollTop < previousScrollTopRef.current - 2;
       previousScrollTopRef.current = scroller.scrollTop;
 
+      if (
+        scroller.scrollTop < 200 &&
+        currentSessionId &&
+        currentEventCache &&
+        currentEventCache.offset > 0 &&
+        !currentEventCache.isLoadingOlder &&
+        !loadingOlderRef.current &&
+        onLoadOlderSessionEvents
+      ) {
+        const previousScrollHeight = scroller.scrollHeight;
+        loadingOlderRef.current = true;
+        void onLoadOlderSessionEvents(currentSessionId)
+          .then(() => {
+            requestAnimationFrame(() => {
+              const nextScroller = scrollRef.current;
+              if (!nextScroller) return;
+              const delta = nextScroller.scrollHeight - previousScrollHeight;
+              nextScroller.scrollTop += delta;
+              previousScrollTopRef.current = nextScroller.scrollTop;
+            });
+          })
+          .finally(() => {
+            loadingOlderRef.current = false;
+          });
+      }
+
       if (isStreamingRef.current && scrolledUp) {
         userDetachedFromBottomRef.current = true;
         stickToBottomRef.current = false;
@@ -99,7 +131,7 @@ export function ConnectedMessageList({
     updateStickiness();
     scroller.addEventListener('scroll', updateStickiness, { passive: true });
     return () => scroller.removeEventListener('scroll', updateStickiness);
-  }, []);
+  }, [currentEventCache, currentSessionId, onLoadOlderSessionEvents]);
 
   useEffect(() => {
     const scroller = scrollRef.current;

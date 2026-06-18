@@ -12,10 +12,18 @@ describe('chat message list contracts', () => {
 
     expect(source).toContain('stickToBottomRef');
     expect(source).toContain('userDetachedFromBottomRef');
+    expect(source).toContain('scroller.scrollTop < 200');
     expect(source).toContain('isStreamingRef.current && scrolledUp');
     expect(source).toContain('distanceFromBottom <= 12');
     expect(source).toContain('distanceFromBottom < 96');
     expect(source).not.toMatch(/scrollRef\.current\.scrollTop\s*=\s*scrollRef\.current\.scrollHeight/);
+  });
+
+  it('preloads additional session pages before the sidebar reaches the bottom', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
+
+    expect(source).toContain('distanceFromBottom < 200');
+    expect(source).toContain('onLoadMoreSessions()');
   });
 
   it('keeps reasoning panels scrollable and lightweight', () => {
@@ -27,6 +35,15 @@ describe('chat message list contracts', () => {
     expect(source).toContain('border-emerald-200/70');
     expect(source).toContain('生成中');
     expect(source).toContain('leading-7');
+  });
+
+  it('virtualizes long message transcripts instead of mapping the full list directly', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('calculateVirtualMessageWindow');
+    expect(source).toContain('visibleItems.map((entry)');
+    expect(source).toContain('style={{ height: virtualWindow.totalHeight }}');
+    expect(source).not.toContain('messages.map((message, index) =>');
   });
 
   it('keeps checkpoint resume outside message replay state', () => {
@@ -71,7 +88,9 @@ describe('chat message list contracts', () => {
   it('loads checkpoint metadata as best effort without blocking session history', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
-    expect(lifecycleSource).toContain('const data = await api.listSessionEvents(sessionId)');
+    expect(lifecycleSource).toContain('const probe = await api.listSessionEvents(sessionId, {');
+    expect(lifecycleSource).toContain('limit: SESSION_EVENTS_PAGE_SIZE');
+    expect(lifecycleSource).toContain('loadOlderSessionEvents');
     expect(lifecycleSource).not.toContain('Promise.all([\\n          api.listSessionEvents(sessionId)');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");

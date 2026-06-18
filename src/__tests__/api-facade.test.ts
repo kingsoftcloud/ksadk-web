@@ -67,6 +67,88 @@ describe('ApiFacadeImpl', () => {
     ]);
   });
 
+  it('sends session pagination fields and returns list metadata', async () => {
+    const facade = new ApiFacadeImpl();
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (url, init) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body || '{}')) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({
+        Code: 0,
+        Data: {
+          Sessions: [{ SessionId: 'sess-1' }],
+          Total: 12,
+          Page: 2,
+          PageSize: 5,
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      const data = await facade.listSessions('agent-1', { page: 2, pageSize: 5 });
+      expect(data.Total).toBe(12);
+      expect(data.Sessions).toEqual([{ SessionId: 'sess-1' }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toEqual([
+      {
+        url: '/agentengine/api/v1/ListSessions',
+        body: {
+          AgentId: 'agent-1',
+          Page: 2,
+          PageSize: 5,
+        },
+      },
+    ]);
+  });
+
+  it('sends session event pagination fields and returns total metadata', async () => {
+    const facade = new ApiFacadeImpl();
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (url, init) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body || '{}')) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({
+        Code: 0,
+        Data: {
+          Events: [{ SeqId: 3 }],
+          Total: 9,
+          Offset: 2,
+          Limit: 1,
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      const data = await facade.listSessionEvents('sess-1', { offset: 2, limit: 1 });
+      expect(data.Total).toBe(9);
+      expect(data.Events).toEqual([{ SeqId: 3 }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toEqual([
+      {
+        url: '/agentengine/api/v1/ListSessionEvents',
+        body: {
+          SessionId: 'sess-1',
+          Offset: 2,
+          Limit: 1,
+        },
+      },
+    ]);
+  });
+
   it('maps checkpoint actions to backend action payloads', async () => {
     const facade = new ApiFacadeImpl();
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];

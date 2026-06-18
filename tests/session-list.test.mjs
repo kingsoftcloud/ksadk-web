@@ -95,6 +95,33 @@ test('session list utils do not pin stale in-progress sessions', async () => {
   );
 });
 
+test('session list utils keep manually pinned sessions first', async () => {
+  const sessionList = await loadSessionListUtils();
+
+  assert.ok(sessionList, 'expected session list helpers to exist');
+  const sorted = sessionList.normalizeSidebarSessions(
+    [
+      {
+        SessionId: 'sess-new',
+        Title: '新会话',
+        UpdatedAt: '2026-05-27T00:19:00Z',
+      },
+      {
+        SessionId: 'sess-pinned',
+        Title: '置顶会话',
+        UpdatedAt: '2026-05-20T00:19:00Z',
+      },
+    ],
+    '',
+    { pinnedSessionIds: ['sess-pinned'] },
+  );
+
+  assert.deepEqual(
+    sorted.map((session) => session.SessionId),
+    ['sess-pinned', 'sess-new'],
+  );
+});
+
 test('session list utils format model and context labels', async () => {
   const sessionList = await loadSessionListUtils();
 

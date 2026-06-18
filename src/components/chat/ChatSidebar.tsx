@@ -1,6 +1,6 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useMemo, useState, type MouseEvent, type UIEvent } from 'react';
 
-import { LoaderCircle, Plus, Search, Trash2 } from 'lucide-react';
+import { LoaderCircle, Pin, PinOff, Plus, Search, Trash2 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
@@ -16,7 +16,12 @@ type ChatSidebarProps = {
   onCreateNewSession: () => void;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string, event: MouseEvent<HTMLButtonElement>) => void;
+  onTogglePinSession: (sessionId: string, event: MouseEvent<HTMLButtonElement>) => void;
+  onLoadMoreSessions?: () => void;
   sessionTitle: (session: Session) => string;
+  pinnedSessionIds?: string[];
+  hasMoreSessions?: boolean;
+  isLoadingSessions?: boolean;
   className?: string;
 };
 
@@ -26,14 +31,31 @@ export function ChatSidebar({
   onCreateNewSession,
   onSelectSession,
   onDeleteSession,
+  onTogglePinSession,
+  onLoadMoreSessions,
   sessionTitle,
+  pinnedSessionIds = [],
+  hasMoreSessions = false,
+  isLoadingSessions = false,
   className,
 }: ChatSidebarProps) {
   const [query, setQuery] = useState('');
   const visibleSessions = useMemo(
-    () => normalizeSidebarSessions(sessions, query),
-    [sessions, query],
+    () => normalizeSidebarSessions(sessions, query, { pinnedSessionIds }),
+    [sessions, pinnedSessionIds, query],
   );
+  const pinnedSet = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds]);
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (!onLoadMoreSessions || isLoadingSessions || !hasMoreSessions || query.trim()) {
+      return;
+    }
+    const target = event.currentTarget;
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (distanceFromBottom < 200) {
+      onLoadMoreSessions();
+    }
+  };
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-slate-50 dark:bg-slate-950/80', className)}>
@@ -62,7 +84,10 @@ export function ChatSidebar({
         </label>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-2 custom-scrollbar">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-2 custom-scrollbar"
+        onScroll={handleScroll}
+      >
         <div className="px-2 py-2 text-xs font-semibold text-slate-400 dark:text-slate-500">
           历史记录{query.trim() ? ` · ${visibleSessions.length}` : ''}
         </div>
@@ -70,6 +95,7 @@ export function ChatSidebar({
           {visibleSessions.length > 0 ? (
             visibleSessions.map((session) => {
               const meta = resolveCompactSessionMeta(session);
+              const pinned = pinnedSet.has(session.SessionId);
               return (
                 <div
                   key={session.SessionId}
@@ -101,6 +127,18 @@ export function ChatSidebar({
                   ) : null}
                   <button
                     type="button"
+                    onClick={(event) => onTogglePinSession(session.SessionId, event)}
+                    className={cn(
+                      'rounded-lg p-1.5 transition hover:bg-white md:opacity-0 md:group-hover:opacity-100 dark:hover:bg-slate-900',
+                      pinned ? 'text-blue-500 opacity-100' : 'text-slate-400',
+                    )}
+                    title={pinned ? '取消置顶' : '置顶会话'}
+                    aria-label={pinned ? '取消置顶会话' : '置顶会话'}
+                  >
+                    {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
                     onClick={(event) => onDeleteSession(session.SessionId, event)}
                     className="hidden rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-rose-500 md:group-hover:block dark:hover:bg-slate-900"
                     title="Delete chat"
@@ -115,6 +153,12 @@ export function ChatSidebar({
               没有匹配的会话
             </div>
           )}
+          {isLoadingSessions ? (
+            <div className="flex items-center justify-center gap-2 px-3 py-3 text-xs text-slate-400">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              <span>加载中</span>
+            </div>
+          ) : null}
         </div>
       </div>
 

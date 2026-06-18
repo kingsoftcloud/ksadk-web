@@ -15,13 +15,15 @@ import {
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
-import { upsertSessions } from '../utils/session-helpers.js';
+import { resolveNextSessionsPage } from '../utils/session-pagination.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 
 const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
+const SESSION_LIST_PAGE_SIZE = 30;
+const SESSION_EVENTS_PAGE_SIZE = 50;
 
 function terminalActivityForRunEvent(event: SessionEventRecord): {
   status: 'completed' | 'failed' | 'stopped';
@@ -249,7 +251,35 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        const data = await api.listSessionEvents(sessionId);
+        const cached = useSessionStore.getState().eventCache[sessionId];
+        let data: { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number };
+        if (cached) {
+          data = {
+            Events: cached.events,
+            Total: cached.total,
+            Offset: cached.offset,
+            Limit: cached.limit,
+          };
+        } else {
+          const probe = await api.listSessionEvents(sessionId, {
+            offset: 0,
+            limit: 1,
+          });
+          const total = Number(probe.Total ?? probe.Events?.length ?? 0);
+          const offset = Math.max(0, total - SESSION_EVENTS_PAGE_SIZE);
+          data = total <= 1
+            ? probe as { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number }
+            : await api.listSessionEvents(sessionId, {
+                offset,
+                limit: SESSION_EVENTS_PAGE_SIZE,
+              }) as { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number };
+          useSessionStore.getState().setSessionEventCache(sessionId, {
+            events: (data.Events || []) as SessionEventRecord[],
+            total,
+            offset: Number(data.Offset ?? offset),
+            limit: Number(data.Limit ?? data.Events?.length ?? 0),
+          });
+        }
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
           void api.listSessionCheckpoints({
@@ -315,9 +345,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       loadFeedbackForMessages,
       resetCompaction,
       subscribeRunEvents,
-      uiCapabilities.RunLifecycle.Enabled,
-      uiCapabilities.RunLifecycle.Checkpoints,
-      uiCapabilities.RunLifecycle.Resume,
+      uiCapabilities,
     ],
   );
 
@@ -327,9 +355,23 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       preferredSessionId: string | null = null,
     ) => {
       try {
-        const sessions = await api.listSessions(targetAgentId);
-        const sorted = upsertSessions(useSessionStore.getState().sessions, sessions as Session[]);
-        useSessionStore.getState().setSessions(sorted);
+        const store = useSessionStore.getState();
+        if (store.sessionsAgentId && store.sessionsAgentId !== targetAgentId) {
+          store.resetSessionPagination(targetAgentId);
+        }
+        useSessionStore.getState().setLoadingSessions(true);
+        const data = await api.listSessions(targetAgentId, {
+          page: 1,
+          pageSize: SESSION_LIST_PAGE_SIZE,
+        });
+        useSessionStore.getState().upsertSessions((data.Sessions || []) as Session[], {
+          agentId: targetAgentId,
+          total: Number(data.Total ?? data.Sessions?.length ?? 0),
+          page: Number(data.Page ?? 1),
+          pageSize: Number(data.PageSize ?? SESSION_LIST_PAGE_SIZE),
+          replace: true,
+        });
+        const sorted = useSessionStore.getState().sessions;
         const activeSessionId = currentSessionIdRef.current;
         const restoredSessionId = resolveSessionToRestore(
           sorted,
@@ -346,10 +388,47 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       } catch (error) {
         if (error instanceof CancelledError) return;
         console.error('Failed to fetch sessions:', error);
+      } finally {
+        useSessionStore.getState().setLoadingSessions(false);
       }
     },
     [api, loadSession],
   );
+
+  const loadMoreSessions = useCallback(async () => {
+    const store = useSessionStore.getState();
+    if (store.isLoadingSessions || !store.hasMoreSessions) {
+      return;
+    }
+    const nextPage = resolveNextSessionsPage({
+      total: store.sessionsTotal,
+      pageSize: store.sessionsPageSize || SESSION_LIST_PAGE_SIZE,
+      loadedPages: store.loadedPages,
+    });
+    if (!nextPage) {
+      return;
+    }
+    const pageSize = store.sessionsPageSize || SESSION_LIST_PAGE_SIZE;
+    const targetAgentId = store.sessionsAgentId || agentIdRef.current || 'default-agent';
+    try {
+      useSessionStore.getState().setLoadingSessions(true);
+      const data = await api.listSessions(targetAgentId, {
+        page: nextPage,
+        pageSize,
+      });
+      useSessionStore.getState().upsertSessions((data.Sessions || []) as Session[], {
+        agentId: targetAgentId,
+        total: Number(data.Total ?? store.sessionsTotal),
+        page: Number(data.Page ?? nextPage),
+        pageSize: Number(data.PageSize ?? pageSize),
+      });
+    } catch (error) {
+      if (error instanceof CancelledError) return;
+      console.error('Failed to load more sessions:', error);
+    } finally {
+      useSessionStore.getState().setLoadingSessions(false);
+    }
+  }, [api]);
 
   useEffect(() => {
     loadSessionRef.current = loadSession;
@@ -390,6 +469,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       try {
         await api.deleteSession(sessionId);
         useSessionStore.getState().removeSession(sessionId);
+        useSessionStore.getState().clearSessionEventCache(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           currentSessionIdRef.current = null;
           useMessageStore.getState().setMessages([]);
@@ -405,9 +485,46 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     [agentId, api, fetchSessions],
   );
 
+  const loadOlderSessionEvents = useCallback(async (sessionId: string) => {
+    const cache = useSessionStore.getState().eventCache[sessionId];
+    if (!cache || cache.offset <= 0 || cache.isLoadingOlder) {
+      return;
+    }
+    const nextOffset = Math.max(0, cache.offset - SESSION_EVENTS_PAGE_SIZE);
+    const nextLimit = cache.offset - nextOffset;
+    try {
+      useSessionStore.getState().setSessionEventLoadingOlder(sessionId, true);
+      const data = await api.listSessionEvents(sessionId, {
+        offset: nextOffset,
+        limit: nextLimit,
+      });
+      const incoming = (data.Events || []) as SessionEventRecord[];
+      const merged = mergeSessionEventRecords(incoming, cache.events) as SessionEventRecord[];
+      useSessionStore.getState().setSessionEventCache(sessionId, {
+        events: merged,
+        total: Number(data.Total ?? cache.total),
+        offset: Number(data.Offset ?? nextOffset),
+        limit: merged.length,
+      });
+      if (currentSessionIdRef.current === sessionId) {
+        const history = buildMessagesFromSessionEvents(merged);
+        useMessageStore.getState().setMessages(history);
+        void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
+      }
+    } catch (error) {
+      if (!(error instanceof CancelledError)) {
+        console.error('Failed to load older session events:', error);
+      }
+    } finally {
+      useSessionStore.getState().setSessionEventLoadingOlder(sessionId, false);
+    }
+  }, [api, loadFeedbackForMessages]);
+
   return {
     fetchSessions,
+    loadMoreSessions,
     loadSession,
+    loadOlderSessionEvents,
     createNewSession,
     deleteSession,
     currentSessionIdRef,

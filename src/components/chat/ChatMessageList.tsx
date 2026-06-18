@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type RefObject } from 'react';
 
 import {
   Bot,
@@ -22,6 +22,7 @@ import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
+import { calculateVirtualMessageWindow } from '../../utils/message-virtualization.js';
 
 import type { RunActivity } from '../../stores/streaming.js';
 import type { SessionCheckpoint } from '../../stores/checkpoint.js';
@@ -52,6 +53,9 @@ type ChatMessageListProps = {
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
 };
+
+const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
+const MESSAGE_VIRTUALIZATION_OVERSCAN = 4;
 
 function formatElapsed(ms: number) {
   const safe = Math.max(0, Math.floor(ms / 1000));
@@ -867,9 +871,64 @@ export function ChatMessageList({
   onResumeCheckpoint,
   scrollRef,
 }: ChatMessageListProps) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return undefined;
+
+    const syncViewport = () => {
+      setScrollTop(scroller.scrollTop);
+      setViewportHeight(scroller.clientHeight);
+    };
+
+    syncViewport();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const resizeObserver = new ResizeObserver(() => syncViewport());
+    resizeObserver.observe(scroller);
+    return () => resizeObserver.disconnect();
+  }, [scrollRef]);
+
+  const virtualWindow = useMemo(
+    () =>
+      calculateVirtualMessageWindow({
+        items: messages,
+        scrollTop,
+        viewportHeight,
+        overscan: MESSAGE_VIRTUALIZATION_OVERSCAN,
+        defaultItemHeight: DEFAULT_MESSAGE_ROW_HEIGHT,
+        measuredHeights,
+        getItemKey: (message, index) => message?.id || String(index),
+      }),
+    [measuredHeights, messages, scrollTop, viewportHeight],
+  );
+
+  const visibleItems = virtualWindow.visibleItems;
+
+  const updateMeasuredHeight = (messageId: string, height: number) => {
+    if (!messageId || !Number.isFinite(height) || height <= 0) {
+      return;
+    }
+    setMeasuredHeights((current) => {
+      if (current.get(messageId) === height) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(messageId, height);
+      return next;
+    });
+  };
+
   return (
     <div
       ref={scrollRef}
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       className={cn(
         'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
@@ -884,24 +943,39 @@ export function ChatMessageList({
         {messages.length === 0 ? (
         <EmptyState agentName={agentName} />
         ) : (
-          messages.map((message, index) =>
-            message.role === 'system' ? (
-              <SystemMessage key={message.id || index} message={message} />
-            ) : (
-              <ChatMessage
-                key={message.id || index}
-                agentName={agentName}
-                isMobile={isMobile}
-                isStreaming={isStreaming}
-                isLastMessage={index === messages.length - 1}
-                message={message}
-                onDeleteFeedback={onDeleteFeedback}
-                onOpenAttachmentPreview={onOpenAttachmentPreview}
-                onRespondToApproval={onRespondToApproval}
-                onSubmitFeedback={onSubmitFeedback}
-              />
-            ),
-          )
+          <div style={{ height: virtualWindow.totalHeight }} className="relative">
+            {visibleItems.map((entry) => (
+              <div
+                key={entry.item.id || entry.index}
+                ref={(node) => {
+                  if (!node) return;
+                  updateMeasuredHeight(entry.item.id || String(entry.index), node.offsetHeight);
+                }}
+                style={{
+                  position: 'absolute',
+                  top: entry.top,
+                  left: 0,
+                  right: 0,
+                }}
+              >
+                {entry.item.role === 'system' ? (
+                  <SystemMessage message={entry.item} />
+                ) : (
+                  <ChatMessage
+                    agentName={agentName}
+                    isMobile={isMobile}
+                    isStreaming={isStreaming}
+                    isLastMessage={entry.index === messages.length - 1}
+                    message={entry.item}
+                    onDeleteFeedback={onDeleteFeedback}
+                    onOpenAttachmentPreview={onOpenAttachmentPreview}
+                    onRespondToApproval={onRespondToApproval}
+                    onSubmitFeedback={onSubmitFeedback}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
       {activity ? (

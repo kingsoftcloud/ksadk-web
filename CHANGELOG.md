@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.10 - 2026-06-18
+
+- Add session list pagination support for `ListSessions`, including `Total`,
+  `Page`, and `PageSize` metadata passthrough in the shared API facade.
+- Add session event windowing support for `ListSessionEvents`, including
+  `Offset`, `Limit`, and `Total`, then load older events on demand when the
+  message view scrolls near the top.
+- Cache restored session events in the shared session store so resumed sessions
+  can prepend older history without losing checkpoint or feedback state.
+- Add incremental sidebar loading for long session lists and allow manual pinning
+  of important sessions so pinned items stay above recency sorting.
+- Virtualize long message transcripts in `ChatMessageList` to avoid rendering
+  the full message array at once during long-running or attachment-heavy chats.
+- Add regression coverage for facade pagination payloads, sidebar prefetch,
+  pinned sessions, top-of-history loading, and message virtualization contracts.
+
 ## 0.2.9 - 2026-06-16
 
 - Treat `save_memory` results with `status: accepted_not_extracted` as an

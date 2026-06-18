@@ -14,6 +14,7 @@ type ConnectedSidebarProps = {
   createNewSession: () => void;
   deleteSession: (sessionId: string) => void;
   loadSession: (sessionId: string) => void;
+  loadMoreSessions?: () => void;
 };
 
 export function ConnectedSidebar({
@@ -21,9 +22,13 @@ export function ConnectedSidebar({
   createNewSession,
   deleteSession,
   loadSession,
+  loadMoreSessions,
 }: ConnectedSidebarProps) {
   const sessions = useSessionStore(s => s.sessions);
   const currentSessionId = useSessionStore(s => s.currentSessionId);
+  const pinnedSessionIds = useSessionStore(s => s.pinnedSessionIds);
+  const isLoadingSessions = useSessionStore(s => s.isLoadingSessions);
+  const hasMoreSessions = useSessionStore(s => s.hasMoreSessions);
   const sidebarOpen = useUIStore(s => s.sidebarOpen);
   const mobileSidebarOpen = useUIStore(s => s.mobileSidebarOpen);
 
@@ -51,8 +56,19 @@ export function ConnectedSidebar({
           currentSessionId={currentSessionId}
           onCreateNewSession={createNewSession}
           onSelectSession={loadSession}
-          onDeleteSession={deleteSession}
+          onDeleteSession={(sessionId, event) => {
+            event.stopPropagation();
+            deleteSession(sessionId);
+          }}
+          onTogglePinSession={(sessionId, event) => {
+            event.stopPropagation();
+            useSessionStore.getState().togglePinnedSession(sessionId);
+          }}
+          onLoadMoreSessions={loadMoreSessions}
           sessionTitle={sessionTitle}
+          pinnedSessionIds={pinnedSessionIds}
+          hasMoreSessions={hasMoreSessions}
+          isLoadingSessions={isLoadingSessions}
         />
       </aside>
     );
@@ -71,8 +87,19 @@ export function ConnectedSidebar({
           currentSessionId={currentSessionId}
           onCreateNewSession={createNewSession}
           onSelectSession={loadSession}
-          onDeleteSession={deleteSession}
+          onDeleteSession={(sessionId, event) => {
+            event.stopPropagation();
+            deleteSession(sessionId);
+          }}
+          onTogglePinSession={(sessionId, event) => {
+            event.stopPropagation();
+            useSessionStore.getState().togglePinnedSession(sessionId);
+          }}
+          onLoadMoreSessions={loadMoreSessions}
           sessionTitle={sessionTitle}
+          pinnedSessionIds={pinnedSessionIds}
+          hasMoreSessions={hasMoreSessions}
+          isLoadingSessions={isLoadingSessions}
         />
       </SheetContent>
     </Sheet>

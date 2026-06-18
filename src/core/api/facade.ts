@@ -11,9 +11,8 @@ import { uploadFile as uploadFileApi } from '../../api/upload.js';
 
 export class ApiFacadeImpl implements ApiFacade {
   // Session
-  async listSessions(agentId: string, opts?: { signal?: AbortSignal }) {
-    const data = await listSessionsApi(agentId, opts);
-    return data as unknown[];
+  async listSessions(agentId: string, opts?: { page?: number; pageSize?: number; signal?: AbortSignal }) {
+    return listSessionsApi(agentId, opts);
   }
 
   async createSession(agentId: string, opts?: { signal?: AbortSignal }) {
@@ -26,8 +25,8 @@ export class ApiFacadeImpl implements ApiFacade {
   }
 
   // Events & Run
-  async listSessionEvents(sessionId: string) {
-    return listSessionEventsApi(sessionId) as Promise<{ Events: unknown[] }>;
+  async listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; signal?: AbortSignal }) {
+    return listSessionEventsApi(sessionId, opts);
   }
 
   async listSessionCheckpoints(

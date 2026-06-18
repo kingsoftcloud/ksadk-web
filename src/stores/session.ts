@@ -1,16 +1,51 @@
 import { create } from 'zustand';
 import type { Session } from '../components/chat/types.js';
+import type { SessionEventRecord } from '../types/session-events.js';
+import { buildSessionPaginationState, mergeLoadedPages } from '../utils/session-pagination.js';
 
 export type SessionState = {
   sessions: Session[];
   currentSessionId: string | null;
+  sessionsAgentId: string;
+  sessionsTotal: number;
+  sessionsPage: number;
+  sessionsPageSize: number;
+  loadedPages: Set<number>;
+  hasMoreSessions: boolean;
+  isLoadingSessions: boolean;
+  pinnedSessionIds: string[];
+  eventCache: Record<string, {
+    events: SessionEventRecord[];
+    total: number;
+    offset: number;
+    limit: number;
+    isLoadingOlder: boolean;
+  }>;
 };
 
 export type SessionActions = {
   setSessions: (sessions: Session[]) => void;
   setCurrentSessionId: (id: string | null) => void;
-  upsertSessions: (incoming: Session[]) => void;
+  upsertSessions: (incoming: Session[], meta?: {
+    agentId?: string;
+    total?: number;
+    page?: number;
+    pageSize?: number;
+    replace?: boolean;
+  }) => void;
   removeSession: (id: string) => void;
+  setLoadingSessions: (loading: boolean) => void;
+  resetSessionPagination: (agentId: string) => void;
+  togglePinnedSession: (id: string) => void;
+  setSessionEventCache: (sessionId: string, cache: {
+    events: SessionEventRecord[];
+    total: number;
+    offset: number;
+    limit: number;
+    isLoadingOlder?: boolean;
+  }) => void;
+  setSessionEventLoadingOlder: (sessionId: string, loading: boolean) => void;
+  clearSessionEventCache: (sessionId?: string) => void;
 };
 
 function sessionUpdatedAtValue(session: Session): number {
@@ -25,7 +60,39 @@ function sessionUpdatedAtValue(session: Session): number {
   return 0;
 }
 
-function upsertSessions(current: Session[], incoming: Session[]): Session[] {
+const PINNED_SESSIONS_STORAGE_KEY = 'ksadk.pinnedSessionIds';
+
+function readPinnedSessionIds(): string[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(PINNED_SESSIONS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePinnedSessionIds(ids: string[]) {
+  try {
+    globalThis.localStorage?.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // Ignore unavailable storage, e.g. private mode.
+  }
+}
+
+function sortSessions(sessions: Session[], pinnedSessionIds: string[]): Session[] {
+  const pinned = new Set(pinnedSessionIds);
+  return sessions.slice().sort((left, right) => {
+    const leftPinned = pinned.has(left.SessionId) ? 1 : 0;
+    const rightPinned = pinned.has(right.SessionId) ? 1 : 0;
+    if (leftPinned !== rightPinned) {
+      return rightPinned - leftPinned;
+    }
+    return sessionUpdatedAtValue(right) - sessionUpdatedAtValue(left);
+  });
+}
+
+function upsertSessions(current: Session[], incoming: Session[], pinnedSessionIds: string[]): Session[] {
   const merged = new Map<string, Session>();
   for (const session of current) {
     if (!session?.SessionId) continue;
@@ -35,9 +102,7 @@ function upsertSessions(current: Session[], incoming: Session[]): Session[] {
     if (!session?.SessionId) continue;
     merged.set(session.SessionId, { ...(merged.get(session.SessionId) || {}), ...session });
   }
-  return Array.from(merged.values()).sort(
-    (left, right) => sessionUpdatedAtValue(right) - sessionUpdatedAtValue(left),
-  );
+  return sortSessions(Array.from(merged.values()), pinnedSessionIds);
 }
 
 export type SessionStore = SessionState & SessionActions;
@@ -45,10 +110,120 @@ export type SessionStore = SessionState & SessionActions;
 export const useSessionStore = create<SessionStore>()((set) => ({
   sessions: [],
   currentSessionId: null,
-  setSessions: (sessions) => set({ sessions }),
+  sessionsAgentId: '',
+  sessionsTotal: 0,
+  sessionsPage: 0,
+  sessionsPageSize: 30,
+  loadedPages: new Set(),
+  hasMoreSessions: false,
+  isLoadingSessions: false,
+  pinnedSessionIds: readPinnedSessionIds(),
+  eventCache: {},
+  setSessions: (sessions) =>
+    set((s) => ({ sessions: sortSessions(sessions, s.pinnedSessionIds) })),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
-  upsertSessions: (incoming) =>
-    set((s) => ({ sessions: upsertSessions(s.sessions, incoming) })),
+  upsertSessions: (incoming, meta) =>
+    set((s) => {
+      const base = meta?.replace ? [] : s.sessions;
+      const nextSessions = upsertSessions(base, incoming, s.pinnedSessionIds);
+      const page = meta?.page ?? s.sessionsPage;
+      const pageSize = meta?.pageSize ?? s.sessionsPageSize;
+      const total = meta?.total ?? Math.max(s.sessionsTotal, nextSessions.length);
+      const loadedPages = meta?.replace
+        ? mergeLoadedPages(new Set(), [page])
+        : mergeLoadedPages(s.loadedPages, [page]);
+      const pagination = buildSessionPaginationState({
+        sessionsLength: nextSessions.length,
+        total,
+        page,
+        pageSize,
+        loadedPages,
+      });
+      return {
+        sessions: nextSessions,
+        sessionsAgentId: meta?.agentId ?? s.sessionsAgentId,
+        sessionsTotal: pagination.total,
+        sessionsPage: pagination.page,
+        sessionsPageSize: pagination.pageSize,
+        loadedPages: pagination.loadedPages,
+        hasMoreSessions: pagination.hasMore,
+      };
+    }),
   removeSession: (id) =>
-    set((s) => ({ sessions: s.sessions.filter((session) => session.SessionId !== id) })),
+    set((s) => {
+      const sessions = s.sessions.filter((session) => session.SessionId !== id);
+      const sessionsTotal = Math.max(0, s.sessionsTotal - 1);
+      const pagination = buildSessionPaginationState({
+        sessionsLength: sessions.length,
+        total: sessionsTotal,
+        page: s.sessionsPage,
+        pageSize: s.sessionsPageSize,
+        loadedPages: s.loadedPages,
+      });
+      return {
+        sessions,
+        sessionsTotal,
+        hasMoreSessions: pagination.hasMore,
+        pinnedSessionIds: s.pinnedSessionIds.filter((pinnedId) => pinnedId !== id),
+      };
+    }),
+  setLoadingSessions: (loading) => set({ isLoadingSessions: loading }),
+  resetSessionPagination: (agentId) =>
+    set({
+      sessions: [],
+      sessionsAgentId: agentId,
+      sessionsTotal: 0,
+      sessionsPage: 0,
+      loadedPages: new Set(),
+      hasMoreSessions: false,
+      isLoadingSessions: false,
+    }),
+  togglePinnedSession: (id) =>
+    set((s) => {
+      const pinned = new Set(s.pinnedSessionIds);
+      if (pinned.has(id)) {
+        pinned.delete(id);
+      } else {
+        pinned.add(id);
+      }
+      const pinnedSessionIds = Array.from(pinned);
+      writePinnedSessionIds(pinnedSessionIds);
+      return {
+        pinnedSessionIds,
+        sessions: sortSessions(s.sessions, pinnedSessionIds),
+      };
+    }),
+  setSessionEventCache: (sessionId, cache) =>
+    set((s) => ({
+      eventCache: {
+        ...s.eventCache,
+        [sessionId]: {
+          events: cache.events,
+          total: cache.total,
+          offset: cache.offset,
+          limit: cache.limit,
+          isLoadingOlder: cache.isLoadingOlder ?? false,
+        },
+      },
+    })),
+  setSessionEventLoadingOlder: (sessionId, loading) =>
+    set((s) => {
+      const existing = s.eventCache[sessionId];
+      if (!existing) return {};
+      return {
+        eventCache: {
+          ...s.eventCache,
+          [sessionId]: { ...existing, isLoadingOlder: loading },
+        },
+      };
+    }),
+  clearSessionEventCache: (sessionId) =>
+    set((s) => {
+      if (!sessionId) {
+        return { eventCache: {} };
+      }
+      const next = { ...s.eventCache };
+      delete next[sessionId];
+      return { eventCache: next };
+    }),
 }));

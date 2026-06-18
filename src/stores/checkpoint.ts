@@ -237,8 +237,10 @@ export const useCheckpointStore = create<CheckpointState & CheckpointActions>()(
   clearSessionCheckpoints: (sessionId) => set((state) => {
     const key = String(sessionId || '');
     if (!key) return { checkpointsBySessionId: {}, toolReceiptsBySessionId: {} };
-    const { [key]: _removedCheckpoint, ...checkpointRest } = state.checkpointsBySessionId;
-    const { [key]: _removedReceipt, ...receiptRest } = state.toolReceiptsBySessionId;
+    const checkpointRest = { ...state.checkpointsBySessionId };
+    const receiptRest = { ...state.toolReceiptsBySessionId };
+    delete checkpointRest[key];
+    delete receiptRest[key];
     return { checkpointsBySessionId: checkpointRest, toolReceiptsBySessionId: receiptRest };
   }),
 }));

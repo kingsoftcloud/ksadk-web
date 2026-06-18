@@ -1,11 +1,21 @@
 export interface ApiFacade {
   // Session
-  listSessions(agentId: string, opts?: { signal?: AbortSignal }): Promise<unknown[]>;
+  listSessions(agentId: string, opts?: { page?: number; pageSize?: number; signal?: AbortSignal }): Promise<{
+    Sessions: unknown[];
+    Total?: number;
+    Page?: number;
+    PageSize?: number;
+  }>;
   createSession(agentId: string, opts?: { signal?: AbortSignal }): Promise<{ SessionId: string }>;
   deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
 
   // Events & Run
-  listSessionEvents(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{ Events: unknown[] }>;
+  listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; signal?: AbortSignal }): Promise<{
+    Events: unknown[];
+    Total?: number;
+    Offset?: number;
+    Limit?: number;
+  }>;
   listSessionCheckpoints(params: { agentId: string; sessionId: string; runId?: string }, opts?: { signal?: AbortSignal }): Promise<{ Checkpoints: unknown[] }>;
   listToolReceipts(params: { agentId: string; sessionId: string; runId?: string; checkpointId?: string }, opts?: { signal?: AbortSignal }): Promise<{ ToolReceipts: unknown[] }>;
   previewCheckpointResume(params: { agentId: string; sessionId: string; runId: string; checkpointId: string }, opts?: { signal?: AbortSignal }): Promise<{ Preview: unknown }>;
