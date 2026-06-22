@@ -36,6 +36,24 @@ export function buildCreateTerminalSessionPayload(options = {}) {
   return payload;
 }
 
+export function buildTerminalSessionsUrl(options = {}, locationLike) {
+  const base =
+    locationLike ||
+    (typeof window !== 'undefined'
+      ? window.location
+      : { href: 'http://localhost/' });
+  const url = new URL(TERMINAL_SESSIONS_ENDPOINT, base.href || 'http://localhost/');
+  const sessionId = String(options.sessionId || options.session_id || '').trim();
+  if (sessionId) {
+    url.searchParams.set('session_id', sessionId);
+  }
+  const mode = String(options.mode || '').trim();
+  if (mode) {
+    url.searchParams.set('mode', mode);
+  }
+  return url.pathname + url.search;
+}
+
 export function normalizeTerminalSessions(payload) {
   const rawSessions = Array.isArray(payload?.sessions)
     ? payload.sessions

@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import {
   buildCreateTerminalSessionPayload,
   buildTerminalAttachUrl,
+  buildTerminalSessionsUrl,
   normalizeTerminalSessions,
   sanitizeTerminalInputForPty,
   TERMINAL_SESSIONS_ENDPOINT,
@@ -46,6 +47,7 @@ type NativeTerminalPanelProps = {
   capability: NativeTerminalCapability;
   open: boolean;
   onClose: () => void;
+  sessionId?: string | null;
   autoCreateWhenEmpty?: boolean;
 };
 
@@ -79,6 +81,7 @@ export function NativeTerminalPanel({
   capability,
   open,
   onClose,
+  sessionId,
   autoCreateWhenEmpty = true,
 }: NativeTerminalPanelProps) {
   const [status, setStatus] = useState<TerminalStatus>('idle');
@@ -104,7 +107,13 @@ export function NativeTerminalPanel({
     const response = await fetch(TERMINAL_SESSIONS_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildCreateTerminalSessionPayload({ mode: capability.Mode || 'tui', forceNew })),
+      body: JSON.stringify(
+        buildCreateTerminalSessionPayload({
+          mode: capability.Mode || 'tui',
+          sessionId,
+          forceNew,
+        }),
+      ),
     });
     if (!response.ok) {
       setStatus('error');
@@ -118,12 +127,14 @@ export function NativeTerminalPanel({
     }
     await refreshSessionsRef.current?.();
     setActiveTerminalSessionId(session.terminal_session_id);
-  }, [capability.Mode]);
+  }, [capability.Mode, sessionId]);
 
   const refreshSessions = useCallback(async () => {
     setLoadingSessions(true);
     try {
-      const response = await fetch(TERMINAL_SESSIONS_ENDPOINT);
+      const response = await fetch(
+        buildTerminalSessionsUrl({ sessionId, mode: capability.Mode || 'tui' }),
+      );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -145,7 +156,7 @@ export function NativeTerminalPanel({
     } finally {
       setLoadingSessions(false);
     }
-  }, [autoCreateWhenEmpty, capability.Enabled, createTerminalSession, open]);
+  }, [autoCreateWhenEmpty, capability.Enabled, capability.Mode, createTerminalSession, open, sessionId]);
 
   useEffect(() => {
     terminalSessionsRef.current = terminalSessions;

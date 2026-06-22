@@ -14,6 +14,13 @@ test('terminal session utils build runtime control-plane endpoints', async () =>
     terminalUtils.buildTerminalAttachUrl('/_ksadk/terminal/ws', 'term-1'),
     'ws://localhost/_ksadk/terminal/ws?terminal_session_id=term-1',
   );
+  assert.equal(
+    terminalUtils.buildTerminalSessionsUrl(
+      { sessionId: 'biz-1', mode: 'tui' },
+      { href: 'https://agent.example.com/hosted-ui/tui' },
+    ),
+    '/_ksadk/terminal/sessions?session_id=biz-1&mode=tui',
+  );
 });
 
 test('terminal session utils normalize list payloads and prefer active sessions first', async () => {

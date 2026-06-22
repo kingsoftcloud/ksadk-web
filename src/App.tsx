@@ -408,6 +408,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           <LazyNativeTerminalPanel
             capability={uiCapabilities.NativeTerminal}
             open={true}
+            sessionId={currentSessionId}
             onClose={() => setInitialTuiPanelOpen(false)}
           />
         </Suspense>
