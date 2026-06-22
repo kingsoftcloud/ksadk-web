@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.11 - 2026-06-22
+
+- Reuse native terminal sessions by conversation/session id so reopening the
+  hosted TUI reconnects to the existing session instead of silently creating a
+  duplicate terminal.
+- Add explicit `force_new` support for manual terminal creation while preserving
+  automatic reuse for existing TUI sessions.
+- Exclude generated distribution directories from lint so release checks remain
+  stable after `build:all` regenerates `dist-ksadk`, `dist-hosted`, and
+  `dist-lib`.
+
 ## 0.2.10 - 2026-06-18
 
 - Add session list pagination support for `ListSessions`, including `Total`,
