@@ -39,6 +39,14 @@ test('terminal session utils serialize create payloads safely', async () => {
     terminalUtils.buildCreateTerminalSessionPayload({ mode: 'tui', cols: 120, rows: 40, sessionId: 'main' }),
     { mode: 'tui', cols: 120, rows: 40, session_id: 'main' },
   );
+  assert.deepEqual(
+    terminalUtils.buildCreateTerminalSessionPayload({ mode: 'tui', forceNew: true }),
+    { mode: 'tui', cols: 80, rows: 24, force_new: true },
+  );
+  assert.deepEqual(
+    terminalUtils.buildCreateTerminalSessionPayload({ mode: 'tui', force_new: true }),
+    { mode: 'tui', cols: 80, rows: 24, force_new: true },
+  );
 });
 
 test('terminal session utils strip xterm OSC color responses before sending input to PTY', async () => {

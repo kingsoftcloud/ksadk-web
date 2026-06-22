@@ -30,6 +30,9 @@ export function buildCreateTerminalSessionPayload(options = {}) {
   if (options.options && typeof options.options === 'object') {
     payload.options = options.options;
   }
+  if (options.forceNew === true || options.force_new === true) {
+    payload.force_new = true;
+  }
   return payload;
 }
 

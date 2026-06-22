@@ -45,17 +45,19 @@ describe('Native terminal panel bundle boundaries', () => {
     expect(terminalPanel).toContain('sendPtyInput(data)');
   });
 
-  it('auto-creates one tui session when opened with an empty session list', () => {
+  it('lists first, reuses existing TUI sessions, and only force-creates on explicit new', () => {
     const terminalPanel = readSource('components/native/NativeTerminalPanel.tsx');
 
     expect(terminalPanel).toContain('autoCreateWhenEmpty?: boolean');
     expect(terminalPanel).toContain('autoCreateWhenEmpty = true');
     expect(terminalPanel).toContain('const refreshSessionsRef = useRef<(() => Promise<void>) | null>(null)');
     expect(terminalPanel).toContain('const autoCreateAttemptedRef = useRef(false)');
-    expect(terminalPanel).toContain('buildCreateTerminalSessionPayload({ mode: capability.Mode || \'tui\' })');
+    expect(terminalPanel).toContain('buildCreateTerminalSessionPayload({ mode: capability.Mode || \'tui\', forceNew })');
+    expect(terminalPanel).toContain('return normalized[0]?.terminal_session_id || null');
     expect(terminalPanel).toContain('normalized.length === 0');
     expect(terminalPanel).toContain('!autoCreateAttemptedRef.current');
     expect(terminalPanel).toContain('await createTerminalSession()');
+    expect(terminalPanel).toContain('createTerminalSession({ forceNew: true })');
   });
 
   it('does not retry auto-create loops after close or failed creation', () => {

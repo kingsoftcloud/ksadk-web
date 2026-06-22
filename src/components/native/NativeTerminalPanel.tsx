@@ -98,13 +98,13 @@ export function NativeTerminalPanel({
     [activeTerminalSessionId, terminalSessions],
   );
 
-  const createTerminalSession = useCallback(async () => {
+  const createTerminalSession = useCallback(async ({ forceNew = false } = {}) => {
     autoCreateAttemptedRef.current = true;
     setStatus('connecting');
     const response = await fetch(TERMINAL_SESSIONS_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildCreateTerminalSessionPayload({ mode: capability.Mode || 'tui' })),
+      body: JSON.stringify(buildCreateTerminalSessionPayload({ mode: capability.Mode || 'tui', forceNew })),
     });
     if (!response.ok) {
       setStatus('error');
@@ -470,7 +470,7 @@ export function NativeTerminalPanel({
           </button>
           <button
             type="button"
-            onClick={() => void createTerminalSession()}
+            onClick={() => void createTerminalSession({ forceNew: true })}
             className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
             aria-label="新建终端会话"
           >
@@ -496,7 +496,7 @@ export function NativeTerminalPanel({
             {terminalSessions.length === 0 ? (
               <button
                 type="button"
-                onClick={() => void createTerminalSession()}
+                onClick={() => void createTerminalSession({ forceNew: true })}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-700 px-3 py-5 text-sm text-slate-400 transition hover:bg-slate-900"
               >
                 <Plus className="h-4 w-4" />
