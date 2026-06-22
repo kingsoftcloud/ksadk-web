@@ -30,7 +30,28 @@ export function buildCreateTerminalSessionPayload(options = {}) {
   if (options.options && typeof options.options === 'object') {
     payload.options = options.options;
   }
+  if (options.forceNew === true || options.force_new === true) {
+    payload.force_new = true;
+  }
   return payload;
+}
+
+export function buildTerminalSessionsUrl(options = {}, locationLike) {
+  const base =
+    locationLike ||
+    (typeof window !== 'undefined'
+      ? window.location
+      : { href: 'http://localhost/' });
+  const url = new URL(TERMINAL_SESSIONS_ENDPOINT, base.href || 'http://localhost/');
+  const sessionId = String(options.sessionId || options.session_id || '').trim();
+  if (sessionId) {
+    url.searchParams.set('session_id', sessionId);
+  }
+  const mode = String(options.mode || '').trim();
+  if (mode) {
+    url.searchParams.set('mode', mode);
+  }
+  return url.pathname + url.search;
 }
 
 export function normalizeTerminalSessions(payload) {

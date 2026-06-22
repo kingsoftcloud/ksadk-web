@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import {
   buildCreateTerminalSessionPayload,
   buildTerminalAttachUrl,
+  buildTerminalSessionsUrl,
   normalizeTerminalSessions,
   sanitizeTerminalInputForPty,
   TERMINAL_SESSIONS_ENDPOINT,
@@ -46,6 +47,7 @@ type NativeTerminalPanelProps = {
   capability: NativeTerminalCapability;
   open: boolean;
   onClose: () => void;
+  sessionId?: string | null;
   autoCreateWhenEmpty?: boolean;
 };
 
@@ -79,6 +81,7 @@ export function NativeTerminalPanel({
   capability,
   open,
   onClose,
+  sessionId,
   autoCreateWhenEmpty = true,
 }: NativeTerminalPanelProps) {
   const [status, setStatus] = useState<TerminalStatus>('idle');
@@ -98,13 +101,19 @@ export function NativeTerminalPanel({
     [activeTerminalSessionId, terminalSessions],
   );
 
-  const createTerminalSession = useCallback(async () => {
+  const createTerminalSession = useCallback(async ({ forceNew = false } = {}) => {
     autoCreateAttemptedRef.current = true;
     setStatus('connecting');
     const response = await fetch(TERMINAL_SESSIONS_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildCreateTerminalSessionPayload({ mode: capability.Mode || 'tui' })),
+      body: JSON.stringify(
+        buildCreateTerminalSessionPayload({
+          mode: capability.Mode || 'tui',
+          sessionId,
+          forceNew,
+        }),
+      ),
     });
     if (!response.ok) {
       setStatus('error');
@@ -118,12 +127,14 @@ export function NativeTerminalPanel({
     }
     await refreshSessionsRef.current?.();
     setActiveTerminalSessionId(session.terminal_session_id);
-  }, [capability.Mode]);
+  }, [capability.Mode, sessionId]);
 
   const refreshSessions = useCallback(async () => {
     setLoadingSessions(true);
     try {
-      const response = await fetch(TERMINAL_SESSIONS_ENDPOINT);
+      const response = await fetch(
+        buildTerminalSessionsUrl({ sessionId, mode: capability.Mode || 'tui' }),
+      );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -145,7 +156,7 @@ export function NativeTerminalPanel({
     } finally {
       setLoadingSessions(false);
     }
-  }, [autoCreateWhenEmpty, capability.Enabled, createTerminalSession, open]);
+  }, [autoCreateWhenEmpty, capability.Enabled, capability.Mode, createTerminalSession, open, sessionId]);
 
   useEffect(() => {
     terminalSessionsRef.current = terminalSessions;
@@ -470,7 +481,7 @@ export function NativeTerminalPanel({
           </button>
           <button
             type="button"
-            onClick={() => void createTerminalSession()}
+            onClick={() => void createTerminalSession({ forceNew: true })}
             className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
             aria-label="新建终端会话"
           >
@@ -496,7 +507,7 @@ export function NativeTerminalPanel({
             {terminalSessions.length === 0 ? (
               <button
                 type="button"
-                onClick={() => void createTerminalSession()}
+                onClick={() => void createTerminalSession({ forceNew: true })}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-700 px-3 py-5 text-sm text-slate-400 transition hover:bg-slate-900"
               >
                 <Plus className="h-4 w-4" />

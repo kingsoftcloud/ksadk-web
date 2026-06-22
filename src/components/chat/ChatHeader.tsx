@@ -352,6 +352,7 @@ export function ChatHeader({
           <LazyNativeTerminalPanel
             capability={nativeTerminal}
             open={terminalOpen}
+            sessionId={currentSessionId}
             onClose={() => setTerminalOpen(false)}
           />
         </Suspense>
