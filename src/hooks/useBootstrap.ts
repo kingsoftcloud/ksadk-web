@@ -20,7 +20,7 @@ function normalizeApiFormats(value: unknown): RuntimeApiFormat[] {
   return formats.length > 0 ? formats : ['responses', 'chat_completions'];
 }
 
-async function fetchModels(targetAgentId: string) {
+export async function fetchModels(targetAgentId: string) {
   try {
     const data = await listAgentModels(targetAgentId);
     const models = (data as Record<string, unknown>)?.Models;
@@ -28,7 +28,7 @@ async function fetchModels(targetAgentId: string) {
       useModelStore.getState().upsertModels(models as import('../components/chat/types.js').ModelCatalogItem[]);
     }
     const dataRecord = data as Record<string, unknown>;
-    if ((dataRecord as Record<string, unknown>)?.Current) {
+    if ((dataRecord as Record<string, unknown>)?.Current && !useModelStore.getState().selectedModel) {
       useModelStore.getState().setSelectedModel(String((dataRecord as Record<string, unknown>).Current));
     }
     if ((dataRecord as Record<string, unknown>)?.Source) {
