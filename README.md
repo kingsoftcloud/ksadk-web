@@ -63,6 +63,28 @@ The workflow is `.github/workflows/publish-npm.yml` and is triggered by a
 published GitHub Release or manual `workflow_dispatch`. Do not store npm tokens
 in repository secrets for the normal release path.
 
+GitHub Release notes are entered manually and must use normal Markdown, not a
+JSON-style escaped string. Do not paste text containing literal `\n` sequences
+into the release body. Follow the existing `v0.2.10` / `v0.2.11` structure:
+
+```md
+## What's New
+
+- **Area name**: User-facing behavior change.
+- **Area name**: User-facing behavior change.
+
+## Full Changelog
+https://github.com/kingsoftcloud/ksadk-web/compare/<previous-tag>...<new-tag>
+```
+
+Release notes should stay concise and product-facing:
+
+- Use `## What's New` and `## Full Changelog`.
+- Prefer short bullets that describe shipped behavior, not CI narration.
+- Put verification details in the PR, workflow run, or changelog review notes,
+  not in the GitHub Release body.
+- Keep the release title in the form `ksadk-web vX.Y.Z`.
+
 Before creating a release or dispatching the workflow, verify the payload:
 
 ```bash
