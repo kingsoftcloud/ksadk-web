@@ -100,4 +100,16 @@ describe('Native terminal panel bundle boundaries', () => {
     expect(app).toContain('LazyNativeTerminalPanel');
     expect(runtime).toContain('AgentWorkbenchProps');
   });
+
+  it('treats initial TUI as a self-opening terminal surface', () => {
+    const app = readSource('App.tsx');
+    const terminalPanel = readSource('components/native/NativeTerminalPanel.tsx');
+
+    expect(app).toContain("useState(initialSurface === 'tui')");
+    expect(app).toContain('const initialTuiOpen = initialTuiPanelOpen && Boolean(uiCapabilities.NativeTerminal?.Enabled)');
+    expect(terminalPanel).toContain('autoCreateWhenEmpty = true');
+    expect(terminalPanel).toContain('void refreshSessions()');
+    expect(terminalPanel).toContain('normalized.length === 0');
+    expect(terminalPanel).toContain('await createTerminalSession()');
+  });
 });
