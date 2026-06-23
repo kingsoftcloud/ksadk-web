@@ -7,7 +7,7 @@ import { useSessionStore } from '../stores/session.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { dispatchRunEventToStores, resetDispatcherState } from '../core/run/dispatcher.js';
 
-function createApiFacade(calls: Record<string, unknown>[]): ApiFacade {
+function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData[] = []): ApiFacade {
   return {
     async listSessions() { return []; },
     async createSession() { return { SessionId: 'session-1' }; },
@@ -53,7 +53,8 @@ function createApiFacade(calls: Record<string, unknown>[]): ApiFacade {
     async getWorkspaceFileContent() { return ''; },
     async listAgentModels() { return {}; },
     async getAgentUiBootstrap() { return {}; },
-    async uploadFile() {
+    async uploadFile(formData) {
+      uploadCalls.push(formData);
       return { FileData: { fileUri: 'file-1', displayName: 'file.txt', mimeType: 'text/plain' } };
     },
   };
@@ -184,7 +185,8 @@ describe('RunEngineImpl', () => {
 
   it('sends uploaded attachments as Responses input_file references', async () => {
     const calls: Record<string, unknown>[] = [];
-    const engine = createRunEngine(createApiFacade(calls));
+    const uploadCalls: FormData[] = [];
+    const engine = createRunEngine(createApiFacade(calls, uploadCalls));
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -211,6 +213,8 @@ describe('RunEngineImpl', () => {
       ResponsesInput: [{ role: 'user', content: expectedContent }],
       Messages: [{ role: 'user', content: expectedContent }],
     });
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0]?.get('AgentId')).toBe('agent-live');
   });
 
   it('sends image attachments as Responses input_image data URLs', async () => {

@@ -540,6 +540,7 @@ export class RunEngineImpl implements RunEngine {
       }
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('AgentId', this.config.agentId);
       try {
         const uploadData = await this.api.uploadFile(formData, { signal: this.abortController?.signal });
         if (uploadData?.FileData?.fileUri) {
