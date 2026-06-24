@@ -94,10 +94,23 @@ function normalizeTableGroups(block) {
     normalizedLines.push(...splitInlineTableBlob(line).map(normalizeTableLineArtifacts));
   }
 
-  const repairedLines = [];
+  const compactedTableLines = [];
   for (let index = 0; index < normalizedLines.length; index += 1) {
     const line = normalizedLines[index];
-    const nextLine = normalizedLines[index + 1] || '';
+    if (
+      line.trim().length === 0 &&
+      isTableRow(compactedTableLines[compactedTableLines.length - 1] || '') &&
+      isSeparatorRow(normalizedLines[index + 1] || '')
+    ) {
+      continue;
+    }
+    compactedTableLines.push(line);
+  }
+
+  const repairedLines = [];
+  for (let index = 0; index < compactedTableLines.length; index += 1) {
+    const line = compactedTableLines[index];
+    const nextLine = compactedTableLines[index + 1] || '';
     repairedLines.push(line);
     if (
       isTableRow(line) &&
@@ -105,7 +118,7 @@ function normalizeTableGroups(block) {
       !isSeparatorRow(nextLine) &&
       tableColumnCount(line) === tableColumnCount(nextLine)
     ) {
-      const previousLine = normalizedLines[index - 1] || '';
+      const previousLine = compactedTableLines[index - 1] || '';
       const previousIsTable = isTableRow(previousLine);
       const lineIndentation = line.match(/^(\s*)/)?.[1] || '';
       if (!previousIsTable && lineIndentation.length === 0) {

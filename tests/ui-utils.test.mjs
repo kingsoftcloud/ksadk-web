@@ -164,6 +164,23 @@ test('preprocessMarkdown repairs malformed packed market tables', () => {
   assert.match(normalized, /\n\n- 数据仅供参考/);
 });
 
+test('preprocessMarkdown keeps table headers attached to delayed separator rows', () => {
+  const raw = [
+    '## 🧩可用技能一览',
+    '',
+    '| 技能名称 | 描述 | 版本 |',
+    '',
+    '|:---------|:-----|:----:|',
+    '| 🌿 kingsoft-ppt-dark-botanical | 生成深色科技风 HTML 演示文稿，适合产品发布会、技术分享、培训简报等 | v1 |',
+  ].join('\n');
+
+  const normalized = preprocessMarkdown(raw);
+
+  assert.match(normalized, /\| 技能名称 \| 描述 \| 版本 \|\n\|:---------\|:-----\|:----:\|/);
+  assert.doesNotMatch(normalized, /\| 技能名称 \| 描述 \| 版本 \|\n\n\|:---------/);
+  assert.doesNotMatch(normalized, /\|:---------\|:-----\|:----:\|\n\| --- \| --- \| --- \|/);
+});
+
 test('preprocessMarkdown keeps consecutive heading markers intact', () => {
   assert.equal(preprocessMarkdown('##⏭️ 下一步'), '## ⏭️ 下一步');
   assert.equal(preprocessMarkdown('###📌 标题'), '### 📌 标题');

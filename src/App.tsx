@@ -121,19 +121,14 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
         return;
       }
       const refresh = () => {
+        useSessionStore.getState().clearSessionEventCache(sessionId);
         void fetchSessions(agentIdRef.current, sessionId);
-        if (
-          currentSessionIdRef.current === sessionId &&
-          !useStreamingStore.getState().isStreaming
-        ) {
-          void loadSession(sessionId);
-        }
       };
       queueMicrotask(refresh);
       window.setTimeout(refresh, 1800);
       window.setTimeout(refresh, 5000);
     },
-    [agentIdRef, currentSessionIdRef, fetchSessions, loadSession],
+    [agentIdRef, fetchSessions],
   );
 
   const selectedModelMetadata =

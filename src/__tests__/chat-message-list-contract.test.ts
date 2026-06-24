@@ -122,4 +122,16 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('后台长任务失败');
     expect(lifecycleSource).toContain('status: terminalActivity.status');
   });
+
+  it('does not let stale session history overwrite the active transcript', () => {
+    const appSource = readFileSync(resolve(repoRoot, 'src/App.tsx'), 'utf8');
+    const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+
+    expect(appSource).not.toContain('void loadSession(sessionId);');
+    expect(appSource).toContain('clearSessionEventCache(sessionId)');
+    expect(lifecycleSource).toContain('const isStillCurrentSession = () => currentSessionIdRef.current === sessionId;');
+    expect(lifecycleSource).toContain('if (!isStillCurrentSession()) {');
+    expect(lifecycleSource).toContain('currentSessionIdRef.current === options.sessionId');
+    expect(lifecycleSource).toContain('historyShouldReplaceMessages(history, useMessageStore.getState().messages)');
+  });
 });

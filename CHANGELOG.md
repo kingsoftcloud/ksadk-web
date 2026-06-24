@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.13 - 2026-06-24
+
+- Prevent just-finished streamed messages from disappearing after a follow-up
+  turn by avoiding stale session-event replay on run settlement and clearing
+  the affected session event cache before sidebar refresh.
+- Guard restored run subscriptions and asynchronous session loads so delayed
+  events from a previous session cannot overwrite the currently visible
+  transcript after switching or creating sessions.
+- Repair GFM table rendering when streamed Markdown inserts a blank line between
+  a table header and its alignment separator.
+- Add regression coverage for stale transcript overwrite prevention and delayed
+  Markdown table separators.
+
 ## 0.2.12 - 2026-06-24
 
 - Forward the selected model metadata in hosted `RunAgent` requests so the

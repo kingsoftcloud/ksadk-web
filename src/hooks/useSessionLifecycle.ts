@@ -25,6 +25,16 @@ const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_EVENTS_PAGE_SIZE = 50;
 
+function historyShouldReplaceMessages(history: Message[], currentMessages: Message[]) {
+  if (!currentMessages.length) {
+    return true;
+  }
+  if (!history.length) {
+    return false;
+  }
+  return history.length >= currentMessages.length;
+}
+
 function terminalActivityForRunEvent(event: SessionEventRecord): {
   status: 'completed' | 'failed' | 'stopped';
   phase: string;
@@ -213,8 +223,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                   countEvent: false,
                 });
               }
+              if (currentSessionIdRef.current !== options.sessionId) {
+                stopRestoreSubscription();
+                break;
+              }
               const history = buildMessagesFromSessionEvents(mergedEvents);
-              useMessageStore.getState().setMessages(history);
+              if (historyShouldReplaceMessages(history, useMessageStore.getState().messages)) {
+                useMessageStore.getState().setMessages(history);
+              }
             } catch (error) {
               console.warn('Failed to parse run event data', dataString, error);
             }
@@ -243,6 +259,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const loadSession = useCallback(
     async (sessionId: string) => {
       currentSessionIdRef.current = sessionId;
+      const isStillCurrentSession = () => currentSessionIdRef.current === sessionId;
       useSessionStore.getState().setCurrentSessionId(sessionId);
       resetCompaction();
       runSubscriptionAbortRef.current?.abort();
@@ -273,12 +290,18 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                 offset,
                 limit: SESSION_EVENTS_PAGE_SIZE,
               }) as { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number };
+          if (!isStillCurrentSession()) {
+            return;
+          }
           useSessionStore.getState().setSessionEventCache(sessionId, {
             events: (data.Events || []) as SessionEventRecord[],
             total,
             offset: Number(data.Offset ?? offset),
             limit: Number(data.Limit ?? data.Events?.length ?? 0),
           });
+        }
+        if (!isStillCurrentSession()) {
+          return;
         }
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
@@ -311,6 +334,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (eventsData?.Events) {
           const events = eventsData.Events;
           const history = buildMessagesFromSessionEvents(events);
+          if (!isStillCurrentSession()) {
+            return;
+          }
           useMessageStore.getState().setMessages(history);
           void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
           const activeRuns = findActiveRunIds(events, {
@@ -331,6 +357,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             });
           }
         } else {
+          if (!isStillCurrentSession()) {
+            return;
+          }
           useMessageStore.getState().setMessages([]);
           useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
           useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
