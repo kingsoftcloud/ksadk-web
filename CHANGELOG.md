@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.12 - 2026-06-24
+
+- Forward the selected model metadata in hosted `RunAgent` requests so the
+  runtime can preserve per-model capabilities such as image input and reasoning
+  support after model hot switching.
+- Keep the selected model lookup stable before run engine creation, avoiding a
+  stale metadata payload when the user changes models and immediately submits a
+  new message.
+- Add regression coverage for `Model` and `ModelMetadata` propagation through
+  the Responses-format run request path.
+
 ## 0.2.11 - 2026-06-22
 
 - Reuse native terminal sessions by conversation/session id so reopening the
