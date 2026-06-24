@@ -192,7 +192,12 @@ describe('RunEngineImpl', () => {
       agentId: 'agent-live',
       apiFormats: ['responses'],
       agentFramework: 'langgraph',
-      selectedModel: '',
+      selectedModel: 'minimax-m3',
+      selectedModelMetadata: {
+        id: 'minimax-m3',
+        display_name: 'MiniMax M3',
+        capabilities: { multimodal_input_image: true },
+      },
       thinkingMode: 'auto',
     });
 
@@ -210,6 +215,11 @@ describe('RunEngineImpl', () => {
     ];
     expect(calls[0]).toMatchObject({
       ApiFormat: 'responses',
+      Model: 'minimax-m3',
+      ModelMetadata: {
+        id: 'minimax-m3',
+        capabilities: { multimodal_input_image: true },
+      },
       ResponsesInput: [{ role: 'user', content: expectedContent }],
       Messages: [{ role: 'user', content: expectedContent }],
     });

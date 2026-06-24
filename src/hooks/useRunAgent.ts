@@ -7,7 +7,7 @@ import type { RuntimeApiFormat } from '../types/api.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { RunEngineImpl, dispatchRunEventToStores, resetDispatcherState } from '../core/run/index.js';
-import type { Session } from '../components/chat/types.js';
+import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 
 type QueuedDraft = {
@@ -21,6 +21,7 @@ type RunAgentContext = {
   agentFramework: string;
   apiFormats: RuntimeApiFormat[];
   selectedModel: string;
+  selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
   uiCapabilities: UiCapabilities;
   isMobile: boolean;
@@ -40,6 +41,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     apiFormats,
     agentFramework,
     selectedModel,
+    selectedModelMetadata,
     thinkingMode,
     currentSessionIdRef,
     queuedDraftRef,
@@ -53,10 +55,11 @@ export function useRunAgent(ctx: RunAgentContext) {
       apiFormats,
       agentFramework,
       selectedModel,
+      selectedModelMetadata,
       thinkingMode,
       checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
     });
-  }, [agentId, apiFormats, agentFramework, selectedModel, thinkingMode, uiCapabilities.RunLifecycle?.CheckpointResumePreview]);
+  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, uiCapabilities.RunLifecycle?.CheckpointResumePreview]);
 
   const getEngine = useCallback((sessionId: string | null | undefined) => {
     const key = String(sessionId || 'new-session');

@@ -582,6 +582,7 @@ export class RunEngineImpl implements RunEngine {
       Stream: true,
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,
+      ModelMetadata: this.config.selectedModelMetadata || undefined,
       ModelOptions: buildModelOptionsFromThinkingMode(normalizeThinkingMode(this.config.thinkingMode)),
     };
 

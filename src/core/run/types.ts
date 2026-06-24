@@ -1,4 +1,5 @@
 import type { RuntimeApiFormat } from '../../types/api.js';
+import type { ModelCatalogItem } from '../../components/chat/types.js';
 
 export type RunStage =
   | 'idle' | 'creating-session' | 'uploading-files'
@@ -36,6 +37,7 @@ export type RunEngineConfig = {
   apiFormats: RuntimeApiFormat[];
   agentFramework: string;
   selectedModel: string;
+  selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
   checkpointResumePreviewEnabled?: boolean;
 };

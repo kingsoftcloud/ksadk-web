@@ -136,12 +136,16 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     [agentIdRef, currentSessionIdRef, fetchSessions, loadSession],
   );
 
+  const selectedModelMetadata =
+    availableModels.find((model) => model.id === selectedModel) || null;
+
   const { submitDraft, stopGeneration, disconnectRun, resumeCheckpoint } = useRunAgent({
     agentId,
     currentSessionId,
     agentFramework,
     apiFormats,
     selectedModel,
+    selectedModelMetadata,
     thinkingMode,
     uiCapabilities,
     isMobile,
@@ -245,8 +249,6 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
         ? 'Hermes'
         : '原生运行时';
 
-  const selectedModelMetadata =
-    availableModels.find((model) => model.id === selectedModel) || null;
   const selectedModelLabel = selectedModelMetadata?.display_name || selectedModel || '';
   const desktopSidebarVisible = !isMobile && sidebarOpen && hostedChatEnabled;
   const initialSurfaceAppliedRef = useRef(false);
