@@ -161,7 +161,7 @@ describe('ApiFacadeImpl', () => {
       });
       const data = String(url).endsWith('/ResumeRun')
         ? {}
-        : String(url).endsWith('/PreviewCheckpointResume')
+        : String(url).endsWith('/GetCheckpointResumePreview')
           ? { Preview: { Risk: { Level: 'medium' } } }
           : String(url).endsWith('/ListToolReceipts')
             ? { ToolReceipts: [{ ReceiptId: 'tr-1' }] }
@@ -207,7 +207,7 @@ describe('ApiFacadeImpl', () => {
         body: { AgentId: 'agent-1', SessionId: 'session-1', RunId: 'run-1' },
       },
       {
-        url: '/agentengine/api/v1/PreviewCheckpointResume',
+        url: '/agentengine/api/v1/GetCheckpointResumePreview',
         body: {
           AgentId: 'agent-1',
           SessionId: 'session-1',

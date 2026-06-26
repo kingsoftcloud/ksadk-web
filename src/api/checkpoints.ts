@@ -15,7 +15,7 @@ export type ResumeRunParams = {
   invocationId?: string;
 };
 
-export type PreviewCheckpointResumeParams = {
+export type GetCheckpointResumePreviewParams = {
   agentId: string;
   sessionId: string;
   runId: string;
@@ -44,10 +44,10 @@ export async function listSessionCheckpoints(
 }
 
 export async function previewCheckpointResume(
-  params: PreviewCheckpointResumeParams,
+  params: GetCheckpointResumePreviewParams,
   options?: { signal?: AbortSignal },
 ): Promise<unknown> {
-  return postJsonAction('PreviewCheckpointResume', {
+  return postJsonAction('GetCheckpointResumePreview', {
     AgentId: params.agentId,
     SessionId: params.sessionId,
     RunId: params.runId,
