@@ -16,6 +16,7 @@ import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
+import { loadCompleteSessionEventHistory } from '../utils/session-event-history.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
@@ -24,6 +25,7 @@ import type { ApiFacade } from '../core/api/types.js';
 const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_EVENTS_PAGE_SIZE = 50;
+const SESSION_EVENTS_RESTORE_PAGE_SIZE = 500;
 
 function historyShouldReplaceMessages(history: Message[], currentMessages: Message[]) {
   if (!currentMessages.length) {
@@ -268,38 +270,23 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        const cached = useSessionStore.getState().eventCache[sessionId];
-        let data: { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number };
-        if (cached) {
-          data = {
-            Events: cached.events,
-            Total: cached.total,
-            Offset: cached.offset,
-            Limit: cached.limit,
-          };
-        } else {
-          const probe = await api.listSessionEvents(sessionId, {
-            offset: 0,
-            limit: 1,
-          });
-          const total = Number(probe.Total ?? probe.Events?.length ?? 0);
-          const offset = Math.max(0, total - SESSION_EVENTS_PAGE_SIZE);
-          data = total <= 1
-            ? probe as { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number }
-            : await api.listSessionEvents(sessionId, {
-                offset,
-                limit: SESSION_EVENTS_PAGE_SIZE,
-              }) as { Events?: SessionEventRecord[]; Total?: number; Offset?: number; Limit?: number };
-          if (!isStillCurrentSession()) {
-            return;
-          }
-          useSessionStore.getState().setSessionEventCache(sessionId, {
-            events: (data.Events || []) as SessionEventRecord[],
-            total,
-            offset: Number(data.Offset ?? offset),
-            limit: Number(data.Limit ?? data.Events?.length ?? 0),
-          });
+        const historyData = await loadCompleteSessionEventHistory(
+          sessionId,
+          api.listSessionEvents,
+          {
+            pageSize: SESSION_EVENTS_RESTORE_PAGE_SIZE,
+            shouldContinue: isStillCurrentSession,
+          },
+        );
+        if (!historyData) {
+          return;
         }
+        useSessionStore.getState().setSessionEventCache(sessionId, {
+          events: historyData.events,
+          total: historyData.total,
+          offset: historyData.offset,
+          limit: historyData.limit,
+        });
         if (!isStillCurrentSession()) {
           return;
         }
@@ -330,9 +317,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         } else {
           useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
         }
-        const eventsData = data as { Events?: SessionEventRecord[] };
-        if (eventsData?.Events) {
-          const events = eventsData.Events;
+        if (historyData.events) {
+          const events = historyData.events;
           const history = buildMessagesFromSessionEvents(events);
           if (!isStillCurrentSession()) {
             return;

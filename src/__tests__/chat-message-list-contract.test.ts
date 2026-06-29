@@ -88,8 +88,8 @@ describe('chat message list contracts', () => {
   it('loads checkpoint metadata as best effort without blocking session history', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
-    expect(lifecycleSource).toContain('const probe = await api.listSessionEvents(sessionId, {');
-    expect(lifecycleSource).toContain('limit: SESSION_EVENTS_PAGE_SIZE');
+    expect(lifecycleSource).toContain('loadCompleteSessionEventHistory');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_RESTORE_PAGE_SIZE');
     expect(lifecycleSource).toContain('loadOlderSessionEvents');
     expect(lifecycleSource).not.toContain('Promise.all([\\n          api.listSessionEvents(sessionId)');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");

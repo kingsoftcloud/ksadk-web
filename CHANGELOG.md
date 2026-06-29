@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.15 - 2026-06-29
+
+- Restore complete session event history when switching sessions instead of
+  rebuilding the transcript from only the newest event page, preventing older
+  turns and tool calls from disappearing until a manual refresh or top-scroll.
+- Add guarded paginated event-history loading so stale session switches cannot
+  apply partial history to the active transcript.
+- Add regression coverage for long sessions whose newest event page starts in
+  the middle of a later turn.
+
 ## 0.2.14 - 2026-06-29
 
 - Restore persisted `stage_tool_call` and `stage_tool_result` events as visible
