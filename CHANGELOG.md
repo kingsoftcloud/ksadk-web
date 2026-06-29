@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.14 - 2026-06-29
+
+- Restore persisted `stage_tool_call` and `stage_tool_result` events as visible
+  tool calls/results when rebuilding session history, matching KSADK runtime
+  background stage activity events.
+- Add regression coverage for DeepResearch-style persisted stage tool activity
+  so tool progress remains visible after refresh or session switching.
+
 ## 0.2.13 - 2026-06-24
 
 - Prevent just-finished streamed messages from disappearing after a follow-up

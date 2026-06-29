@@ -1211,6 +1211,88 @@ test('session event utils restore persisted tool calls and results around assist
   );
 });
 
+test('session event utils restore persisted stage tool events around assistant output', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-user-stage',
+      EventType: 'user_message',
+      InvocationId: 'inv-stage-tools',
+      Content: { role: 'user', parts: [{ text: '调研 2026 年 AI 搜索趋势' }] },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-stage-tool-call',
+      EventType: 'stage_tool_call',
+      InvocationId: 'inv-stage-tools',
+      Content: { role: 'model', parts: [{ text: '搜索来源' }] },
+      Metadata: {
+        tool_name: 'metaso.search',
+        tool_args: { query: '2026 AI search trend' },
+        display_title: '搜索来源',
+        display_summary: '正在检索 2026 AI 搜索趋势。',
+      },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-stage-tool-result',
+      EventType: 'stage_tool_result',
+      InvocationId: 'inv-stage-tools',
+      Content: { role: 'user', parts: [{ text: '检索到 8 条来源，保留 5 条。' }] },
+      Metadata: {
+        tool_name: 'metaso.search',
+        tool_output: {
+          ok: true,
+          kept: 5,
+          total: 8,
+        },
+        display_title: '搜索来源',
+        display_summary: '检索到 8 条来源，保留 5 条。',
+      },
+      Timestamp: 3,
+    },
+    {
+      EventId: 'evt-assistant-stage',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-stage-tools',
+      Content: { role: 'model', parts: [{ text: '已完成搜索阶段。' }] },
+      Timestamp: 4,
+    },
+  ]);
+
+  assert.deepEqual(
+    messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      tools: message.tools,
+    })),
+    [
+      {
+        id: 'evt-user-stage',
+        role: 'user',
+        content: '调研 2026 年 AI 搜索趋势',
+        tools: undefined,
+      },
+      {
+        id: 'evt-assistant-stage',
+        role: 'model',
+        content: '已完成搜索阶段。',
+        tools: {
+          'metaso.search': {
+            name: 'metaso.search',
+            args: JSON.stringify({ query: '2026 AI search trend' }, null, 2),
+            output: JSON.stringify({ ok: true, kept: 5, total: 8 }, null, 2),
+            status: 'completed',
+          },
+        },
+      },
+    ],
+  );
+});
+
 test('session event utils settle running tool calls when invocation completed', async () => {
   const sessionEvents = await loadSessionEventUtils();
 

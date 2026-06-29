@@ -17,6 +17,13 @@ const RUN_TERMINAL_STATUSES = new Set([
   'aborted',
 ]);
 
+const TOOL_EVENT_TYPES = new Set([
+  'tool_call',
+  'tool_result',
+  'stage_tool_call',
+  'stage_tool_result',
+]);
+
 function textFromUnknown(value) {
   if (typeof value === 'string') {
     return value;
@@ -299,7 +306,7 @@ function stringifyToolPayload(value) {
 
 function toolMessageFromSessionEvent(event) {
   const eventType = String(event?.EventType || '');
-  if (eventType !== 'tool_call' && eventType !== 'tool_result') {
+  if (!TOOL_EVENT_TYPES.has(eventType)) {
     return null;
   }
   const name = String(
@@ -315,7 +322,7 @@ function toolMessageFromSessionEvent(event) {
     status: 'running',
   };
   const tool =
-    eventType === 'tool_result'
+    eventType === 'tool_result' || eventType === 'stage_tool_result'
       ? (() => {
           const output = stringifyToolPayload(
             event.Metadata?.tool_output
@@ -499,7 +506,7 @@ export function buildMessageFromSessionEvent(event) {
       : null;
   }
 
-  if (eventType === 'tool_call' || eventType === 'tool_result') {
+  if (TOOL_EVENT_TYPES.has(eventType)) {
     return toolMessageFromSessionEvent(event);
   }
 
@@ -619,7 +626,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     if (
       invocationId &&
-      ['assistant_message', 'assistant_stream_snapshot', 'reasoning', 'tool_call'].includes(String(event.EventType || ''))
+      ['assistant_message', 'assistant_stream_snapshot', 'reasoning', 'tool_call', 'tool_result', 'stage_tool_call', 'stage_tool_result'].includes(String(event.EventType || ''))
     ) {
       outputByInvocation.add(invocationId);
     }
@@ -687,7 +694,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     if (!message) {
       continue;
     }
-    if (message.eventType === 'tool_call' || message.eventType === 'tool_result') {
+    if (TOOL_EVENT_TYPES.has(message.eventType)) {
       const invocationId = String(event.InvocationId || '').trim();
       if (!invocationId) {
         flushPendingReasoning();
