@@ -13,6 +13,21 @@ export type ListSessionEventsFn = (
   opts?: { offset?: number; limit?: number },
 ) => Promise<ListSessionEventsPage>;
 
+export function resolveOlderSessionEventPage(
+  cache: { offset: number; total: number },
+  pageSize: number,
+): { offset: number; limit: number } | null {
+  const offset = Math.max(0, Number(cache.offset) || 0);
+  const total = Math.max(0, Number(cache.total) || 0);
+  if (offset >= total) {
+    return null;
+  }
+  return {
+    offset,
+    limit: Math.min(Math.max(1, Number(pageSize) || 1), total - offset),
+  };
+}
+
 export async function loadCompleteSessionEventHistory(
   sessionId: string,
   listSessionEvents: ListSessionEventsFn,
@@ -43,34 +58,40 @@ export async function loadCompleteSessionEventHistory(
     };
   }
 
-  let nextOffset = Math.max(0, total - pageSize);
-  const tail = await listSessionEvents(sessionId, {
-    offset: nextOffset,
-    limit: pageSize,
-  });
+  const tailPage = resolveOlderSessionEventPage({ offset: 0, total }, pageSize);
+  if (!tailPage) {
+    return {
+      events: [],
+      total,
+      offset: 0,
+      limit: 0,
+    };
+  }
+  const tail = await listSessionEvents(sessionId, tailPage);
   if (shouldAbort()) return null;
 
   let merged = (tail.Events || []) as SessionEventRecord[];
+  let loadedCount = merged.length;
 
-  while (nextOffset > 0) {
-    const previousOffset = Math.max(0, nextOffset - pageSize);
-    const previousLimit = nextOffset - previousOffset;
-    const page = await listSessionEvents(sessionId, {
-      offset: previousOffset,
-      limit: previousLimit,
-    });
+  while (loadedCount < total) {
+    const nextPage = resolveOlderSessionEventPage(
+      { offset: loadedCount, total },
+      pageSize,
+    );
+    if (!nextPage) break;
+    const page = await listSessionEvents(sessionId, nextPage);
     if (shouldAbort()) return null;
     merged = mergeSessionEventRecords(
       (page.Events || []) as SessionEventRecord[],
       merged,
     ) as SessionEventRecord[];
-    nextOffset = previousOffset;
+    loadedCount += (page.Events || []).length;
   }
 
   return {
     events: merged,
     total,
-    offset: 0,
+    offset: loadedCount,
     limit: merged.length,
   };
 }

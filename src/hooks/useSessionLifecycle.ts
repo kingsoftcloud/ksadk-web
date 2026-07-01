@@ -16,7 +16,10 @@ import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
-import { loadCompleteSessionEventHistory } from '../utils/session-event-history.js';
+import {
+  loadCompleteSessionEventHistory,
+  resolveOlderSessionEventPage,
+} from '../utils/session-event-history.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
@@ -502,23 +505,23 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const loadOlderSessionEvents = useCallback(async (sessionId: string) => {
     const cache = useSessionStore.getState().eventCache[sessionId];
-    if (!cache || cache.offset <= 0 || cache.isLoadingOlder) {
+    if (!cache || cache.isLoadingOlder) {
       return;
     }
-    const nextOffset = Math.max(0, cache.offset - SESSION_EVENTS_PAGE_SIZE);
-    const nextLimit = cache.offset - nextOffset;
+    const nextPage = resolveOlderSessionEventPage(cache, SESSION_EVENTS_PAGE_SIZE);
+    if (!nextPage) {
+      return;
+    }
     try {
       useSessionStore.getState().setSessionEventLoadingOlder(sessionId, true);
-      const data = await api.listSessionEvents(sessionId, {
-        offset: nextOffset,
-        limit: nextLimit,
-      });
+      const data = await api.listSessionEvents(sessionId, nextPage);
       const incoming = (data.Events || []) as SessionEventRecord[];
       const merged = mergeSessionEventRecords(incoming, cache.events) as SessionEventRecord[];
+      const loadedCount = cache.offset + incoming.length;
       useSessionStore.getState().setSessionEventCache(sessionId, {
         events: merged,
         total: Number(data.Total ?? cache.total),
-        offset: Number(data.Offset ?? nextOffset),
+        offset: loadedCount,
         limit: merged.length,
       });
       if (currentSessionIdRef.current === sessionId) {

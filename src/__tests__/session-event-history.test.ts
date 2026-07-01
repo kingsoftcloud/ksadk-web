@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { loadCompleteSessionEventHistory } from '../utils/session-event-history.js';
+import {
+  loadCompleteSessionEventHistory,
+  resolveOlderSessionEventPage,
+} from '../utils/session-event-history.js';
 
 function makeEvents(total: number) {
   return Array.from({ length: total }, (_, index) => ({
@@ -21,8 +24,10 @@ describe('session event history loading', () => {
         calls.push({ offset: opts?.offset, limit: opts?.limit });
         const offset = opts?.offset ?? 0;
         const limit = opts?.limit ?? sourceEvents.length;
+        const end = Math.max(sourceEvents.length - offset, 0);
+        const start = Math.max(end - limit, 0);
         return {
-          Events: sourceEvents.slice(offset, offset + limit),
+          Events: sourceEvents.slice(start, end),
           Total: sourceEvents.length,
           Offset: offset,
           Limit: limit,
@@ -34,18 +39,18 @@ describe('session event history loading', () => {
     expect(result?.events.map((event) => event.SeqId)).toEqual(
       sourceEvents.map((event) => event.SeqId),
     );
-    expect(result?.offset).toBe(0);
     expect(result?.total).toBe(306);
     expect(calls).toEqual([
       { offset: 0, limit: 1 },
-      { offset: 256, limit: 50 },
-      { offset: 206, limit: 50 },
-      { offset: 156, limit: 50 },
-      { offset: 106, limit: 50 },
-      { offset: 56, limit: 50 },
-      { offset: 6, limit: 50 },
-      { offset: 0, limit: 6 },
+      { offset: 0, limit: 50 },
+      { offset: 50, limit: 50 },
+      { offset: 100, limit: 50 },
+      { offset: 150, limit: 50 },
+      { offset: 200, limit: 50 },
+      { offset: 250, limit: 50 },
+      { offset: 300, limit: 6 },
     ]);
+    expect(result?.offset).toBe(306);
   });
 
   it('stops without returning partial history when the selected session changes mid-load', async () => {
@@ -58,8 +63,10 @@ describe('session event history loading', () => {
         calls += 1;
         const offset = opts?.offset ?? 0;
         const limit = opts?.limit ?? sourceEvents.length;
+        const end = Math.max(sourceEvents.length - offset, 0);
+        const start = Math.max(end - limit, 0);
         return {
-          Events: sourceEvents.slice(offset, offset + limit),
+          Events: sourceEvents.slice(start, end),
           Total: sourceEvents.length,
           Offset: offset,
           Limit: limit,
@@ -73,5 +80,17 @@ describe('session event history loading', () => {
 
     expect(result).toBeNull();
     expect(calls).toBe(2);
+  });
+
+  it('requests the next older page by skipping already loaded latest events', () => {
+    expect(resolveOlderSessionEventPage({ offset: 50, total: 306 }, 50)).toEqual({
+      offset: 50,
+      limit: 50,
+    });
+    expect(resolveOlderSessionEventPage({ offset: 300, total: 306 }, 50)).toEqual({
+      offset: 300,
+      limit: 6,
+    });
+    expect(resolveOlderSessionEventPage({ offset: 306, total: 306 }, 50)).toBeNull();
   });
 });
