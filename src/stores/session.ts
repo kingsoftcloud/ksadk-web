@@ -55,7 +55,7 @@ function sessionUpdatedAtValue(session: Session): number {
     return Number.isNaN(parsed) ? 0 : parsed;
   }
   if (typeof raw === 'number') {
-    return raw;
+    return Number.isFinite(raw) ? (raw > 1e11 ? raw : raw * 1000) : 0;
   }
   return 0;
 }

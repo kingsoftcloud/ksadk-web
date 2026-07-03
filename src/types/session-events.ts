@@ -1,6 +1,9 @@
 export type SessionEventRecord = {
   EventId?: string;
   EventType?: string;
+  // Backend returns the owning session id on each event record; dispatcher
+  // falls back to it when the wrapping RunEvent has no sessionId.
+  SessionId?: string;
   InvocationId?: string;
   Content?: {
     role?: string;

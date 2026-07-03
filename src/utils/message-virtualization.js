@@ -2,6 +2,13 @@ function clampIndex(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Compute the visible slice of a message transcript for virtualized rendering.
+ *
+ * @template T
+ * @param {{ items?: T[]; scrollTop?: number; viewportHeight?: number; overscan?: number; defaultItemHeight?: number; measuredHeights?: Map<string, number>; getItemKey?: (item: T, index: number) => string }} [options]
+ * @returns {{ startIndex: number; endIndex: number; offsetTop: number; totalHeight: number; visibleItems: Array<{ index: number; item: T; top: number; height: number }> }}
+ */
 export function calculateVirtualMessageWindow({
   items = [],
   scrollTop = 0,

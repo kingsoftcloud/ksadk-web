@@ -271,13 +271,25 @@ export class RunEngineImpl implements RunEngine {
   stop(): void {
     if (this._stage === 'idle') return;
     this.setStage('stopping');
+    const invocationId = useStreamingStore.getState().currentRunId;
+    if (invocationId) {
+      void this.api.cancelRun(this.config.agentId, invocationId).catch((err) => {
+        console.warn('[RunEngine] cancelRun on stop failed:', err);
+      });
+    }
     this.abortController?.abort();
-    useStreamingStore.getState().stopActivity();
+    useStreamingStore.getState().stopActivity(
+      invocationId
+        ? '已向运行时发送取消请求；如果当前框架只支持协作式取消，后台可能会在下一个安全点停止。'
+        : undefined,
+    );
     useStreamingStore.getState().setCurrentRunId('');
     this.setStage('cancelled');
     this.emit({
       type: 'system_message',
-      content: '已停止接收本次输出；如果运行时不支持取消，后台执行可能仍会继续。',
+      content: invocationId
+        ? '已请求取消本次运行。'
+        : '已停止接收本次输出；如果运行时不支持取消，后台执行可能仍会继续。',
     });
   }
 

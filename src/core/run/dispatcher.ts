@@ -40,7 +40,7 @@ function settleRunningToolsForTerminalStatus(status: string) {
           changed = true;
           return [name, { ...tool, status: nextStatus }];
         }),
-      );
+      ) as NonNullable<Message['tools']>;
       return changed ? { ...msg, tools } : msg;
     }),
   );
@@ -235,28 +235,29 @@ export function dispatchRunEventToStores(event: RunEvent) {
       break;
 
     case 'stream_event': {
-      if (event.event.EventType === 'run_checkpoint') {
-        useCheckpointStore.getState().upsertSessionCheckpoint(event.sessionId || event.event.SessionId, event.event);
+      const streamSessionId = event.sessionId || event.event.SessionId;
+      if (event.event.EventType === 'run_checkpoint' && streamSessionId) {
+        useCheckpointStore.getState().upsertSessionCheckpoint(streamSessionId, event.event);
       }
       if (event.event.EventType === 'run_status') {
         const status = String((event.event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
         if (status === 'completed') {
           useStreamingStore.getState().updateActivity({
-            sessionId: event.sessionId || event.event.SessionId,
+            sessionId: streamSessionId,
             status: 'completed',
             phase: '后台长任务已完成',
             countEvent: false,
           });
         } else if (status === 'cancelled' || status === 'canceled' || status === 'aborted') {
           useStreamingStore.getState().updateActivity({
-            sessionId: event.sessionId || event.event.SessionId,
+            sessionId: streamSessionId,
             status: 'stopped',
             phase: '后台长任务已取消',
             countEvent: false,
           });
         } else if (status === 'failed' || status === 'error') {
           useStreamingStore.getState().updateActivity({
-            sessionId: event.sessionId || event.event.SessionId,
+            sessionId: streamSessionId,
             status: 'failed',
             phase: '后台长任务失败',
             countEvent: false,

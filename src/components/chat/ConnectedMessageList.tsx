@@ -58,6 +58,7 @@ export function ConnectedMessageList({
   const previousScrollTopRef = useRef(0);
   const isStreamingRef = useRef(isStreaming);
   const loadingOlderRef = useRef(false);
+  const needsInitialScrollRef = useRef(true);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -75,6 +76,18 @@ export function ConnectedMessageList({
   useEffect(() => {
     isStreamingRef.current = isStreaming;
   }, [isStreaming]);
+
+  // Reset stickiness state whenever the active session changes so the next
+  // history injection is treated as "should be at the bottom" rather than
+  // "user scrolled up". Without this, effect A's updateStickiness() flips
+  // stickToBottomRef to false on the empty->history transition (scrollTop=0
+  // against a large scrollHeight) and effect B then refuses to scroll.
+  useEffect(() => {
+    needsInitialScrollRef.current = true;
+    stickToBottomRef.current = true;
+    userDetachedFromBottomRef.current = false;
+    previousScrollTopRef.current = 0;
+  }, [currentSessionId]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -135,7 +148,52 @@ export function ConnectedMessageList({
 
   useEffect(() => {
     const scroller = scrollRef.current;
-    if (!scroller || !stickToBottomRef.current) return;
+    if (!scroller) return;
+
+    // Initial session load: bypass the stickiness gate. The gate is unreliable
+    // here because effect A (updateStickiness) runs first and, seeing scrollTop=0
+    // against the freshly-injected history's large scrollHeight, flips
+    // stickToBottomRef to false before this effect can scroll. Virtualization
+    // also means scrollHeight grows across frames as off-screen rows are
+    // measured, so we rAF-loop, pinning to the bottom until scrollHeight
+    // stabilizes (or the attempt budget is exhausted).
+    if (messages.length > 0 && needsInitialScrollRef.current) {
+      // Capture the session that owns this scroll. If the user switches
+      // sessions while a rAF is pending, the new session owns its own
+      // initial-scroll effect and we must not stomp on its viewport.
+      const sessionAtStart = useSessionStore.getState().currentSessionId;
+      let pendingRaf = 0;
+      let lastScrollHeight = -1;
+      let attempts = 0;
+      const pinToBottom = () => {
+        if (useSessionStore.getState().currentSessionId !== sessionAtStart) {
+          return;
+        }
+        const node = scrollRef.current;
+        if (!node) return;
+        if (node.scrollHeight !== lastScrollHeight) {
+          lastScrollHeight = node.scrollHeight;
+          node.scrollTop = node.scrollHeight;
+          previousScrollTopRef.current = node.scrollTop;
+          attempts += 1;
+          if (attempts < 8) {
+            pendingRaf = requestAnimationFrame(pinToBottom);
+            return;
+          }
+        }
+        // scrollHeight stable (or budget exhausted) — hand control back to
+        // the stickiness gate so subsequent streamed chunks keep following.
+        stickToBottomRef.current = true;
+        userDetachedFromBottomRef.current = false;
+        needsInitialScrollRef.current = false;
+      };
+      pendingRaf = requestAnimationFrame(pinToBottom);
+      return () => {
+        cancelAnimationFrame(pendingRaf);
+      };
+    }
+
+    if (!stickToBottomRef.current) return;
     scroller.scrollTop = scroller.scrollHeight;
     previousScrollTopRef.current = scroller.scrollTop;
   }, [messages, isStreaming]);

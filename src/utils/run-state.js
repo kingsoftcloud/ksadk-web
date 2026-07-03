@@ -19,6 +19,8 @@ function parseTimestampMs(event) {
   return 0;
 }
 
+const ACTIVE_RUN_STATUSES = new Set(['in_progress', 'running', 'resuming', 'starting', 'queued', 'pending']);
+
 function eventType(event) {
   return String(event?.EventType || event?.event_type || '').trim();
 }
@@ -52,7 +54,7 @@ export function findActiveRunIds(events = [], options = {}) {
     .filter(([invocationId, status]) => {
       const latestTimestamp = latestTimestampByInvocation.get(invocationId) || 0;
       const stale = latestTimestamp > 0 && now - latestTimestamp > staleAfterMs;
-      return status === 'in_progress' && !stale;
+      return ACTIVE_RUN_STATUSES.has(status) && !stale;
     })
     .map(([invocationId]) => invocationId);
 }

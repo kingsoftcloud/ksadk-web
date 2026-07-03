@@ -8,7 +8,7 @@ function sessionUpdatedAtValue(session) {
     return Number.isNaN(parsed) ? 0 : parsed;
   }
   if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return raw;
+    return raw > 1e11 ? raw : raw * 1000;
   }
   return 0;
 }

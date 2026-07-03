@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.16 - 2026-07-03
+
+- Keep the conversation transcript scrolled to the latest message after a page
+  refresh or session switch instead of jumping to the top, by resetting the
+  stickiness state on session change and pinning to the bottom past the
+  virtualization measurement window.
+- Send a runtime cancel request when stopping a run that has an active
+  invocation id, so cooperative cancellation reaches the backend instead of
+  only aborting the local stream.
+- Treat `running`, `resuming`, `starting`, `queued`, and `pending` run statuses
+  as active subscriptions so resumed or just-started runs stay connected.
+- Normalize numeric session timestamps that arrive in seconds into
+  milliseconds, and fall back to `LastPrompt`/`Summary` for session titles when
+  the first prompt is unavailable.
+- Tighten TypeScript declarations across the run dispatcher, session event
+  record, and message virtualization helper so the package type-checks cleanly
+  for consumers.
+- Add regression coverage for initial scroll pinning, active run status
+  detection, and session state helpers.
+
 ## 0.2.15 - 2026-06-29
 
 - Restore complete session event history when switching sessions instead of

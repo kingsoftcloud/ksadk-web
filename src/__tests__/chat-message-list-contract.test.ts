@@ -19,6 +19,49 @@ describe('chat message list contracts', () => {
     expect(source).not.toMatch(/scrollRef\.current\.scrollTop\s*=\s*scrollRef\.current\.scrollHeight/);
   });
 
+  it('bypasses the stickiness gate to pin to the bottom on initial session load', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
+
+    // Reset hook: switching sessions re-arms the initial-scroll intent and
+    // restores stickiness defaults so the gate does not start in a "detached"
+    // state carried over from the previous session.
+    expect(source).toContain('needsInitialScrollRef');
+    expect(source).toMatch(/needsInitialScrollRef\.current\s*=\s*true/);
+    expect(source).toMatch(/\},\s*\[currentSessionId\]\);/);
+
+    // Force branch bypasses the gate and rAF-loops because virtualization
+    // settles scrollHeight across frames as off-screen rows are measured.
+    expect(source).toContain('needsInitialScrollRef.current) {');
+    expect(source).toContain('requestAnimationFrame(pinToBottom)');
+    expect(source).toMatch(/attempts\s*<\s*8/);
+
+    // Stale-session guard: a pending rAF must not scroll a session we no
+    // longer own (fast session switching).
+    expect(source).toContain('sessionAtStart');
+    expect(source).toContain('useSessionStore.getState().currentSessionId !== sessionAtStart');
+
+    // Cleanup cancels the pending rAF so an unmounted/changed session does
+    // not receive a deferred scroll.
+    expect(source).toContain('cancelAnimationFrame(pendingRaf)');
+
+    // The forbidden inline pattern stays forbidden (also asserted by the test
+    // above); the force branch must use a local node reference instead.
+    expect(source).not.toMatch(/scrollRef\.current\.scrollTop\s*=\s*scrollRef\.current\.scrollHeight/);
+  });
+
+  it('anchors the scroll position when loading older session events', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
+
+    // Preload trigger near the top of the transcript.
+    expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('loadingOlderRef');
+    // Keep the viewport anchored when prepending older events: capture the
+    // prior scrollHeight and shift scrollTop by the delta.
+    expect(source).toContain('previousScrollHeight');
+    expect(source).toMatch(/nextScroller\.scrollTop\s*\+=\s*delta/);
+    expect(source).toMatch(/previousScrollTopRef\.current\s*=\s*nextScroller\.scrollTop/);
+  });
+
   it('preloads additional session pages before the sidebar reaches the bottom', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
 

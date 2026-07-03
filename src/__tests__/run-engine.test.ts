@@ -587,6 +587,43 @@ describe('RunEngineImpl', () => {
     expect(settledSessionIds).toEqual(['session-live']);
   });
 
+  it('requests remote cancellation when stopping an active run', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    api.runAgent = async (body) => {
+      calls.push(body);
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"working"}\n\n'));
+        },
+      });
+    };
+    const engine = createRunEngine(api);
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+
+    engine.start({
+      text: 'long run',
+      attachments: [],
+      sessionId: 'session-live',
+    });
+
+    await waitForCalls(calls);
+    const invocationId = String(calls[0].InvocationId || '');
+    engine.stop();
+    await waitForCalls(calls, 2);
+
+    expect(calls.at(-1)).toEqual({
+      cancel: { agentId: 'agent-live', invocationId },
+    });
+  });
+
   it('does not replace an existing session when the runtime returns an empty stream', async () => {
     const calls: Record<string, unknown>[] = [];
     const createdSessions: string[] = [];

@@ -7,7 +7,7 @@ export function sessionUpdatedAtValue(session: Session): number {
     return Number.isNaN(parsed) ? 0 : parsed;
   }
   if (typeof raw === 'number') {
-    return raw;
+    return Number.isFinite(raw) ? (raw > 1e11 ? raw : raw * 1000) : 0;
   }
   return 0;
 }
@@ -35,6 +35,14 @@ export function sessionTitle(session: Session): string {
   const firstPrompt = String(session.FirstPrompt || '').trim();
   if (firstPrompt) {
     return firstPrompt;
+  }
+  const lastPrompt = String(session.LastPrompt || '').trim();
+  if (lastPrompt) {
+    return lastPrompt;
+  }
+  const summary = String(session.Summary || '').trim();
+  if (summary) {
+    return summary;
   }
   return '新对话';
 }
