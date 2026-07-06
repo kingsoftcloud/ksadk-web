@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.17 - 2026-07-06
+
+- Treat `interrupted` and `resume_failed` as terminal run states when restoring
+  or streaming sessions, so background resume failures do not leave the UI in a
+  permanently running state.
+- Show explicit stopped/failed text for interrupted and resume-failed restore
+  paths instead of falling through to generic running state handling.
+
 ## 0.2.16 - 2026-07-03
 
 - Keep the conversation transcript scrolled to the latest message after a page
