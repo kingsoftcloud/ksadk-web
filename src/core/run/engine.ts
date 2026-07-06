@@ -17,7 +17,7 @@ type StreamConsumeResult = {
   terminalStatus?: string;
 };
 
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted']);
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
 function terminalStatusFromSessionEvent(event: SessionEventRecord): string | null {
   if (event.EventType !== 'run_status') return null;
@@ -366,8 +366,12 @@ export class RunEngineImpl implements RunEngine {
         this.setStage('completing');
         if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') {
           this.emit({ type: 'activity', phase: '后台长任务已取消', status: 'stopped', countEvent: false });
+        } else if (terminalStatus === 'interrupted') {
+          this.emit({ type: 'activity', phase: '后台长任务已中断', status: 'stopped', countEvent: false });
         } else if (terminalStatus === 'failed' || terminalStatus === 'error') {
           this.emit({ type: 'activity', phase: '后台长任务失败', status: 'failed', countEvent: false });
+        } else if (terminalStatus === 'resume_failed') {
+          this.emit({ type: 'activity', phase: '后台长任务恢复失败', status: 'failed', countEvent: false });
         } else {
           this.emit({ type: 'activity', phase: '后台长任务已完成', status: 'completed', countEvent: false });
         }

@@ -52,8 +52,14 @@ function terminalActivityForRunEvent(event: SessionEventRecord): {
   if (rawStatus === 'cancelled' || rawStatus === 'canceled' || rawStatus === 'aborted') {
     return { status: 'stopped', phase: '后台长任务已取消' };
   }
+  if (rawStatus === 'interrupted') {
+    return { status: 'stopped', phase: '后台长任务已中断' };
+  }
   if (rawStatus === 'failed' || rawStatus === 'error') {
     return { status: 'failed', phase: '后台长任务失败' };
+  }
+  if (rawStatus === 'resume_failed') {
+    return { status: 'failed', phase: '后台长任务恢复失败' };
   }
   return null;
 }

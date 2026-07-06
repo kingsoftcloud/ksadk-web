@@ -15,6 +15,8 @@ const RUN_TERMINAL_STATUSES = new Set([
   'cancelled',
   'canceled',
   'aborted',
+  'interrupted',
+  'resume_failed',
 ]);
 
 const TOOL_EVENT_TYPES = new Set([
