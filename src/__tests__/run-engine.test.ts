@@ -12,7 +12,13 @@ function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData
     async listSessions() { return []; },
     async createSession() { return { SessionId: 'session-1' }; },
     async deleteSession() {},
+    async getSession() {
+      return { SessionId: 'session-1', ActiveRunStatus: '' };
+    },
     async listSessionEvents() { return { Events: [] }; },
+    async listSessionMessages() {
+      return { Messages: [], LatestSeqId: 0, HasMore: false, NextCursor: null };
+    },
     async listSessionCheckpoints() { return { Checkpoints: [] }; },
     async listToolReceipts() { return { ToolReceipts: [] }; },
     async previewCheckpointResume(params) {

@@ -5,13 +5,12 @@ import { useUIStore } from '../stores/ui.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { useBootstrapStore } from '../stores/bootstrap.js';
 import { CancelledError } from '../api/client.js';
-import { findActiveRunIds } from '../utils/run-state.js';
 import {
   buildMessagesFromSessionEvents,
   eventHasTerminalRunStatus,
-  maxSeqIdFromEvents,
   mergeSessionEventRecords,
 } from '../utils/session-events.js';
+import { mapBackendMessages } from '../utils/messages.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
@@ -29,6 +28,14 @@ const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_EVENTS_PAGE_SIZE = 50;
 const SESSION_EVENTS_RESTORE_PAGE_SIZE = 500;
+
+// 重连判据:ActiveRunStatus 属于这些态时认为有活跃 run(对齐后端 RUN_STATUS_ACTIVE)。
+const ACTIVE_RUN_STATUSES = new Set([
+  'in_progress',
+  'running',
+  'resuming',
+  'starting',
+]);
 
 function historyShouldReplaceMessages(history: Message[], currentMessages: Message[]) {
   if (!currentMessages.length) {
@@ -279,26 +286,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        const historyData = await loadCompleteSessionEventHistory(
-          sessionId,
-          api.listSessionEvents,
-          {
-            pageSize: SESSION_EVENTS_RESTORE_PAGE_SIZE,
-            shouldContinue: isStillCurrentSession,
-          },
-        );
-        if (!historyData) {
-          return;
-        }
-        useSessionStore.getState().setSessionEventCache(sessionId, {
-          events: historyData.events,
-          total: historyData.total,
-          offset: historyData.offset,
-          limit: historyData.limit,
+        // PR4:用 ListSessionMessages 替换 ListSessionEvents + buildMessagesFromSessionEvents。
+        // 后端服务端投影(snapshot 去重/reasoning 归并/tool 配对/附件规范化),前端不再反推。
+        const messagesData = await api.listSessionMessages(sessionId, {
+          agentId: agentIdRef.current || undefined,
+          includeReasoning: true,
+          includeToolEvents: true,
+          includeAttachments: true,
         });
         if (!isStillCurrentSession()) {
           return;
         }
+        const history = mapBackendMessages(messagesData.Messages);
+        useMessageStore.getState().setMessages(history);
+        void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
+        const lastSeqId = messagesData.LatestSeqId || 0;
+
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
           void api.listSessionCheckpoints({
@@ -326,41 +329,33 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         } else {
           useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
         }
-        if (historyData.events) {
-          const events = historyData.events;
-          const history = buildMessagesFromSessionEvents(events);
-          if (!isStillCurrentSession()) {
-            return;
+
+        // 重连判据:读 GetSession.ActiveRunStatus(不靠扫 events 反推)。
+        if (
+          runtimeCapabilities.RunLifecycle.Enabled &&
+          runtimeCapabilities.RunLifecycle.Resume
+        ) {
+          try {
+            const session = await api.getSession(sessionId);
+            if (!isStillCurrentSession()) {
+              return;
+            }
+            const status = String(session.ActiveRunStatus || '').toLowerCase();
+            const isActive = ACTIVE_RUN_STATUSES.has(status) && !!session.ActiveInvocationId;
+            if (isActive) {
+              void subscribeRunEvents({
+                sessionId,
+                invocationId: session.ActiveInvocationId!,
+                afterSeqId: lastSeqId,
+                initialEvents: [],
+              });
+            }
+          } catch (error) {
+            console.warn('[SessionLifecycle] getSession for reconnect failed:', error);
           }
-          useMessageStore.getState().setMessages(history);
-          void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
-          const activeRuns = findActiveRunIds(events, {
-            now: Date.now(),
-            staleAfterMs: 30 * 60 * 1000,
-          });
-          const lastSeqId = maxSeqIdFromEvents(events);
-          if (
-            runtimeCapabilities.RunLifecycle.Enabled &&
-            runtimeCapabilities.RunLifecycle.Resume &&
-            activeRuns[0]
-          ) {
-            void subscribeRunEvents({
-              sessionId,
-              invocationId: activeRuns[0],
-              afterSeqId: lastSeqId,
-              initialEvents: events,
-            });
-          }
-        } else {
-          if (!isStillCurrentSession()) {
-            return;
-          }
-          useMessageStore.getState().setMessages([]);
-          useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
-          useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
         }
       } catch (error) {
-        console.error('Failed to load session events:', error);
+        console.error('Failed to load session messages:', error);
       }
     },
     [

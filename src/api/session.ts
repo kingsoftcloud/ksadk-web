@@ -11,6 +11,18 @@ type SessionPayload = {
   UpdatedAt?: string;
   CreatedAt?: string;
   ActiveRunStatus?: string;
+  ActiveInvocationId?: string;
+  ActiveRunMode?: string;
+  ActiveRunTrigger?: string;
+  ActiveRunUpdatedAt?: string;
+  ContextUsage?: { used_tokens: number; cached_tokens?: number; context_window_tokens: number; percent: number } | null;
+  TokenUsage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    turns?: number;
+    last_response_id?: string;
+  } | null;
 };
 
 type ListSessionsResponse = {
@@ -60,4 +72,11 @@ export async function createSession(agentId: string, opts?: { signal?: AbortSign
 
 export async function deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void> {
   await postJsonAction<unknown>('DeleteSession', { SessionId: sessionId }, opts);
+}
+
+export async function getSession(
+  sessionId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<SessionPayload> {
+  return postJsonAction<SessionPayload>('GetSession', { SessionId: sessionId }, opts);
 }

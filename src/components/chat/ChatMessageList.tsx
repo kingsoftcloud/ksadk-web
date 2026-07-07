@@ -73,39 +73,6 @@ function formatLag(ms: number) {
   return `${Math.floor(ms / 60_000)} 分钟前`;
 }
 
-function formatCompactTokenCount(value?: number | null) {
-  const safe = Number(value);
-  if (!Number.isFinite(safe) || safe <= 0) {
-    return '0';
-  }
-  if (safe < 1000) {
-    return String(Math.round(safe));
-  }
-  if (safe < 1_000_000) {
-    return `${Math.round(safe / 100) / 10}k`;
-  }
-  return `${Math.round(safe / 100_000) / 10}m`;
-}
-
-function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerContextIndicator }) {
-  const usedTokens = contextIndicator?.usedTokens;
-  const contextWindowTokens = contextIndicator?.contextWindowTokens;
-
-  if (!usedTokens || !contextWindowTokens) {
-    return null;
-  }
-
-  return (
-    <span
-      key={Math.round(usedTokens)}
-      className="token-count-pulse hidden font-mono text-slate-400 dark:text-slate-500 sm:inline"
-      title={`估算 token：${Math.round(usedTokens)} / ${Math.round(contextWindowTokens)}`}
-    >
-      估算 token {formatCompactTokenCount(usedTokens)} / {formatCompactTokenCount(contextWindowTokens)}
-    </span>
-  );
-}
-
 function RunActivityBanner({
   activity,
   contextIndicator,
@@ -153,7 +120,6 @@ function RunActivityBanner({
         <span className="text-slate-400 dark:text-slate-500">
           {activity.eventCount} ev
         </span>
-        <AnimatedTokenCount contextIndicator={contextIndicator} />
         <span className="hidden text-slate-400 dark:text-slate-500 sm:inline">
           {formatLag(now - activity.lastEventAt)}
         </span>

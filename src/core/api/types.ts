@@ -8,6 +8,23 @@ export interface ApiFacade {
   }>;
   createSession(agentId: string, opts?: { signal?: AbortSignal }): Promise<{ SessionId: string }>;
   deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
+  getSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{
+    SessionId: string;
+    AgentId?: string;
+    Title?: string;
+    UpdatedAt?: string;
+    ActiveRunStatus?: string;
+    ActiveInvocationId?: string;
+    ActiveRunUpdatedAt?: string;
+    ContextUsage?: { used_tokens: number; cached_tokens?: number; context_window_tokens: number; percent: number } | null;
+    TokenUsage?: {
+      input_tokens: number;
+      output_tokens: number;
+      total_tokens: number;
+      turns?: number;
+      last_response_id?: string;
+    } | null;
+  }>;
 
   // Events & Run
   listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; signal?: AbortSignal }): Promise<{
@@ -15,6 +32,23 @@ export interface ApiFacade {
     Total?: number;
     Offset?: number;
     Limit?: number;
+  }>;
+  listSessionMessages(
+    sessionId: string,
+    opts?: {
+      agentId?: string;
+      afterSeqId?: number;
+      limit?: number;
+      includeReasoning?: boolean;
+      includeToolEvents?: boolean;
+      includeAttachments?: boolean;
+      signal?: AbortSignal;
+    },
+  ): Promise<{
+    Messages: unknown[];
+    LatestSeqId: number;
+    HasMore: boolean;
+    NextCursor: number | null;
   }>;
   listSessionCheckpoints(params: { agentId: string; sessionId: string; runId?: string }, opts?: { signal?: AbortSignal }): Promise<{ Checkpoints: unknown[] }>;
   listToolReceipts(params: { agentId: string; sessionId: string; runId?: string; checkpointId?: string }, opts?: { signal?: AbortSignal }): Promise<{ ToolReceipts: unknown[] }>;

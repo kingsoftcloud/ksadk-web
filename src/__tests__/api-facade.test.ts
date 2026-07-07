@@ -6,8 +6,8 @@ describe('ApiFacadeImpl', () => {
   it('exposes all required methods', () => {
     const facade = new ApiFacadeImpl();
     const methods: (keyof ApiFacade)[] = [
-      'listSessions', 'createSession', 'deleteSession',
-      'listSessionEvents', 'listSessionCheckpoints', 'listToolReceipts', 'previewCheckpointResume', 'runAgent', 'resumeRun', 'subscribeRunEvents',
+      'listSessions', 'createSession', 'deleteSession', 'getSession',
+      'listSessionEvents', 'listSessionMessages', 'listSessionCheckpoints', 'listToolReceipts', 'previewCheckpointResume', 'runAgent', 'resumeRun', 'subscribeRunEvents',
       'getResponseFeedback', 'upsertResponseFeedback', 'deleteResponseFeedback',
       'listWorkspaceFiles', 'addWorkspaceFile', 'deleteWorkspaceFile', 'getWorkspaceFileContent',
       'listAgentModels', 'getAgentUiBootstrap', 'uploadFile',

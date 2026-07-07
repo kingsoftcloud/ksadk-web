@@ -1,7 +1,8 @@
 import type { ApiFacade } from './types.js';
 import { postJsonAction, streamGetAction } from '../../api/client.js';
-import { listSessions as listSessionsApi, createSession as createSessionApi, deleteSession as deleteSessionApi } from '../../api/session.js';
+import { listSessions as listSessionsApi, createSession as createSessionApi, deleteSession as deleteSessionApi, getSession as getSessionApi } from '../../api/session.js';
 import { listSessionEvents as listSessionEventsApi } from '../../api/events.js';
+import { listSessionMessages as listSessionMessagesApi } from '../../api/messages.js';
 import { runAgent as runAgentApi } from '../../api/run.js';
 import { listSessionCheckpoints as listSessionCheckpointsApi, listToolReceipts as listToolReceiptsApi, previewCheckpointResume as previewCheckpointResumeApi, resumeRun as resumeRunApi } from '../../api/checkpoints.js';
 import { listWorkspaceFiles as listWorkspaceFilesApi, addWorkspaceFile as addWorkspaceFileApi, deleteWorkspaceFile as deleteWorkspaceFileApi, getWorkspaceFileContent as getFileContentApi } from '../../api/workspace.js';
@@ -24,9 +25,28 @@ export class ApiFacadeImpl implements ApiFacade {
     await deleteSessionApi(sessionId, opts);
   }
 
+  async getSession(sessionId: string, opts?: { signal?: AbortSignal }) {
+    return getSessionApi(sessionId, opts);
+  }
+
   // Events & Run
   async listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; signal?: AbortSignal }) {
     return listSessionEventsApi(sessionId, opts);
+  }
+
+  async listSessionMessages(
+    sessionId: string,
+    opts?: {
+      agentId?: string;
+      afterSeqId?: number;
+      limit?: number;
+      includeReasoning?: boolean;
+      includeToolEvents?: boolean;
+      includeAttachments?: boolean;
+      signal?: AbortSignal;
+    },
+  ) {
+    return listSessionMessagesApi(sessionId, opts);
   }
 
   async listSessionCheckpoints(
