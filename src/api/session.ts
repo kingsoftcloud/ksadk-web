@@ -78,5 +78,6 @@ export async function getSession(
   sessionId: string,
   opts?: { signal?: AbortSignal },
 ): Promise<SessionPayload> {
-  return postJsonAction<SessionPayload>('GetSession', { SessionId: sessionId }, opts);
+  const data = await postJsonAction<{ Session: SessionPayload }>('GetSession', { SessionId: sessionId }, opts);
+  return data.Session;
 }

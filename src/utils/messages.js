@@ -80,7 +80,7 @@ export function mapBackendMessage(msg) {
   const reasoning = msg.Reasoning?.length
     ? msg.Reasoning.map((r) => r.text).join('')
     : undefined;
-  return {
+  const result = {
     id: msg.MessageId || `msg-${msg.SeqId ?? Math.random().toString(36).slice(2)}`,
     role,
     content: extractContentText(msg.Content),
@@ -90,6 +90,12 @@ export function mapBackendMessage(msg) {
     tools,
     attachments,
   };
+  // 反馈控件需要 responseId/eventId/traceId/rootSpanId(后端从 event Metadata 投出)
+  if (msg.MessageId) result.eventId = msg.MessageId;
+  if (msg.ResponseId) result.responseId = msg.ResponseId;
+  if (msg.TraceId) result.traceId = msg.TraceId;
+  if (msg.RootSpanId) result.rootSpanId = msg.RootSpanId;
+  return result;
 }
 
 export function mapBackendMessages(messages) {

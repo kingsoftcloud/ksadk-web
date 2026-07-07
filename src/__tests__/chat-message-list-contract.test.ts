@@ -175,6 +175,8 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('const isStillCurrentSession = () => currentSessionIdRef.current === sessionId;');
     expect(lifecycleSource).toContain('if (!isStillCurrentSession()) {');
     expect(lifecycleSource).toContain('currentSessionIdRef.current === options.sessionId');
-    expect(lifecycleSource).toContain('historyShouldReplaceMessages(history, useMessageStore.getState().messages)');
+    // PR4:重连期间不覆盖消息列表(保持 loadSession 的 ListSessionMessages 结果),
+    // run 结束后 shouldReloadSession 重新 loadSession 拿最终消息。
+    expect(lifecycleSource).toContain('重连期间不覆盖消息列表');
   });
 });

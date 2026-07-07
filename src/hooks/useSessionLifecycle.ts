@@ -245,10 +245,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                 stopRestoreSubscription();
                 break;
               }
-              const history = buildMessagesFromSessionEvents(mergedEvents);
-              if (historyShouldReplaceMessages(history, useMessageStore.getState().messages)) {
-                useMessageStore.getState().setMessages(history);
-              }
+              // 重连期间不覆盖消息列表(保持 loadSession 的 ListSessionMessages 结果)。
+              // run 结束后 shouldReloadSession 会重新 loadSession 拿最终消息。
+              // 增量事件仅更新 streaming activity(上方 terminalActivity 已处理)。
             } catch (error) {
               console.warn('Failed to parse run event data', dataString, error);
             }
@@ -286,8 +285,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        // PR4:用 ListSessionMessages 替换 ListSessionEvents + buildMessagesFromSessionEvents。
-        // 后端服务端投影(snapshot 去重/reasoning 归并/tool 配对/附件规范化),前端不再反推。
+        // PR4:用 ListSessionMessages 替换 buildMessagesFromSessionEvents(服务端投影)。
+        // 同时仍拉 ListSessionEvents 填 eventCache(供 loadOlderSessionEvents 向上翻页,
+        // 后端 ListSessionMessages 的 BeforeSeqId 留作后续优化)。
         const messagesData = await api.listSessionMessages(sessionId, {
           agentId: agentIdRef.current || undefined,
           includeReasoning: true,
@@ -301,6 +301,21 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         useMessageStore.getState().setMessages(history);
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
         const lastSeqId = messagesData.LatestSeqId || 0;
+
+        // 填 eventCache(供 loadOlderSessionEvents 翻更早历史;非阻塞)
+        void api.listSessionEvents(sessionId, { limit: SESSION_EVENTS_RESTORE_PAGE_SIZE })
+          .then((eventData) => {
+            if (!isStillCurrentSession()) return;
+            useSessionStore.getState().setSessionEventCache(sessionId, {
+              events: eventData.Events as SessionEventRecord[],
+              total: eventData.Total ?? 0,
+              offset: eventData.Offset ?? 0,
+              limit: eventData.Limit ?? 0,
+            });
+          })
+          .catch((error) => {
+            console.warn('[SessionLifecycle] event cache load failed:', error);
+          });
 
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
