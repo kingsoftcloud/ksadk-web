@@ -303,13 +303,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         const lastSeqId = messagesData.LatestSeqId || 0;
 
         // 填 eventCache(供 loadOlderSessionEvents 翻更早历史;非阻塞)
+        // offset 表示"已加载多少条最新事件",首次拿 limit=500 条后 offset=已加载数量,
+        // 否则 loadOlder 会重复从 offset=0 拉最新页。
         void api.listSessionEvents(sessionId, { limit: SESSION_EVENTS_RESTORE_PAGE_SIZE })
           .then((eventData) => {
             if (!isStillCurrentSession()) return;
+            const loadedEvents = (eventData.Events || []) as SessionEventRecord[];
             useSessionStore.getState().setSessionEventCache(sessionId, {
-              events: eventData.Events as SessionEventRecord[],
+              events: loadedEvents,
               total: eventData.Total ?? 0,
-              offset: eventData.Offset ?? 0,
+              offset: (eventData.Offset ?? 0) + loadedEvents.length,
               limit: eventData.Limit ?? 0,
             });
           })
