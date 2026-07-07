@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.18 - 2026-07-08
+
+- Load restored sessions through the server-projected `ListSessionMessages`
+  response so long conversations open on the latest message window instead of
+  rebuilding history from raw events on the client.
+- Restore active run reconnects by unwrapping `GetSession.Session` before
+  reading `ActiveRunStatus` and `ActiveInvocationId`.
+- Keep older-history pagination working by preserving the latest event cache
+  offset after the projected message load.
+- Preserve response feedback metadata (`responseId`, `eventId`, trace ids) when
+  mapping projected backend messages into the chat transcript.
+- Remove estimated token text from the run activity banner, keeping session
+  token usage out of the compact control surface.
+
 ## 0.2.17 - 2026-07-06
 
 - Treat `interrupted` and `resume_failed` as terminal run states when restoring
