@@ -11,8 +11,8 @@
   offset after the projected message load.
 - Preserve response feedback metadata (`responseId`, `eventId`, trace ids) when
   mapping projected backend messages into the chat transcript.
-- Remove estimated token text from the run activity banner, keeping session
-  token usage out of the compact control surface.
+- Keep session token usage out of the sidebar while showing low-noise estimated
+  context tokens inside the active run capsule.
 
 ## 0.2.17 - 2026-07-06
 

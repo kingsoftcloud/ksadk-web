@@ -73,6 +73,39 @@ function formatLag(ms: number) {
   return `${Math.floor(ms / 60_000)} 分钟前`;
 }
 
+function formatCompactTokens(value?: number) {
+  if (!Number.isFinite(value) || !value || value <= 0) return '';
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
+  return String(Math.round(value));
+}
+
+function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerContextIndicator }) {
+  const usedTokens = contextIndicator?.usedTokens;
+  const contextWindowTokens = contextIndicator?.contextWindowTokens;
+  const label = formatCompactTokens(usedTokens);
+  const windowLabel = formatCompactTokens(contextWindowTokens);
+  const [pulseKey, setPulseKey] = useState(0);
+
+  useEffect(() => {
+    if (label) setPulseKey((current) => current + 1);
+  }, [label]);
+
+  if (!label) return null;
+
+  const detail = [label, windowLabel].filter(Boolean).join('/');
+  const title = contextIndicator?.label || `估算 token ${detail}`;
+  return (
+    <span
+      key={pulseKey}
+      className="token-count-pulse hidden text-slate-400 dark:text-slate-500 sm:inline"
+      title={title}
+    >
+      估算 token {detail}
+    </span>
+  );
+}
+
 function RunActivityBanner({
   activity,
   contextIndicator,
@@ -123,6 +156,7 @@ function RunActivityBanner({
         <span className="hidden text-slate-400 dark:text-slate-500 sm:inline">
           {formatLag(now - activity.lastEventAt)}
         </span>
+        <AnimatedTokenCount contextIndicator={contextIndicator} />
         {isActive && (onStopGeneration || onCancelRemote) ? (
           <div className="flex flex-shrink-0 gap-1">
             {onStopGeneration ? (
