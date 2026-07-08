@@ -160,7 +160,12 @@ export function ConnectedMessageList({
     if (messages.length > 0 && needsInitialScrollRef.current) {
       const sessionAtStart = useSessionStore.getState().currentSessionId;
       const node = scrollRef.current;
+      // 临时禁用 CSS scroll-smooth:平滑滚动会让 scrollTop=scrollHeight 变成动画,
+      // rAF 读到中间值导致 pin 逻辑误判,最终停在中间位置。
+      // pin 期间用 instant,finish 后恢复(让 CSS class 重新生效)。
+      const prevScrollBehavior = node ? node.style.scrollBehavior : '';
       if (node) {
+        node.style.scrollBehavior = 'auto';
         node.scrollTop = node.scrollHeight;
         previousScrollTopRef.current = node.scrollTop;
       }
@@ -171,6 +176,7 @@ export function ConnectedMessageList({
       const finish = () => {
         if (finished) return;
         finished = true;
+        if (node) node.style.scrollBehavior = prevScrollBehavior;
         stickToBottomRef.current = true;
         userDetachedFromBottomRef.current = false;
         needsInitialScrollRef.current = false;
