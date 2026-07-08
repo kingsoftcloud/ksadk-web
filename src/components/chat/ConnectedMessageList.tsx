@@ -155,41 +155,55 @@ export function ConnectedMessageList({
     // against the freshly-injected history's large scrollHeight, flips
     // stickToBottomRef to false before this effect can scroll. Virtualization
     // also means scrollHeight grows across frames as off-screen rows are
-    // measured, so we rAF-loop, pinning to the bottom until scrollHeight
-    // stabilizes (or the attempt budget is exhausted).
+    // measured, so we pin to bottom on every scrollHeight change via
+    // ResizeObserver until it stabilizes (or a 2s timeout elapses).
     if (messages.length > 0 && needsInitialScrollRef.current) {
-      // Capture the session that owns this scroll. If the user switches
-      // sessions while a rAF is pending, the new session owns its own
-      // initial-scroll effect and we must not stomp on its viewport.
       const sessionAtStart = useSessionStore.getState().currentSessionId;
-      let pendingRaf = 0;
-      let lastScrollHeight = -1;
-      let attempts = 0;
-      const pinToBottom = () => {
-        if (useSessionStore.getState().currentSessionId !== sessionAtStart) {
-          return;
-        }
-        const node = scrollRef.current;
-        if (!node) return;
-        if (node.scrollHeight !== lastScrollHeight) {
-          lastScrollHeight = node.scrollHeight;
-          node.scrollTop = node.scrollHeight;
-          previousScrollTopRef.current = node.scrollTop;
-          attempts += 1;
-          if (attempts < 8) {
-            pendingRaf = requestAnimationFrame(pinToBottom);
-            return;
-          }
-        }
-        // scrollHeight stable (or budget exhausted) — hand control back to
-        // the stickiness gate so subsequent streamed chunks keep following.
+      const node = scrollRef.current;
+      if (node) {
+        node.scrollTop = node.scrollHeight;
+        previousScrollTopRef.current = node.scrollTop;
+      }
+      let stableCount = 0;
+      let lastScrollHeight = node?.scrollHeight ?? -1;
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
         stickToBottomRef.current = true;
         userDetachedFromBottomRef.current = false;
         needsInitialScrollRef.current = false;
       };
-      pendingRaf = requestAnimationFrame(pinToBottom);
+      const pin = () => {
+        if (finished) return;
+        if (useSessionStore.getState().currentSessionId !== sessionAtStart) {
+          finished = true;
+          return;
+        }
+        const el = scrollRef.current;
+        if (!el) return;
+        if (el.scrollHeight !== lastScrollHeight) {
+          lastScrollHeight = el.scrollHeight;
+          el.scrollTop = el.scrollHeight;
+          previousScrollTopRef.current = el.scrollTop;
+          stableCount = 0;
+        } else {
+          stableCount += 1;
+          // scrollHeight stable for 3 consecutive checks → done
+          if (stableCount >= 3) {
+            finish();
+            return;
+          }
+        }
+        pendingRaf = requestAnimationFrame(pin);
+      };
+      // 超时兜底:2s 内必须结束,防 ResizeObserver 不触发
+      const timeoutId = window.setTimeout(finish, 2000);
+      pendingRaf = requestAnimationFrame(pin);
       return () => {
         cancelAnimationFrame(pendingRaf);
+        window.clearTimeout(timeoutId);
+        finish();
       };
     }
 

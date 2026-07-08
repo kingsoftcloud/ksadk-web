@@ -29,11 +29,13 @@ describe('chat message list contracts', () => {
     expect(source).toMatch(/needsInitialScrollRef\.current\s*=\s*true/);
     expect(source).toMatch(/\},\s*\[currentSessionId\]\);/);
 
-    // Force branch bypasses the gate and rAF-loops because virtualization
-    // settles scrollHeight across frames as off-screen rows are measured.
+    // Force branch bypasses the gate and pins to bottom. Virtualization
+    // settles scrollHeight across frames; we rAF-loop until stable (3
+    // consecutive unchanged checks) with a 2s timeout backstop.
     expect(source).toContain('needsInitialScrollRef.current) {');
-    expect(source).toContain('requestAnimationFrame(pinToBottom)');
-    expect(source).toMatch(/attempts\s*<\s*8/);
+    expect(source).toContain('requestAnimationFrame(pin)');
+    expect(source).toMatch(/stableCount\s*>=\s*3/);
+    expect(source).toMatch(/setTimeout\(finish,\s*2000\)/);
 
     // Stale-session guard: a pending rAF must not scroll a session we no
     // longer own (fast session switching).
