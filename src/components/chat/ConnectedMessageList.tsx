@@ -167,6 +167,7 @@ export function ConnectedMessageList({
       let stableCount = 0;
       let lastScrollHeight = node?.scrollHeight ?? -1;
       let finished = false;
+      let pendingRaf = 0;
       const finish = () => {
         if (finished) return;
         finished = true;
