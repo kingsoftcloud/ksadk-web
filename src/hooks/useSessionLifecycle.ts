@@ -288,8 +288,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // PR4:用 ListSessionMessages 替换 buildMessagesFromSessionEvents(服务端投影)。
         // 同时仍拉 ListSessionEvents 填 eventCache(供 loadOlderSessionEvents 向上翻页,
         // 后端 ListSessionMessages 的 BeforeSeqId 留作后续优化)。
+        // 注意:不传 agentId —— hosted-ui 会话历史存在 server DB,走 hosted path
+        // (ConversationService.get_events + 投影)。传 agentId 会触发 runtime path
+        // (从 runtime agent 拉事件),hosted 场景 runtime 不持有会话历史 → 消息消失。
         const messagesData = await api.listSessionMessages(sessionId, {
-          agentId: agentIdRef.current || undefined,
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
