@@ -46,8 +46,8 @@ function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData
     async subscribeRunEvents() {
       return new ReadableStream<Uint8Array>();
     },
-    async cancelRun(agentId, invocationId) {
-      calls.push({ cancel: { agentId, invocationId } });
+    async cancelRun(agentId, sessionId, invocationId) {
+      calls.push({ cancel: { agentId, sessionId, invocationId } });
       return { Cancelled: true, Found: true, Status: 'cancelling' };
     },
     async getResponseFeedback() { return null; },
@@ -369,7 +369,7 @@ describe('RunEngineImpl', () => {
 
     await engine.cancelRemote(invocationId);
     expect(calls.at(-1)).toEqual({
-      cancel: { agentId: 'agent-live', invocationId },
+      cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
   });
 
@@ -626,7 +626,7 @@ describe('RunEngineImpl', () => {
     await waitForCalls(calls, 2);
 
     expect(calls.at(-1)).toEqual({
-      cancel: { agentId: 'agent-live', invocationId },
+      cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
   });
 
@@ -841,7 +841,7 @@ describe('RunEngineImpl', () => {
     await engine.cancelRemote(invocationId);
 
     expect(calls.at(-1)).toEqual({
-      cancel: { agentId: 'agent-live', invocationId },
+      cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
   });
 });

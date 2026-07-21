@@ -36,6 +36,7 @@ describe('ChatComposer interaction contract', () => {
     const cancelHandler = source.slice(cancelHandlerStart, cancelHandlerEnd);
 
     expect(cancelHandler).toContain('const sessionId = currentSessionIdRef.current');
+    expect(cancelHandler).toContain('api.cancelRun(agentId, sessionId, invocationId)');
     expect(cancelHandler).toContain('refreshSettledRun(sessionId)');
     expect(cancelHandler).toContain('取消请求已发送');
     expect(cancelHandler).toMatch(/stopSessionActivity\(\s*sessionId/);

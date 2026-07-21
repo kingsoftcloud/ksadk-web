@@ -33,6 +33,7 @@ export type BackendMessage = {
 export type ListSessionMessagesOptions = {
   agentId?: string;
   afterSeqId?: number;
+  beforeSeqId?: number;
   limit?: number;
   includeReasoning?: boolean;
   includeToolEvents?: boolean;
@@ -57,6 +58,7 @@ export async function listSessionMessages(
       AgentId: opts?.agentId,
       SessionId: sessionId,
       AfterSeqId: opts?.afterSeqId,
+      BeforeSeqId: opts?.beforeSeqId,
       Limit: opts?.limit,
       IncludeReasoning: opts?.includeReasoning,
       IncludeToolEvents: opts?.includeToolEvents,
@@ -68,6 +70,10 @@ export async function listSessionMessages(
     Messages: data.Messages ?? [],
     LatestSeqId: Number.isFinite(Number(data.LatestSeqId)) ? Number(data.LatestSeqId) : 0,
     HasMore: Boolean(data.HasMore),
-    NextCursor: Number.isFinite(Number(data.NextCursor)) ? Number(data.NextCursor) : null,
+    NextCursor: data.NextCursor === null || data.NextCursor === undefined
+      ? null
+      : Number.isFinite(Number(data.NextCursor))
+        ? Number(data.NextCursor)
+        : null,
   };
 }

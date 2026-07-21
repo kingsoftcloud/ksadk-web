@@ -272,8 +272,8 @@ export class RunEngineImpl implements RunEngine {
     if (this._stage === 'idle') return;
     this.setStage('stopping');
     const invocationId = useStreamingStore.getState().currentRunId;
-    if (invocationId) {
-      void this.api.cancelRun(this.config.agentId, invocationId).catch((err) => {
+    if (invocationId && this.activeSessionId) {
+      void this.api.cancelRun(this.config.agentId, this.activeSessionId, invocationId).catch((err) => {
         console.warn('[RunEngine] cancelRun on stop failed:', err);
       });
     }
@@ -305,7 +305,9 @@ export class RunEngineImpl implements RunEngine {
 
   async cancelRemote(invocationId: string): Promise<void> {
     try {
-      await this.api.cancelRun(this.config.agentId, invocationId);
+      if (this.activeSessionId) {
+        await this.api.cancelRun(this.config.agentId, this.activeSessionId, invocationId);
+      }
     } catch (err) {
       console.warn('[RunEngine] cancelRemote failed:', err);
     }

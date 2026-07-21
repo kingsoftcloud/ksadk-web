@@ -8,6 +8,7 @@ import { useCheckpointStore } from '../../stores/checkpoint.js';
 import { ChatMessageList } from './ChatMessageList';
 import { AttachmentPreview } from './AttachmentPreview';
 import { buildComposerContextIndicator } from '../../utils/context.js';
+import { ownsOlderMessageScrollRequest } from '../../utils/session-message-history.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
 import type { ModelStore } from '../../stores/model.js';
 import type { SessionStore } from '../../stores/session.js';
@@ -24,7 +25,7 @@ type ConnectedMessageListProps = {
   onCancelRemote?: () => void;
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
-  onLoadOlderSessionEvents?: (sessionId: string) => Promise<void>;
+  onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
 };
 
 export function ConnectedMessageList({
@@ -37,15 +38,15 @@ export function ConnectedMessageList({
   onCancelRemote,
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
-  onLoadOlderSessionEvents,
+  onLoadOlderSessionMessages,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
   const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
   const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
-  const currentEventCache = useSessionStore((s: SessionStore) =>
-    currentSessionId ? s.eventCache[currentSessionId] : null,
+  const currentMessageHistory = useSessionStore((s: SessionStore) =>
+    currentSessionId ? s.messageHistory[currentSessionId] : null,
   );
   const input = useUIStore((s: UIStore) => s.input);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
@@ -58,6 +59,7 @@ export function ConnectedMessageList({
   const previousScrollTopRef = useRef(0);
   const isStreamingRef = useRef(isStreaming);
   const loadingOlderRef = useRef(false);
+  const olderLoadTokenRef = useRef<symbol | null>(null);
   const needsInitialScrollRef = useRef(true);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
@@ -87,6 +89,8 @@ export function ConnectedMessageList({
     stickToBottomRef.current = true;
     userDetachedFromBottomRef.current = false;
     previousScrollTopRef.current = 0;
+    loadingOlderRef.current = false;
+    olderLoadTokenRef.current = null;
   }, [currentSessionId]);
 
   useEffect(() => {
@@ -102,17 +106,31 @@ export function ConnectedMessageList({
       if (
         scroller.scrollTop < 200 &&
         currentSessionId &&
-        currentEventCache &&
-        currentEventCache.offset > 0 &&
-        !currentEventCache.isLoadingOlder &&
+        currentMessageHistory?.hasMore &&
+        !currentMessageHistory.isLoadingOlder &&
         !loadingOlderRef.current &&
-        onLoadOlderSessionEvents
+        onLoadOlderSessionMessages
       ) {
         const previousScrollHeight = scroller.scrollHeight;
+        const requestedSessionId = currentSessionId;
+        const requestToken = Symbol(requestedSessionId);
         loadingOlderRef.current = true;
-        void onLoadOlderSessionEvents(currentSessionId)
+        olderLoadTokenRef.current = requestToken;
+        void onLoadOlderSessionMessages(requestedSessionId)
           .then(() => {
+            if (!ownsOlderMessageScrollRequest({
+              requestedSessionId,
+              activeSessionId: useSessionStore.getState().currentSessionId,
+              requestToken,
+              activeRequestToken: olderLoadTokenRef.current,
+            })) return;
             requestAnimationFrame(() => {
+              if (!ownsOlderMessageScrollRequest({
+                requestedSessionId,
+                activeSessionId: useSessionStore.getState().currentSessionId,
+                requestToken,
+                activeRequestToken: olderLoadTokenRef.current,
+              })) return;
               const nextScroller = scrollRef.current;
               if (!nextScroller) return;
               const delta = nextScroller.scrollHeight - previousScrollHeight;
@@ -121,7 +139,10 @@ export function ConnectedMessageList({
             });
           })
           .finally(() => {
-            loadingOlderRef.current = false;
+            if (olderLoadTokenRef.current === requestToken) {
+              olderLoadTokenRef.current = null;
+              loadingOlderRef.current = false;
+            }
           });
       }
 
@@ -144,7 +165,7 @@ export function ConnectedMessageList({
     updateStickiness();
     scroller.addEventListener('scroll', updateStickiness, { passive: true });
     return () => scroller.removeEventListener('scroll', updateStickiness);
-  }, [currentEventCache, currentSessionId, onLoadOlderSessionEvents]);
+  }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
 
   useEffect(() => {
     const scroller = scrollRef.current;

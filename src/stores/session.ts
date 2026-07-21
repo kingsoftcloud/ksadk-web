@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { Session } from '../components/chat/types.js';
-import type { SessionEventRecord } from '../types/session-events.js';
 import { buildSessionPaginationState, mergeLoadedPages } from '../utils/session-pagination.js';
 
 export type SessionState = {
@@ -14,11 +13,9 @@ export type SessionState = {
   hasMoreSessions: boolean;
   isLoadingSessions: boolean;
   pinnedSessionIds: string[];
-  eventCache: Record<string, {
-    events: SessionEventRecord[];
-    total: number;
-    offset: number;
-    limit: number;
+  messageHistory: Record<string, {
+    nextCursor: number | null;
+    hasMore: boolean;
     isLoadingOlder: boolean;
   }>;
 };
@@ -37,15 +34,13 @@ export type SessionActions = {
   setLoadingSessions: (loading: boolean) => void;
   resetSessionPagination: (agentId: string) => void;
   togglePinnedSession: (id: string) => void;
-  setSessionEventCache: (sessionId: string, cache: {
-    events: SessionEventRecord[];
-    total: number;
-    offset: number;
-    limit: number;
+  setSessionMessageHistory: (sessionId: string, history: {
+    nextCursor: number | null;
+    hasMore: boolean;
     isLoadingOlder?: boolean;
   }) => void;
-  setSessionEventLoadingOlder: (sessionId: string, loading: boolean) => void;
-  clearSessionEventCache: (sessionId?: string) => void;
+  setSessionMessageHistoryLoading: (sessionId: string, loading: boolean) => void;
+  clearSessionMessageHistory: (sessionId?: string) => void;
 };
 
 function sessionUpdatedAtValue(session: Session): number {
@@ -118,7 +113,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   hasMoreSessions: false,
   isLoadingSessions: false,
   pinnedSessionIds: readPinnedSessionIds(),
-  eventCache: {},
+  messageHistory: {},
   setSessions: (sessions) =>
     set((s) => ({ sessions: sortSessions(sessions, s.pinnedSessionIds) })),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
@@ -193,37 +188,35 @@ export const useSessionStore = create<SessionStore>()((set) => ({
         sessions: sortSessions(s.sessions, pinnedSessionIds),
       };
     }),
-  setSessionEventCache: (sessionId, cache) =>
+  setSessionMessageHistory: (sessionId, history) =>
     set((s) => ({
-      eventCache: {
-        ...s.eventCache,
+      messageHistory: {
+        ...s.messageHistory,
         [sessionId]: {
-          events: cache.events,
-          total: cache.total,
-          offset: cache.offset,
-          limit: cache.limit,
-          isLoadingOlder: cache.isLoadingOlder ?? false,
+          nextCursor: history.nextCursor,
+          hasMore: history.hasMore,
+          isLoadingOlder: history.isLoadingOlder ?? false,
         },
       },
     })),
-  setSessionEventLoadingOlder: (sessionId, loading) =>
+  setSessionMessageHistoryLoading: (sessionId, loading) =>
     set((s) => {
-      const existing = s.eventCache[sessionId];
+      const existing = s.messageHistory[sessionId];
       if (!existing) return {};
       return {
-        eventCache: {
-          ...s.eventCache,
+        messageHistory: {
+          ...s.messageHistory,
           [sessionId]: { ...existing, isLoadingOlder: loading },
         },
       };
     }),
-  clearSessionEventCache: (sessionId) =>
+  clearSessionMessageHistory: (sessionId) =>
     set((s) => {
       if (!sessionId) {
-        return { eventCache: {} };
+        return { messageHistory: {} };
       }
-      const next = { ...s.eventCache };
+      const next = { ...s.messageHistory };
       delete next[sessionId];
-      return { eventCache: next };
+      return { messageHistory: next };
     }),
 }));

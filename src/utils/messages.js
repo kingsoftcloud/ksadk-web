@@ -39,6 +39,11 @@ function extractContentText(content) {
 
 function mapToolEvents(toolEvents) {
   const tools = {};
+  const nameCounts = new Map();
+  for (const te of toolEvents ?? []) {
+    if (!te?.Name) continue;
+    nameCounts.set(te.Name, (nameCounts.get(te.Name) || 0) + 1);
+  }
   for (const te of toolEvents ?? []) {
     if (!te?.Name) continue;
     const status = TOOL_STATUS_MAP[String(te.Status ?? 'completed').toLowerCase()] ?? 'completed';
@@ -57,8 +62,9 @@ function mapToolEvents(toolEvents) {
     if (te.ToolCallId) {
       entry.previousResponseId = te.ToolCallId;
     }
-    // 同名 tool 后者覆盖前者(保留最后状态)
-    tools[te.Name] = entry;
+    // 仅同名多次时用 ToolCallId 分键；单工具和旧事件保持 name 键兼容。
+    const key = nameCounts.get(te.Name) > 1 && te.ToolCallId ? te.ToolCallId : te.Name;
+    tools[key] = entry;
   }
   return tools;
 }

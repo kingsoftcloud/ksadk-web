@@ -99,7 +99,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     fetchSessions,
     loadMoreSessions,
     loadSession,
-    loadOlderSessionEvents,
+    loadOlderSessionMessages,
     createNewSession,
     deleteSession,
     currentSessionIdRef,
@@ -121,7 +121,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
         return;
       }
       const refresh = () => {
-        useSessionStore.getState().clearSessionEventCache(sessionId);
+        useSessionStore.getState().clearSessionMessageHistory(sessionId);
         void fetchSessions(agentIdRef.current, sessionId);
       };
       queueMicrotask(refresh);
@@ -166,10 +166,10 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const handleCancelRemote = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     const streamingState = useStreamingStore.getState();
-    const invocationId = streamingState.currentRunId || streamingState.getSessionActivity(sessionId)?.runId || '';
-    if (invocationId) {
+    const invocationId = streamingState.getSessionActivity(sessionId)?.runId || streamingState.currentRunId || '';
+    if (sessionId && invocationId) {
       try {
-        await api.cancelRun(agentId, invocationId);
+        await api.cancelRun(agentId, sessionId, invocationId);
         useStreamingStore.getState().stopSessionActivity(
           sessionId,
           '取消请求已发送，后台运行会停在最近 checkpoint。',
@@ -366,7 +366,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
                 uiCapabilities.RunLifecycle.CheckpointResume
               }
               onResumeCheckpoint={resumeCheckpoint}
-              onLoadOlderSessionEvents={loadOlderSessionEvents}
+              onLoadOlderSessionMessages={loadOlderSessionMessages}
             />
         <ConnectedComposer
           composerMaxHeight={composerMaxHeight}

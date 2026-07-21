@@ -48,6 +48,21 @@ describe('mapBackendMessage', () => {
     expect(result.tools.search.status).toBe('completed');
   });
 
+  it('keeps same-name tool calls distinct by ToolCallId', () => {
+    const result = mapBackendMessage({
+      Role: 'assistant',
+      Content: { text: 'done' },
+      ToolEvents: [
+        { Name: 'search', ToolCallId: 'call-1', Args: { q: 'one' }, Result: 'first' },
+        { Name: 'search', ToolCallId: 'call-2', Args: { q: 'two' }, Result: 'second' },
+      ],
+    } satisfies BackendMessage);
+
+    expect(Object.keys(result.tools)).toEqual(['call-1', 'call-2']);
+    expect(result.tools['call-1'].args).toBe('{"q":"one"}');
+    expect(result.tools['call-2'].output).toBe('second');
+  });
+
   it('maps paused approval tool event', () => {
     const msg: BackendMessage = {
       Role: 'assistant',
