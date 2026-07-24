@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { preprocessMarkdown } from '../utils/markdown.js';
 
 const LazyCodeBlock = React.lazy(() =>
@@ -87,7 +88,7 @@ const PlainMarkdown: React.FC<{ content: string }> = React.memo(({ content }) =>
   return (
     <div className="prose prose-slate dark:prose-invert max-w-none break-words text-[15px] leading-7 prose-headings:mb-3 prose-headings:mt-6 prose-headings:font-semibold prose-headings:text-slate-900 dark:prose-headings:text-slate-50 prose-h1:text-[1.95rem] prose-h1:leading-tight prose-h1:tracking-[-0.02em] prose-h2:text-[1.55rem] prose-h2:leading-tight prose-h2:tracking-[-0.015em] prose-h3:text-[1.2rem] prose-h3:leading-snug prose-p:my-3 prose-p:leading-7 prose-strong:text-slate-900 dark:prose-strong:text-slate-100 prose-ol:my-3 prose-ul:my-3 prose-li:my-1.5 prose-li:leading-7 prose-hr:my-5 prose-hr:border-slate-200 dark:prose-hr:border-slate-700 prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         components={markdownComponents}
       >
         {processedContent}
