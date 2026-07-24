@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.0 - 2026-07-24
+
+> **Review candidate, not a published npm release.** `0.3.0` is the web
+> counterpart of the KsADK `0.8.0` review branch. No npm tag or package is
+> created by this changelog entry.
+
+### Hosted runtime transport
+
+- Add the official `@ag-ui/client` transport and capability-driven runtime
+  dispatcher for Hosted Chat. The existing OpenAI Responses stream remains the
+  default compatibility path whenever AG-UI is unavailable or not negotiated.
+- Make the transport choice a run concern instead of a second page or client:
+  session restoration, composer state, streaming state, and the API facade
+  stay shared across Responses and AG-UI.
+
+### A2UI and approvals
+
+- Render RuntimeEvent-projected A2UI activities through
+  `@copilotkit/a2ui-renderer`, with a bounded activity surface that works in
+  the message timeline and on compact viewports.
+- Persist and replay activity/approval state with session history. A pending
+  card can appear after a reload without a manual refresh; an answered card is
+  terminal and does not submit the same approval again.
+- Route approval answers through the existing resume contract and expose
+  explicit pending, responding, resolved, and error UI states. UI actions do
+  not replace backend approval or tool policy enforcement.
+
+### Session and UI fixes
+
+- Repair restored-session history projection, event cursor merging, and active
+  approval hydration so a switch/reload does not erase messages or leave a
+  stale interactive card above the current run.
+- Refine expandable activity layout and mobile spacing so A2UI content remains
+  within the chat flow instead of overlaying neighboring messages.
+
+### Tooling and compatibility
+
+- Migrate the app styling pipeline to Tailwind CSS v4.
+- Update the locked DOMPurify transitive dependency security patch.
+- This candidate requires the corresponding Hosted runtime capability. It does
+  not make a new npm package available to `ksadk-python`; Python remains pinned
+  to the currently published web package until a reviewed npm publication
+  occurs.
+
 ## 0.2.18 - 2026-07-08
 
 - Load restored sessions through the server-projected `ListSessionMessages`
