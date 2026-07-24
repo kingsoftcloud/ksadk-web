@@ -9,6 +9,8 @@ import type { ApiFacade } from '../core/api/types.js';
 import { RunEngineImpl, dispatchRunEventToStores, resetDispatcherState } from '../core/run/index.js';
 import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
+import { resolveHostedChatTransport } from '../utils/capabilities.js';
+import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 
 type QueuedDraft = {
   text: string;
@@ -57,9 +59,10 @@ export function useRunAgent(ctx: RunAgentContext) {
       selectedModel,
       selectedModelMetadata,
       thinkingMode,
+      hostedChatTransport: resolveHostedChatTransport(uiCapabilities),
       checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
     });
-  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, uiCapabilities.RunLifecycle?.CheckpointResumePreview]);
+  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, uiCapabilities]);
 
   const getEngine = useCallback((sessionId: string | null | undefined) => {
     const key = String(sessionId || 'new-session');
@@ -235,5 +238,63 @@ export function useRunAgent(ctx: RunAgentContext) {
     resetDispatcherState();
   }, []);
 
-  return { submitDraft, stopGeneration, disconnectRun, resumeCheckpoint, resetCompaction };
+  const submitAguiAction = useCallback((message: A2UIClientEventMessage) => {
+    const action = message.userAction;
+    if (!action) return false;
+    const context = action.context || {};
+    const interruptId = String(context.interruptId || context.interrupt_id || '');
+    if (!interruptId) return false;
+    const sessionId = currentSessionIdRef.current;
+    if (!sessionId) return false;
+    const engine = getEngine(sessionId);
+    const status = context.status === 'cancelled' ? 'cancelled' : 'resolved';
+    const payload = Object.prototype.hasOwnProperty.call(context, 'payload')
+      ? context.payload
+      : {
+          action: action.name,
+          sourceComponentId: action.sourceComponentId,
+          context,
+        };
+    return engine.resumeAguiInterrupt({
+      sessionId,
+      interruptId,
+      status,
+      payload,
+      onSettled: onRunSettled,
+    });
+  }, [currentSessionIdRef, getEngine, onRunSettled]);
+
+  const respondToAguiApproval = useCallback((options: {
+    interruptId: string;
+    approve: boolean;
+  }) => {
+    if (!options.interruptId) return false;
+    const sessionId = currentSessionIdRef.current;
+    if (!sessionId) return false;
+    const engine = getEngine(sessionId);
+    if (engine.stage !== 'idle') return false;
+
+    useStreamingStore.getState().setSessionStreaming(sessionId, true);
+    const accepted = engine.resumeAguiInterrupt({
+      sessionId,
+      interruptId: options.interruptId,
+      status: 'resolved',
+      payload: { decision: options.approve ? 'approve' : 'reject' },
+      onSettled: onRunSettled,
+    });
+    if (!accepted) {
+      useStreamingStore.getState().setSessionStreaming(sessionId, false);
+    }
+    return accepted;
+  }, [currentSessionIdRef, getEngine, onRunSettled]);
+
+  return {
+    submitDraft,
+    stopGeneration,
+    disconnectRun,
+    resumeCheckpoint,
+    submitAguiAction,
+    respondToAguiApproval,
+    resetCompaction,
+  };
 }

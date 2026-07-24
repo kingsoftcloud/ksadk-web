@@ -1,6 +1,31 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@plugin "tailwindcss-animate";
+
+@theme {
+  --color-primary: hsl(215 78% 52%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-accent: hsl(215 78% 95%);
+  --color-accent-foreground: hsl(215 78% 25%);
+  --color-background: hsl(210 20% 99%);
+  --color-foreground: hsl(215 25% 15%);
+  --color-muted: hsl(210 15% 96%);
+  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
+  --color-border: hsl(210 12% 90%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(222.2 84% 4.9%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(222.2 84% 4.9%);
+  --color-secondary: hsl(210 40% 96.1%);
+  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
+  --color-destructive: hsl(0 84.2% 60.2%);
+  --color-destructive-foreground: hsl(210 40% 98%);
+  --color-input: hsl(214.3 31.8% 91.4%);
+  --color-ring: hsl(222.2 84% 4.9%);
+  --radius: 0.75rem;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {

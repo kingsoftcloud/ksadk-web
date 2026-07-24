@@ -32,6 +32,7 @@ export class ResponsesProtocol implements StreamProtocol {
             ...(approvalRequestId ? { approvalRequestId } : {}),
             ...(previousResponseId ? { previousResponseId } : {}),
             ...(serverLabel ? { serverLabel } : {}),
+            ...(approvalRequestId ? { approvalProtocol: 'responses' } : {}),
           },
         } as StreamAction;
       }

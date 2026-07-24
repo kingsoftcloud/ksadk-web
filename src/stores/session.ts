@@ -16,6 +16,7 @@ export type SessionState = {
   messageHistory: Record<string, {
     nextCursor: number | null;
     hasMore: boolean;
+    isLoadingInitial: boolean;
     isLoadingOlder: boolean;
   }>;
 };
@@ -39,6 +40,7 @@ export type SessionActions = {
     hasMore: boolean;
     isLoadingOlder?: boolean;
   }) => void;
+  setSessionInitialMessageHistoryLoading: (sessionId: string, loading: boolean) => void;
   setSessionMessageHistoryLoading: (sessionId: string, loading: boolean) => void;
   clearSessionMessageHistory: (sessionId?: string) => void;
 };
@@ -111,7 +113,10 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   sessionsPageSize: 30,
   loadedPages: new Set(),
   hasMoreSessions: false,
-  isLoadingSessions: false,
+  // Session restoration starts from an unknown state. Rendering an empty
+  // transcript before the first list request completes makes persisted
+  // approvals look as if they only appear after a manual refresh.
+  isLoadingSessions: true,
   pinnedSessionIds: readPinnedSessionIds(),
   messageHistory: {},
   setSessions: (sessions) =>
@@ -195,10 +200,26 @@ export const useSessionStore = create<SessionStore>()((set) => ({
         [sessionId]: {
           nextCursor: history.nextCursor,
           hasMore: history.hasMore,
+          isLoadingInitial: false,
           isLoadingOlder: history.isLoadingOlder ?? false,
         },
       },
     })),
+  setSessionInitialMessageHistoryLoading: (sessionId, loading) =>
+    set((s) => {
+      const existing = s.messageHistory[sessionId];
+      return {
+        messageHistory: {
+          ...s.messageHistory,
+          [sessionId]: {
+            nextCursor: existing?.nextCursor ?? null,
+            hasMore: existing?.hasMore ?? false,
+            isLoadingInitial: loading,
+            isLoadingOlder: existing?.isLoadingOlder ?? false,
+          },
+        },
+      };
+    }),
   setSessionMessageHistoryLoading: (sessionId, loading) =>
     set((s) => {
       const existing = s.messageHistory[sessionId];

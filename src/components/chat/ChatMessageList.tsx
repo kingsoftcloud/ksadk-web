@@ -1,4 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 
 import {
   Bot,
@@ -27,6 +36,8 @@ import { calculateVirtualMessageWindow } from '../../utils/message-virtualizatio
 import type { RunActivity } from '../../stores/streaming.js';
 import type { SessionCheckpoint } from '../../stores/checkpoint.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
+import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
+import { A2UIActivityMessage } from './A2UIActivityMessage';
 
 type ChatMessageListProps = {
   agentName: string;
@@ -35,12 +46,15 @@ type ChatMessageListProps = {
   activity: RunActivity | null;
   contextIndicator: ComposerContextIndicator;
   messages: Message[];
+  isLoadingInitialHistory?: boolean;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
   onRespondToApproval: (options: {
     approvalRequestId: string;
     approve: boolean;
     previousResponseId?: string;
   }) => void;
+  onRespondToAguiApproval?: (options: { interruptId: string; approve: boolean }) => void;
+  onSubmitAguiAction?: (message: A2UIClientEventMessage) => void;
   onSubmitFeedback: (options: {
     message: Message;
     rating: 'up' | 'down';
@@ -56,6 +70,55 @@ type ChatMessageListProps = {
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
 const MESSAGE_VIRTUALIZATION_OVERSCAN = 4;
+
+function approvalLevelLabel(level?: string) {
+  const normalized = String(level || '').trim().toLowerCase();
+  if (normalized === 'elevated') return '高风险';
+  if (normalized === 'always') return '始终确认';
+  if (normalized === 'confirm') return '需确认';
+  return level || '';
+}
+
+function approvalLevelTone(level?: string) {
+  const normalized = String(level || '').trim().toLowerCase();
+  return normalized === 'elevated'
+    ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200'
+    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200';
+}
+
+function MeasuredMessageRow({
+  messageId,
+  top,
+  onMeasure,
+  children,
+}: {
+  messageId: string;
+  top: number;
+  onMeasure: (messageId: string, height: number, top: number) => void;
+  children: ReactNode;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const node = rowRef.current;
+    if (!node) return undefined;
+    const measure = () => onMeasure(messageId, node.offsetHeight, top);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [messageId, onMeasure, top]);
+
+  return (
+    <div
+      ref={rowRef}
+      style={{ position: 'absolute', top, left: 0, right: 0 }}
+    >
+      {children}
+    </div>
+  );
+}
 
 function formatElapsed(ms: number) {
   const safe = Math.max(0, Math.floor(ms / 1000));
@@ -85,11 +148,6 @@ function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerCo
   const contextWindowTokens = contextIndicator?.contextWindowTokens;
   const label = formatCompactTokens(usedTokens);
   const windowLabel = formatCompactTokens(contextWindowTokens);
-  const [pulseKey, setPulseKey] = useState(0);
-
-  useEffect(() => {
-    if (label) setPulseKey((current) => current + 1);
-  }, [label]);
 
   if (!label) return null;
 
@@ -97,7 +155,7 @@ function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerCo
   const title = contextIndicator?.label || `估算 token ${detail}`;
   return (
     <span
-      key={pulseKey}
+      key={label}
       className="token-count-pulse hidden text-slate-400 dark:text-slate-500 sm:inline"
       title={title}
     >
@@ -200,6 +258,17 @@ function EmptyState({ agentName }: { agentName: string }) {
       <p className="mt-2 text-sm text-slate-500">
         我是 {agentName}，由 Ksyun AgentEngine 驱动
       </p>
+    </div>
+  );
+}
+
+function InitialHistorySkeleton() {
+  return (
+    <div className="mx-auto flex w-full max-w-[44rem] flex-col gap-5 px-2 py-8" aria-label="正在加载会话历史">
+      <div className="h-4 w-28 animate-pulse rounded bg-slate-200/80 dark:bg-slate-800" />
+      <div className="h-20 w-4/5 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <div className="ml-auto h-12 w-3/5 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <div className="h-16 w-11/12 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-900" />
     </div>
   );
 }
@@ -665,7 +734,9 @@ function ChatMessage({
   onDeleteFeedback,
   onOpenAttachmentPreview,
   onRespondToApproval,
+  onRespondToAguiApproval,
   onSubmitFeedback,
+  onSubmitAguiAction,
 }: {
   agentName: string;
   isMobile: boolean;
@@ -675,7 +746,9 @@ function ChatMessage({
   onDeleteFeedback: (message: Message) => void;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
   onRespondToApproval: ChatMessageListProps['onRespondToApproval'];
+  onRespondToAguiApproval?: ChatMessageListProps['onRespondToAguiApproval'];
   onSubmitFeedback: ChatMessageListProps['onSubmitFeedback'];
+  onSubmitAguiAction?: ChatMessageListProps['onSubmitAguiAction'];
 }) {
   if (message.role === 'user') {
     return (
@@ -691,6 +764,16 @@ function ChatMessage({
           {message.content}
         </div>
       </div>
+    );
+  }
+
+  if (message.role === 'a2ui' && message.aguiActivity) {
+    return (
+      <A2UIActivityMessage
+        surfaceId={message.aguiActivity.surfaceId}
+        messages={message.aguiActivity.messages}
+        onAction={onSubmitAguiAction}
+      />
     );
   }
 
@@ -710,22 +793,22 @@ function ChatMessage({
       ) : null}
 
       {message.reasoning ? (
-        <details className="group/details mb-3 overflow-hidden rounded-lg border border-emerald-200/70 bg-emerald-50/40 text-sm text-slate-600 transition-colors open:bg-white dark:border-emerald-900/50 dark:bg-emerald-950/10 dark:text-slate-300 dark:open:bg-slate-950/30">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-l-2 border-emerald-400 px-3 py-2 font-medium outline-none marker:hidden dark:border-emerald-500">
+        <details className="group/details mb-3 overflow-hidden rounded-md border border-slate-200/80 bg-slate-50/60 text-sm text-slate-600 transition-colors open:bg-white dark:border-slate-700/80 dark:bg-slate-900/40 dark:text-slate-300 dark:open:bg-slate-950/30">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-medium outline-none marker:hidden">
             <div className="flex min-w-0 items-center gap-2">
               {isStreaming && isLastMessage && !message.content ? (
-                <RefreshCcw className="h-4 w-4 animate-spin text-emerald-500" />
+                <RefreshCcw className="h-4 w-4 animate-spin text-slate-500" />
               ) : (
-                <Check className="h-4 w-4 text-emerald-500" />
+                <Check className="h-4 w-4 text-slate-400" />
               )}
               <span className="truncate">思考过程</span>
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+              <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                 {isStreaming && isLastMessage && !message.content ? '生成中' : '已完成'}
               </span>
             </div>
             <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform group-open/details:rotate-180" />
           </summary>
-          <div className="border-t border-emerald-100/80 bg-white/70 dark:border-emerald-950 dark:bg-slate-950/20">
+          <div className="border-t border-slate-200/70 bg-white/70 dark:border-slate-800 dark:bg-slate-950/20">
             <div className="custom-scrollbar max-h-[min(46vh,28rem)] overflow-y-auto px-4 py-3 text-[14px] leading-7 text-slate-600 dark:text-slate-300 [&_p]:my-2 [&_pre]:my-2">
               <MessageMarkdown content={message.reasoning} />
             </div>
@@ -737,30 +820,37 @@ function ChatMessage({
         ? Object.values(message.tools).map((tool, toolIndex) => (
             <details
               key={`${tool.name}-${toolIndex}`}
-              open={tool.status === 'paused' ? true : undefined}
+              // Approval status is the user-facing source of truth. A tool
+              // result can settle its execution status before the interrupt
+              // is rendered, but a pending decision must remain actionable.
+              open={tool.approvalStatus === 'pending' || tool.status === 'paused' ? true : undefined}
               className={cn(
-                'group/details mb-3 rounded-xl border px-3 py-2.5 text-sm transition-all',
+                'group/details mb-2 overflow-hidden rounded-md border text-sm transition-colors',
                 tool.status === 'paused'
-                  ? 'border-amber-200 bg-amber-50/50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200'
+                  ? 'border-amber-200/80 bg-amber-50/25 text-slate-700 dark:border-amber-900/60 dark:bg-amber-950/10 dark:text-slate-200'
                   : tool.status === 'error'
-                    ? 'border-rose-200 bg-rose-50/40 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200'
-                  : 'border-blue-200 bg-blue-50/30 text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-400',
+                    ? 'border-rose-200/80 bg-rose-50/25 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/10 dark:text-rose-200'
+                    : 'border-slate-200/80 bg-slate-50/40 text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300',
               )}
             >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-medium">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-medium">
                 <div className="flex items-center gap-2">
                   {tool.status === 'running' ? (
-                    <RefreshCcw className="h-4 w-4 animate-spin text-blue-500" />
+                    <RefreshCcw className="h-4 w-4 animate-spin text-slate-500" />
                   ) : tool.status === 'paused' ? (
                     <ShieldCheck className="h-4 w-4 text-amber-500" />
                   ) : tool.status === 'error' ? (
                     <XCircle className="h-4 w-4 text-rose-500" />
                   ) : (
-                    <Check className="h-4 w-4 text-emerald-500" />
+                    <Check className="h-4 w-4 text-slate-400" />
                   )}
                   <span>
-                    {tool.status === 'paused'
+                    {tool.approvalStatus === 'pending'
                       ? '等待审批：'
+                      : tool.approvalStatus === 'approved'
+                        ? '已批准：'
+                        : tool.approvalStatus === 'rejected'
+                          ? '已拒绝：'
                       : tool.status === 'error'
                         ? '工具调用失败：'
                         : '工具调用：'}
@@ -770,54 +860,89 @@ function ChatMessage({
               </summary>
               <div
                 className={cn(
-                  'mx-1 mt-3 flex flex-col gap-3 border-l-2 py-1 pl-4 font-mono text-[13px] leading-relaxed opacity-90',
+                  'flex flex-col gap-3 border-t px-3 py-3 font-mono text-[13px] leading-relaxed',
                   tool.status === 'paused'
-                    ? 'border-amber-200 dark:border-amber-800'
+                    ? 'border-amber-200/70 dark:border-amber-900/60'
                     : tool.status === 'error'
-                      ? 'border-rose-200 dark:border-rose-800'
-                      : 'border-blue-200 dark:border-blue-800',
+                      ? 'border-rose-200/70 dark:border-rose-900/60'
+                      : 'border-slate-200/70 dark:border-slate-800',
                 )}
               >
-                {tool.status === 'paused' && tool.approvalRequestId ? (
-                  <div className="rounded-2xl border border-amber-200 bg-white/75 p-3 font-sans text-sm text-amber-900 shadow-sm dark:border-amber-900/70 dark:bg-slate-950/40 dark:text-amber-100">
-                    <div className="font-medium">该工具调用需要人工确认后继续。</div>
+                {tool.approvalRequestId ? (
+                  <div className="font-sans text-sm text-slate-700 dark:text-slate-200">
+                    <div className="font-medium">
+                      {tool.approvalStatus === 'approved'
+                        ? '已批准该工具调用。'
+                        : tool.approvalStatus === 'rejected'
+                          ? '已拒绝该工具调用。'
+                          : tool.approvalMessage || '该工具调用需要人工确认后继续。'}
+                    </div>
+                    {tool.approvalLevel ? (
+                      <div className={cn(
+                        'mt-2 inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium',
+                        approvalLevelTone(tool.approvalLevel),
+                      )}>
+                        审批级别：{approvalLevelLabel(tool.approvalLevel)}
+                      </div>
+                    ) : null}
                     {tool.serverLabel ? (
                       <div className="mt-1 text-xs text-amber-700/80 dark:text-amber-200/80">
                         MCP Server: {tool.serverLabel}
                       </div>
                     ) : null}
+                    {tool.approvalStatus === 'pending' ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        disabled={tool.approvalStatus === 'approved' || tool.approvalStatus === 'rejected'}
+                        disabled={isStreaming || tool.approvalStatus !== 'pending'}
                         onClick={() =>
-                          onRespondToApproval({
-                            approvalRequestId: tool.approvalRequestId || '',
-                            approve: true,
-                            previousResponseId: tool.previousResponseId,
-                          })
+                          tool.approvalProtocol === 'ag-ui'
+                            ? onRespondToAguiApproval?.({
+                                interruptId: tool.approvalRequestId || '',
+                                approve: true,
+                              })
+                            : onRespondToApproval({
+                                approvalRequestId: tool.approvalRequestId || '',
+                                approve: true,
+                                previousResponseId: tool.previousResponseId,
+                              })
                         }
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
                       >
                         <Check className="h-3.5 w-3.5" />
                         批准并继续
                       </button>
                       <button
                         type="button"
-                        disabled={tool.approvalStatus === 'approved' || tool.approvalStatus === 'rejected'}
+                        disabled={isStreaming || tool.approvalStatus !== 'pending'}
                         onClick={() =>
-                          onRespondToApproval({
-                            approvalRequestId: tool.approvalRequestId || '',
-                            approve: false,
-                            previousResponseId: tool.previousResponseId,
-                          })
+                          tool.approvalProtocol === 'ag-ui'
+                            ? onRespondToAguiApproval?.({
+                                interruptId: tool.approvalRequestId || '',
+                                approve: false,
+                              })
+                            : onRespondToApproval({
+                                approvalRequestId: tool.approvalRequestId || '',
+                                approve: false,
+                                previousResponseId: tool.previousResponseId,
+                              })
                         }
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-55 dark:border-rose-900/70 dark:bg-slate-950 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-55 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
                       >
                         <XCircle className="h-3.5 w-3.5" />
                         拒绝
                       </button>
                     </div>
+                    ) : (
+                      <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        {tool.approvalStatus === 'approved' ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-500" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 text-rose-500" />
+                        )}
+                        {tool.approvalStatus === 'approved' ? '已批准' : '已拒绝'}
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 {tool.args ? (
@@ -843,6 +968,15 @@ function ChatMessage({
         ) : null}
       </div>
 
+      {message.aguiActivities?.map((activity) => (
+        <A2UIActivityMessage
+          key={activity.surfaceId}
+          surfaceId={activity.surfaceId}
+          messages={activity.messages}
+          onAction={onSubmitAguiAction}
+        />
+      ))}
+
       <FeedbackControls
         isLastMessage={isLastMessage}
         isStreaming={isStreaming}
@@ -861,10 +995,13 @@ export function ChatMessageList({
   activity,
   contextIndicator,
   messages,
+  isLoadingInitialHistory = false,
   onDeleteFeedback,
   onOpenAttachmentPreview,
   onRespondToApproval,
+  onRespondToAguiApproval,
   onSubmitFeedback,
+  onSubmitAguiAction,
   onStopGeneration,
   onCancelRemote,
   checkpoints = [],
@@ -874,6 +1011,7 @@ export function ChatMessageList({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
+  const measuredHeightsRef = useRef(measuredHeights);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
@@ -911,19 +1049,24 @@ export function ChatMessageList({
 
   const visibleItems = virtualWindow.visibleItems;
 
-  const updateMeasuredHeight = (messageId: string, height: number) => {
+  const updateMeasuredHeight = useCallback((messageId: string, height: number, top: number) => {
     if (!messageId || !Number.isFinite(height) || height <= 0) {
       return;
     }
-    setMeasuredHeights((current) => {
-      if (current.get(messageId) === height) {
-        return current;
-      }
-      const next = new Map(current);
-      next.set(messageId, height);
-      return next;
-    });
-  };
+    const current = measuredHeightsRef.current;
+    const previousHeight = current.get(messageId) ?? DEFAULT_MESSAGE_ROW_HEIGHT;
+    if (previousHeight === height) return;
+    const next = new Map(current);
+    next.set(messageId, height);
+    measuredHeightsRef.current = next;
+    setMeasuredHeights(next);
+
+    const scroller = scrollRef.current;
+    if (scroller && top < scroller.scrollTop) {
+      scroller.scrollTop += height - previousHeight;
+      setScrollTop(scroller.scrollTop);
+    }
+  }, [scrollRef]);
 
   return (
     <div
@@ -940,23 +1083,18 @@ export function ChatMessageList({
           isStreaming={isStreaming}
           onResumeCheckpoint={onResumeCheckpoint}
         />
-        {messages.length === 0 ? (
+        {messages.length === 0 && isLoadingInitialHistory ? (
+        <InitialHistorySkeleton />
+        ) : messages.length === 0 ? (
         <EmptyState agentName={agentName} />
         ) : (
           <div style={{ height: virtualWindow.totalHeight }} className="relative">
             {visibleItems.map((entry) => (
-              <div
+              <MeasuredMessageRow
                 key={entry.item.id || entry.index}
-                ref={(node) => {
-                  if (!node) return;
-                  updateMeasuredHeight(entry.item.id || String(entry.index), node.offsetHeight);
-                }}
-                style={{
-                  position: 'absolute',
-                  top: entry.top,
-                  left: 0,
-                  right: 0,
-                }}
+                messageId={entry.item.id || String(entry.index)}
+                top={entry.top}
+                onMeasure={updateMeasuredHeight}
               >
                 {entry.item.role === 'system' ? (
                   <SystemMessage message={entry.item} />
@@ -970,10 +1108,12 @@ export function ChatMessageList({
                     onDeleteFeedback={onDeleteFeedback}
                     onOpenAttachmentPreview={onOpenAttachmentPreview}
                     onRespondToApproval={onRespondToApproval}
+                    onRespondToAguiApproval={onRespondToAguiApproval}
                     onSubmitFeedback={onSubmitFeedback}
+                    onSubmitAguiAction={onSubmitAguiAction}
                   />
                 )}
-              </div>
+              </MeasuredMessageRow>
             ))}
           </div>
         )}

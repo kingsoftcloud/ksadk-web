@@ -1,4 +1,8 @@
-import type { RuntimeApiFormat } from './api.js';
+import type {
+  HostedChatTransport,
+  HostedChatTransportProtocol,
+  RuntimeApiFormat,
+} from './api.js';
 
 export type BuiltinToolCapability = {
   name: string;
@@ -23,6 +27,8 @@ export type UiCapabilities = {
   HostedChat: {
     Enabled: boolean;
     ApiFormats: RuntimeApiFormat[];
+    PreferredTransport: HostedChatTransportProtocol;
+    Transports: HostedChatTransport[];
   };
   NativeDashboard: {
     Enabled: boolean;

@@ -115,6 +115,28 @@ function completedOutputItems(data) {
   return Array.isArray(payload?.output) ? payload.output : [];
 }
 
+function unwrapInterruptInfo(value) {
+  let current = value;
+  if (typeof current === 'string') {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return {};
+    }
+  }
+  if (Array.isArray(current)) {
+    current = current[0] || {};
+  }
+  if (!current || typeof current !== 'object') return {};
+  if (current.value && typeof current.value === 'object' && !Array.isArray(current.value)) {
+    return {
+      ...current.value,
+      approval_request_id: current.value.approval_request_id || current.value.id || current.id,
+    };
+  }
+  return current;
+}
+
 function normalizeOutputItem({ data, state, status }) {
   const item = data?.item || data?.output_item || data || {};
   const type = String(item.type || '').trim();
@@ -276,14 +298,87 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
   }
 
   if (eventType === 'response.approval_request' || eventType === 'response.ksadk.approval_request') {
-    const interruptInfo = data?.interrupt_info && typeof data.interrupt_info === 'object' ? data.interrupt_info : {};
+    const interruptInfo = unwrapInterruptInfo(data?.interrupt_info);
+    const approvalRequestId = String(interruptInfo.approval_request_id || interruptInfo.id || '');
+    const previousResponseId = String(data?.response_id || state.currentResponseId || '');
+    // 把审批详情(工具名/参数/允许决定)转成可交互 tool_upsert(status=paused),
+    // 让 ChatMessageList 渲染 ApprovalBar(批准/拒绝按钮),而不是只出一句系统消息。
+    // 兼容两种嵌套:interrupt_info.approval_requests.action_requests(外层包装)
+    // 与 interrupt_info.action_requests(runner 直出)。
+    const ar = (interruptInfo.approval_requests && typeof interruptInfo.approval_requests === 'object')
+      ? interruptInfo.approval_requests
+      : interruptInfo;
+    const actionRequests = Array.isArray(ar.action_requests) ? ar.action_requests : [];
+    if (actionRequests.length > 0) {
+      return actionRequests.map((req) => ({
+        type: 'tool_upsert',
+        name: String(req?.name || 'tool'),
+        args: JSON.stringify(req?.args ?? {}),
+        status: 'paused',
+        approvalRequestId,
+        previousResponseId,
+      }));
+    }
     return [
       {
         type: 'approval_request',
-        approvalRequestId: String(interruptInfo.approval_request_id || interruptInfo.id || ''),
-        previousResponseId: String(data?.response_id || state.currentResponseId || ''),
+        approvalRequestId,
+        previousResponseId,
       },
     ];
+  }
+
+  // A2UI surface 生命周期。兼容两种命名:
+  //  - ksadk 冻结命名(G0.2):a2ui.surface.begin / .update / .end
+  //  - a2ui.org v1.0 官方协议:createSurface / updateComponents / deleteSurface
+  // 前端统一归一成内部 StreamAction,后续若后端切官方协议,前端零改。
+  const surfaceBeginTypes = new Set([
+    'response.ksadk.a2ui_surface_begin', 'a2ui.surface.begin',
+    'response.a2ui.createSurface', 'a2ui.createSurface', 'createSurface',
+  ]);
+  if (surfaceBeginTypes.has(eventType)) {
+    const surface = data?.surface && typeof data.surface === 'object' ? data.surface : {};
+    return [{
+      type: 'a2ui_surface_begin',
+      surfaceId: String(data?.surface_id || data?.surfaceId || surface.surface_id || surface.surfaceId || ''),
+      surface,
+    }];
+  }
+
+  const surfaceUpdateTypes = new Set([
+    'response.ksadk.a2ui_surface_update', 'a2ui.surface.update',
+    'response.a2ui.updateComponents', 'a2ui.updateComponents', 'updateComponents',
+  ]);
+  if (surfaceUpdateTypes.has(eventType)) {
+    const surface = data?.surface && typeof data.surface === 'object' ? data.surface : {};
+    return [{
+      type: 'a2ui_surface_update',
+      surfaceId: String(data?.surface_id || data?.surfaceId || surface.surface_id || surface.surfaceId || ''),
+      surface,
+    }];
+  }
+
+  const surfaceEndTypes = new Set([
+    'response.ksadk.a2ui_surface_end', 'a2ui.surface.end',
+    'response.a2ui.deleteSurface', 'a2ui.deleteSurface', 'deleteSurface',
+  ]);
+  if (surfaceEndTypes.has(eventType)) {
+    return [{ type: 'a2ui_surface_end', surfaceId: String(data?.surface_id || data?.surfaceId || '') }];
+  }
+
+  // A2UI 交互(input_required)。官方 v1.0 经 actionResponse 承载同步回包;
+  // 此处归一 interaction(input_required 登记),兼容 ksadk 冻结命名 a2ui.interaction。
+  const interactionTypes = new Set([
+    'response.ksadk.a2ui_interaction', 'a2ui.interaction',
+  ]);
+  if (interactionTypes.has(eventType)) {
+    return [{
+      type: 'a2ui_interaction',
+      surfaceId: String(data?.surface_id || data?.surfaceId || ''),
+      interactionId: String(data?.interaction_id || data?.interactionId || ''),
+      kind: String(data?.kind || 'input'),
+      inputSchema: data?.input_schema && typeof data.input_schema === 'object' ? data.input_schema : {},
+    }];
   }
 
   const fallbackText = data?.content?.parts?.[0]?.text;

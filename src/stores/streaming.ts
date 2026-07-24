@@ -19,6 +19,7 @@ export type StreamingState = {
   stopRequested: boolean;
   activity: RunActivity | null;
   sessionActivities: Record<string, RunActivity>;
+  sessionStreaming: Record<string, true>;
 };
 
 export type StreamingActions = {
@@ -52,9 +53,13 @@ export type StreamingActions = {
 
 export type StreamingStore = StreamingState & StreamingActions;
 
-const isActivityActive = (activity: RunActivity | null | undefined): boolean => (
-  Boolean(activity && activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped')
-);
+const hasStreamingSession = (sessions: Record<string, true>): boolean => Object.keys(sessions).length > 0;
+
+const withoutStreamingSession = (sessions: Record<string, true>, key: string): Record<string, true> => {
+  const next = { ...sessions };
+  delete next[key];
+  return next;
+};
 
 export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   isStreaming: false,
@@ -62,26 +67,21 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   stopRequested: false,
   activity: null,
   sessionActivities: {},
+  sessionStreaming: {},
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setSessionStreaming: (sessionId, streaming) => set((state) => {
     const key = String(sessionId || '');
     if (!key) return { isStreaming: streaming };
-    if (!streaming) {
-      const current = state.sessionActivities[key];
-      if (!current) {
-        return { isStreaming: Object.values(state.sessionActivities).some(isActivityActive) };
-      }
-      return {
-        isStreaming: Object.entries(state.sessionActivities).some(([id, activity]) => (
-          id !== key && isActivityActive(activity)
-        )),
-      };
-    }
-    return { isStreaming: true };
+    const remaining = withoutStreamingSession(state.sessionStreaming, key);
+    const sessionStreaming = streaming ? { ...remaining, [key]: true as const } : remaining;
+    return {
+      sessionStreaming,
+      isStreaming: hasStreamingSession(sessionStreaming),
+    };
   }),
   isSessionStreaming: (sessionId) => {
-    const activity = get().getSessionActivity(sessionId);
-    return isActivityActive(activity);
+    const key = String(sessionId || '');
+    return Boolean(key && get().sessionStreaming[key]);
   },
   getSessionActivity: (sessionId) => {
     const key = String(sessionId || '');
@@ -127,11 +127,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
         };
     if (key) {
       return {
-        isStreaming: nextActivity.status !== 'completed' && nextActivity.status !== 'failed' && nextActivity.status !== 'stopped'
-          ? true
-          : Object.entries(state.sessionActivities).some(([id, existing]) => (
-              id !== key && existing.status !== 'completed' && existing.status !== 'failed' && existing.status !== 'stopped'
-            )),
+        isStreaming: hasStreamingSession(state.sessionStreaming),
         sessionActivities: {
           ...state.sessionActivities,
           [key]: nextActivity,
@@ -174,12 +170,12 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
       lastEventAt: Date.now(),
     };
     const sessionActivities = { ...state.sessionActivities, [key]: nextActivity };
+    const sessionStreaming = withoutStreamingSession(state.sessionStreaming, key);
     return {
-      isStreaming: Object.entries(sessionActivities).some(([id, activity]) => (
-        id !== key && activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped'
-      )),
+      isStreaming: hasStreamingSession(sessionStreaming),
       activity: nextActivity,
       sessionActivities,
+      sessionStreaming,
     };
   }),
   clearActivity: () => set({ activity: null }),
@@ -187,11 +183,20 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
     const key = String(sessionId || '');
     if (!key) return {};
     const { [key]: _removed, ...sessionActivities } = state.sessionActivities;
+    const sessionStreaming = withoutStreamingSession(state.sessionStreaming, key);
     return {
       sessionActivities,
-      isStreaming: Object.values(sessionActivities).some((activity) => activity.status !== 'completed' && activity.status !== 'failed' && activity.status !== 'stopped'),
+      sessionStreaming,
+      isStreaming: hasStreamingSession(sessionStreaming),
       activity: state.activity === _removed ? null : state.activity,
     };
   }),
-  resetRun: () => set({ isStreaming: false, currentRunId: '', stopRequested: false, activity: null, sessionActivities: {} }),
+  resetRun: () => set({
+    isStreaming: false,
+    currentRunId: '',
+    stopRequested: false,
+    activity: null,
+    sessionActivities: {},
+    sessionStreaming: {},
+  }),
 }));

@@ -75,6 +75,31 @@ describe('mapBackendMessage', () => {
     expect(result.tools.send_email.status).toBe('paused');
     expect(result.tools.send_email.approvalRequestId).toBe('apr-1');
     expect(result.tools.send_email.approvalStatus).toBe('pending');
+    expect(result.tools.send_email.approvalProtocol).toBe('responses');
+  });
+
+  it('preserves AG-UI protocol for replayed approval events', () => {
+    const msg = {
+      Role: 'assistant',
+      Content: { text: '' },
+      ToolEvents: [
+        {
+          Name: 'run_command',
+          Status: 'approved',
+          ApprovalRequestId: 'interrupt-1',
+          Protocol: 'ag-ui',
+          ApprovalLevel: 'elevated',
+          ApprovalMessage: '运行此高风险命令前需要确认。',
+        },
+      ],
+    } as BackendMessage;
+
+    const result = mapBackendMessage(msg);
+
+    expect(result.tools.run_command.approvalStatus).toBe('approved');
+    expect(result.tools.run_command.approvalProtocol).toBe('ag-ui');
+    expect(result.tools.run_command.approvalLevel).toBe('elevated');
+    expect(result.tools.run_command.approvalMessage).toBe('运行此高风险命令前需要确认。');
   });
 
   it('maps denied approval to rejected', () => {
@@ -96,5 +121,50 @@ describe('mapBackendMessage', () => {
     expect(result).toHaveLength(2);
     expect(result[0].role).toBe('user');
     expect(result[1].role).toBe('model');
+  });
+
+  it('rehydrates persisted A2UI operations as an activity message', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'assistant-1',
+      Role: 'assistant',
+      Content: { text: '状态如下' },
+      Activities: [{
+        MessageId: 'run-1:a2ui:status',
+        SurfaceId: 'status',
+        Content: {
+          a2ui_operations: [{ createSurface: { surfaceId: 'status' } }],
+        },
+      }],
+    }]);
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toMatchObject({
+      role: 'a2ui',
+      aguiActivity: {
+        surfaceId: 'status',
+        messages: [{ createSurface: { surfaceId: 'status' } }],
+      },
+    });
+  });
+
+  it('repairs only the legacy A2UI root id during history rehydration', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'assistant-legacy',
+      Role: 'assistant',
+      Content: { text: '状态如下' },
+      Activities: [{
+        SurfaceId: 'status',
+        Content: {
+          a2ui_operations: [{
+            updateComponents: {
+              surfaceId: 'status',
+              components: [{ id: 'status-root', component: 'Column', children: [] }],
+            },
+          }],
+        },
+      }],
+    }]);
+
+    expect(result[1].aguiActivity.messages[0].updateComponents.components[0].id).toBe('root');
   });
 });

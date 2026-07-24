@@ -284,6 +284,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         && loadSessionGenerationRef.current === generation
       );
       useSessionStore.getState().setCurrentSessionId(sessionId);
+      useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, true);
       resetCompaction();
       runSubscriptionAbortRef.current?.abort();
       if (isMobile) {
@@ -366,6 +367,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       } catch (error) {
         console.error('Failed to load session messages:', error);
+      } finally {
+        if (isStillCurrentSession()) {
+          useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, false);
+        }
       }
     },
     [

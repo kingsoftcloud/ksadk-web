@@ -14,6 +14,7 @@ import type { ModelStore } from '../../stores/model.js';
 import type { SessionStore } from '../../stores/session.js';
 import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
+import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 
 type ConnectedMessageListProps = {
   agentName: string;
@@ -21,6 +22,8 @@ type ConnectedMessageListProps = {
   onDeleteFeedback: (message: Message) => void;
   onSubmitFeedback: (options: { message: Message; rating: 'up' | 'down'; comment?: string }) => void;
   onRespondToApproval: (options: { approvalRequestId: string; approve: boolean; previousResponseId?: string }) => void;
+  onRespondToAguiApproval?: (options: { interruptId: string; approve: boolean }) => void;
+  onSubmitAguiAction?: (message: A2UIClientEventMessage) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
   checkpointResumeEnabled?: boolean;
@@ -34,6 +37,8 @@ export function ConnectedMessageList({
   onDeleteFeedback,
   onSubmitFeedback,
   onRespondToApproval,
+  onRespondToAguiApproval,
+  onSubmitAguiAction,
   onStopGeneration,
   onCancelRemote,
   checkpointResumeEnabled = false,
@@ -42,12 +47,14 @@ export function ConnectedMessageList({
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
   const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
   const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
   const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
   const currentMessageHistory = useSessionStore((s: SessionStore) =>
     currentSessionId ? s.messageHistory[currentSessionId] : null,
   );
+  const isLoadingInitialHistory = isLoadingSessions || Boolean(currentMessageHistory?.isLoadingInitial);
   const input = useUIStore((s: UIStore) => s.input);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
   const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
@@ -259,10 +266,13 @@ export function ConnectedMessageList({
         activity={activity}
         contextIndicator={contextIndicator}
         messages={messages}
+        isLoadingInitialHistory={isLoadingInitialHistory}
         onDeleteFeedback={onDeleteFeedback}
         onOpenAttachmentPreview={openAttachmentPreview}
         onRespondToApproval={onRespondToApproval}
+        onRespondToAguiApproval={onRespondToAguiApproval}
         onSubmitFeedback={onSubmitFeedback}
+        onSubmitAguiAction={onSubmitAguiAction}
         onStopGeneration={onStopGeneration}
         onCancelRemote={onCancelRemote}
         checkpoints={checkpointResumeEnabled ? checkpoints : []}

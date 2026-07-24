@@ -58,6 +58,11 @@ function mapToolEvents(toolEvents) {
     if (te.ApprovalRequestId) {
       entry.approvalRequestId = te.ApprovalRequestId;
       entry.approvalStatus = APPROVAL_STATUS_MAP[String(te.Status ?? 'paused').toLowerCase()] ?? 'pending';
+      entry.approvalProtocol = String(te.Protocol ?? '').toLowerCase() === 'ag-ui'
+        ? 'ag-ui'
+        : 'responses';
+      if (te.ApprovalMessage) entry.approvalMessage = String(te.ApprovalMessage);
+      if (te.ApprovalLevel) entry.approvalLevel = String(te.ApprovalLevel);
     }
     if (te.ToolCallId) {
       entry.previousResponseId = te.ToolCallId;
@@ -104,6 +109,29 @@ export function mapBackendMessage(msg) {
   return result;
 }
 
-export function mapBackendMessages(messages) {
-  return messages.map(mapBackendMessage);
+function mapBackendActivities(msg) {
+  if (!Array.isArray(msg.Activities)) return [];
+  return msg.Activities.flatMap((activity, index) => {
+    const surfaceId = String(activity?.SurfaceId || '');
+    if (!surfaceId) return [];
+    const content = activity?.Content;
+    const messages = Array.isArray(content?.a2ui_operations)
+      ? content.a2ui_operations
+      : Array.isArray(content)
+        ? content
+        : [];
+    if (!messages.length) return [];
+    return [{
+      id: activity.MessageId || `a2ui-${msg.MessageId || msg.SeqId || 'message'}-${index}`,
+      role: 'a2ui',
+      content: '',
+      timestamp: parseTimestamp(msg.Timestamp),
+      aguiActivity: { surfaceId, messages: normalizeA2uiOperations(messages) },
+    }];
+  });
 }
+
+export function mapBackendMessages(messages) {
+  return messages.flatMap((message) => [mapBackendMessage(message), ...mapBackendActivities(message)]);
+}
+import { normalizeA2uiOperations } from '../core/run/a2ui.js';

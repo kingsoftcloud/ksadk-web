@@ -14,8 +14,18 @@ export type BackendMessage = {
     Status?: 'running' | 'completed' | 'failed' | 'paused' | 'approved' | 'denied';
     ToolCallId?: string;
     ApprovalRequestId?: string;
+    Protocol?: string;
+    ApprovalLevel?: string;
+    ApprovalMessage?: string;
     ResultSeqId?: number;
     Reason?: string;
+  }[];
+  Activities?: {
+    SeqId?: number;
+    Type?: string;
+    MessageId?: string;
+    SurfaceId?: string;
+    Content?: unknown;
   }[];
   Attachments?: {
     file_uri: string;

@@ -7,18 +7,17 @@ import { buildCompactionMessage } from '../../utils/session-events.js';
 import { isFailedToolOutput } from '../../utils/tool-display.js';
 import type { Message } from '../../components/chat/types.js';
 
-let assistantCreated = false;
-
 const TERMINAL_COMPLETE_STATUSES = new Set(['completed']);
 const TERMINAL_ERROR_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'incomplete']);
 
 function ensureAssistantMessage(id: string) {
-  if (assistantCreated) return;
-  assistantCreated = true;
-  useMessageStore.getState().patchMessages((prev) => [
-    ...prev,
-    { id, role: 'model', content: '', timestamp: Date.now(), reasoning: '' },
-  ]);
+  useMessageStore.getState().patchMessages((prev) => {
+    if (prev.some((message) => message.id === id)) return prev;
+    return [
+      ...prev,
+      { id, role: 'model', content: '', timestamp: Date.now(), reasoning: '' },
+    ];
+  });
 }
 
 function settleRunningToolsForTerminalStatus(status: string) {
@@ -48,9 +47,6 @@ function settleRunningToolsForTerminalStatus(status: string) {
 
 export function dispatchRunEventToStores(event: RunEvent) {
   if (event.sessionId && useSessionStore.getState().currentSessionId !== event.sessionId) {
-    if (event.type === 'stage_changed' && (event.stage === 'completing' || event.stage === 'error' || event.stage === 'cancelled')) {
-      assistantCreated = false;
-    }
     return;
   }
 
@@ -117,17 +113,24 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
+          const current = msg.tools?.[event.name];
+          const currentApprovalResolved = current?.approvalStatus === 'approved'
+            || current?.approvalStatus === 'rejected';
           return {
             ...msg,
             tools: {
               ...(msg.tools || {}),
               [event.name]: {
-                ...(msg.tools?.[event.name] || { name: event.name, args: '' }),
+                ...(current || { name: event.name, args: '' }),
                 name: event.name,
                 args: event.args,
-                status: event.status as NonNullable<Message['tools']>[string]['status'],
+                status: currentApprovalResolved
+                  ? 'completed'
+                  : event.status as NonNullable<Message['tools']>[string]['status'],
                 ...(event.extra || {}),
-                ...(event.extra?.approvalRequestId ? { approvalStatus: 'pending' as const } : {}),
+                ...(event.extra?.approvalRequestId && !currentApprovalResolved
+                  ? { approvalStatus: 'pending' as const }
+                  : {}),
               },
             },
           };
@@ -152,6 +155,57 @@ export function dispatchRunEventToStores(event: RunEvent) {
               },
             },
           };
+        }),
+      );
+      break;
+
+    case 'approval_requested': {
+      ensureAssistantMessage(event.messageId);
+      ms.patchMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== event.messageId) return msg;
+          const existing = msg.tools?.[event.approvalRequestId];
+          const alreadyResolved = existing?.approvalStatus === 'approved'
+            || existing?.approvalStatus === 'rejected';
+          return {
+            ...msg,
+            tools: {
+              ...(msg.tools || {}),
+              [event.approvalRequestId]: {
+                ...(existing || {}),
+                name: event.name,
+                args: event.args,
+                status: alreadyResolved ? 'completed' : 'paused',
+                approvalRequestId: event.approvalRequestId,
+                approvalProtocol: event.protocol,
+                approvalStatus: alreadyResolved ? existing.approvalStatus : 'pending',
+                ...(event.message ? { approvalMessage: event.message } : {}),
+                ...(event.approvalLevel ? { approvalLevel: event.approvalLevel } : {}),
+              },
+            },
+          };
+        }),
+      );
+      break;
+    }
+
+    case 'approval_resolved':
+      ms.patchMessages((prev) =>
+        prev.map((msg) => {
+          if (!msg.tools) return msg;
+          let changed = false;
+          const tools = Object.fromEntries(
+            Object.entries(msg.tools).map(([key, tool]) => {
+              if (tool.approvalRequestId !== event.approvalRequestId) return [key, tool];
+              changed = true;
+              return [key, {
+                ...tool,
+                status: 'completed' as const,
+                approvalStatus: event.decision,
+              }];
+            }),
+          ) as NonNullable<Message['tools']>;
+          return changed ? { ...msg, tools } : msg;
         }),
       );
       break;
@@ -194,7 +248,6 @@ export function dispatchRunEventToStores(event: RunEvent) {
         useStreamingStore.getState().setSessionStreaming(event.sessionId, true);
       } else if (event.stage === 'completing' || event.stage === 'error' || event.stage === 'cancelled') {
         useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
-        assistantCreated = false;
       }
       break;
 
@@ -207,7 +260,6 @@ export function dispatchRunEventToStores(event: RunEvent) {
           state.clearSessionActivity(event.sessionId);
         }
       }, 2400);
-      assistantCreated = false;
       break;
 
     case 'error':
@@ -227,7 +279,6 @@ export function dispatchRunEventToStores(event: RunEvent) {
           timestamp: Date.now(),
         },
       ]);
-      assistantCreated = false;
       break;
 
     case 'terminal':
@@ -266,9 +317,111 @@ export function dispatchRunEventToStores(event: RunEvent) {
       }
       break;
     }
+
+    case 'a2ui_surface_begin': {
+      const msgId = `a2ui-${event.surfaceId}`;
+      useMessageStore.getState().patchMessages((prev) => {
+        const without = prev.filter((m) => m.id !== msgId);
+        return [
+          ...without,
+          {
+            id: msgId,
+            role: 'a2ui' as const,
+            content: '',
+            timestamp: Date.now(),
+            a2ui: {
+              surfaceId: event.surfaceId,
+              surface: event.surface,
+            },
+          },
+        ];
+      });
+      break;
+    }
+
+    case 'a2ui_surface_update': {
+      const msgId = `a2ui-${event.surfaceId}`;
+      useMessageStore.getState().patchMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId && m.a2ui
+            ? { ...m, a2ui: { ...m.a2ui, surface: event.surface } }
+            : m,
+        ),
+      );
+      break;
+    }
+
+    case 'a2ui_surface_end': {
+      const msgId = `a2ui-${event.surfaceId}`;
+      useMessageStore.getState().patchMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId && m.a2ui
+            ? { ...m, a2ui: { ...m.a2ui, ended: true } }
+            : m,
+        ),
+      );
+      break;
+    }
+
+    case 'a2ui_interaction': {
+      const msgId = `a2ui-${event.surfaceId}`;
+      useMessageStore.getState().patchMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId && m.a2ui
+            ? {
+                ...m,
+                a2ui: {
+                  ...m.a2ui,
+                  pendingInteraction: {
+                    interactionId: event.interactionId,
+                    kind: event.kind,
+                    inputSchema: event.inputSchema,
+                  },
+                },
+              }
+            : m,
+        ),
+      );
+      break;
+    }
+
+    case 'agui_activity': {
+      const msgId = `agui-a2ui-${event.surfaceId}`;
+      useMessageStore.getState().patchMessages((prev) => {
+        const activity = { surfaceId: event.surfaceId, messages: event.messages };
+        let attached = false;
+        const withAttachedActivity = prev.map((message) => {
+          if (message.id !== event.messageId) return message;
+          attached = true;
+          const prior = message.aguiActivities || [];
+          const next = [
+            ...prior.filter((item) => item.surfaceId !== event.surfaceId),
+            activity,
+          ];
+          return { ...message, aguiActivities: next };
+        });
+        if (attached) return withAttachedActivity;
+
+        // An activity can legally arrive before the assistant message. Keep
+        // the existing standalone fallback for that edge case and for replay.
+        const current = prev.find((message) => message.id === msgId);
+        const nextMessage: Message = {
+          id: msgId,
+          role: 'a2ui',
+          content: '',
+          timestamp: current?.timestamp || Date.now(),
+          aguiActivity: activity,
+        };
+        return current
+          ? prev.map((message) => message.id === msgId ? nextMessage : message)
+          : [...prev, nextMessage];
+      });
+      break;
+    }
   }
 }
 
 export function resetDispatcherState() {
-  assistantCreated = false;
+  // Kept for test and session lifecycle callers. Message existence is now the
+  // source of truth, so switching sessions cannot drop a live AG-UI event.
 }

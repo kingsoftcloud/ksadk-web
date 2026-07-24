@@ -134,7 +134,14 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const selectedModelMetadata =
     availableModels.find((model) => model.id === selectedModel) || null;
 
-  const { submitDraft, stopGeneration, disconnectRun, resumeCheckpoint } = useRunAgent({
+  const {
+    submitDraft,
+    stopGeneration,
+    disconnectRun,
+    resumeCheckpoint,
+    submitAguiAction,
+    respondToAguiApproval,
+  } = useRunAgent({
     agentId,
     currentSessionId,
     agentFramework,
@@ -358,6 +365,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
               onDeleteFeedback={deleteResponseFeedback}
               onSubmitFeedback={submitResponseFeedback}
               onRespondToApproval={respondToApproval}
+              onRespondToAguiApproval={respondToAguiApproval}
+              onSubmitAguiAction={submitAguiAction}
               onStopGeneration={handleStopGeneration}
               onCancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
               checkpointResumeEnabled={

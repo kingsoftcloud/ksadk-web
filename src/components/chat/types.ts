@@ -12,7 +12,7 @@ export type PreviewImageSize = {
 
 export type Message = {
   id: string;
-  role: 'user' | 'model' | 'tool' | 'system';
+  role: 'user' | 'model' | 'tool' | 'system' | 'a2ui';
   content: string;
   timestamp: number;
   responseId?: string;
@@ -26,6 +26,24 @@ export type Message = {
   compactedUntilSeqId?: number;
   historical?: boolean;
   reasoning?: string;
+  a2ui?: {
+    surfaceId: string;
+    surface: import('../../core/stream/types.js').A2UISurface;
+    pendingInteraction?: {
+      interactionId: string;
+      kind: string;
+      inputSchema: Record<string, unknown>;
+    };
+    ended?: boolean;
+  };
+  aguiActivity?: {
+    surfaceId: string;
+    messages: Array<Record<string, unknown>>;
+  };
+  aguiActivities?: Array<{
+    surfaceId: string;
+    messages: Array<Record<string, unknown>>;
+  }>;
   tools?: {
     [name: string]: {
       name: string;
@@ -36,6 +54,9 @@ export type Message = {
       previousResponseId?: string;
       serverLabel?: string;
       approvalStatus?: 'pending' | 'approved' | 'rejected';
+      approvalProtocol?: 'responses' | 'ag-ui';
+      approvalMessage?: string;
+      approvalLevel?: string;
     };
   };
   attachments?: MessageAttachment[];

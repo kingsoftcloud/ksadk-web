@@ -97,6 +97,191 @@ describe('RunEngineImpl', () => {
     useSessionStore.getState().setCurrentSessionId(null);
     useCheckpointStore.getState().clearSessionCheckpoints();
     resetDispatcherState();
+    vi.unstubAllGlobals();
+  });
+
+  it('projects AG-UI approval resolution without reviving the pending card', () => {
+    useSessionStore.getState().setCurrentSessionId('session-1');
+
+    dispatchRunEventToStores({
+      type: 'approval_requested',
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      approvalRequestId: 'approval-1',
+      protocol: 'ag-ui',
+      name: 'write_file',
+      args: '{"path":"/tmp/x.txt"}',
+      message: 'Approve?',
+    });
+    dispatchRunEventToStores({
+      type: 'approval_resolved',
+      sessionId: 'session-1',
+      approvalRequestId: 'approval-1',
+      decision: 'approved',
+    });
+    dispatchRunEventToStores({
+      type: 'approval_requested',
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      approvalRequestId: 'approval-1',
+      protocol: 'ag-ui',
+      name: 'write_file',
+      args: '{"path":"/tmp/x.txt"}',
+      message: 'Approve?',
+    });
+
+    expect(useMessageStore.getState().messages[0].tools?.['approval-1']).toMatchObject({
+      approvalRequestId: 'approval-1',
+      approvalProtocol: 'ag-ui',
+      approvalStatus: 'approved',
+      status: 'completed',
+    });
+  });
+
+  it('projects a live AG-UI approval into a fresh assistant row after a session switch', () => {
+    useSessionStore.getState().setCurrentSessionId('session-before');
+    dispatchRunEventToStores({
+      type: 'assistant_message_created',
+      sessionId: 'session-before',
+      messageId: 'assistant-before',
+    });
+
+    // Loading a different session clears the visible transcript but must not
+    // leave a module-level assistant marker that drops its first live event.
+    useMessageStore.getState().setMessages([]);
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    dispatchRunEventToStores({
+      type: 'approval_requested',
+      sessionId: 'session-live',
+      messageId: 'assistant-live',
+      approvalRequestId: 'approval-live',
+      protocol: 'ag-ui',
+      name: 'run_command',
+      args: '{"command":"pwd"}',
+      message: 'Approval required',
+    });
+
+    expect(useMessageStore.getState().messages).toEqual([
+      expect.objectContaining({
+        id: 'assistant-live',
+        tools: {
+          'approval-live': expect.objectContaining({
+            approvalStatus: 'pending',
+            approvalProtocol: 'ag-ui',
+          }),
+        },
+      }),
+    ]);
+  });
+
+  it('settles session streaming when AG-UI finishes with an approval interrupt', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'data: {"type":"RUN_STARTED","threadId":"session-approval","runId":"run-approval"}',
+        '',
+        'data: {"type":"RUN_FINISHED","threadId":"session-approval","runId":"run-approval","outcome":{"type":"interrupt","interrupts":[{"id":"approval-1","reason":"tool","message":"Approval required","toolCallId":"approval-1"}]}}',
+        '',
+      ].join('\n'),
+      { headers: { 'content-type': 'text/event-stream' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    useSessionStore.getState().setCurrentSessionId('session-approval');
+    const engine = createRunEngine(createApiFacade([]));
+    engine.subscribe(dispatchRunEventToStores);
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      hostedChatTransport: {
+        Protocol: 'ag-ui',
+        Runtime: 'copilotkit',
+        Endpoint: '/agentengine/agui',
+        Version: '0.1.19',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      },
+    });
+
+    expect(engine.start({ text: 'run command', attachments: [], sessionId: 'session-approval' })).toBe(true);
+    for (let attempt = 0; attempt < 20 && fetchMock.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await waitForEngineIdle(engine);
+
+    expect(useStreamingStore.getState().getSessionActivity('session-approval')).toMatchObject({
+      status: 'waiting',
+      phase: '等待人工确认',
+    });
+    expect(useStreamingStore.getState().isSessionStreaming('session-approval')).toBe(false);
+    expect(useMessageStore.getState().messages[0].tools?.['approval-1']).toMatchObject({
+      approvalStatus: 'pending',
+      approvalProtocol: 'ag-ui',
+    });
+  });
+
+  it('resumes a rehydrated AG-UI approval through its durable session', async () => {
+    const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      fetchCalls.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response(
+        [
+          'data: {"type":"RUN_STARTED","threadId":"session-history","runId":"run-resume"}',
+          '',
+          'data: {"type":"RUN_FINISHED","threadId":"session-history","runId":"run-resume","outcome":{"type":"success"}}',
+          '',
+        ].join('\n'),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }));
+    const engine = createRunEngine(createApiFacade([]));
+    const resolved: string[] = [];
+    engine.subscribe((event) => {
+      if (event.type === 'approval_resolved') resolved.push(event.approvalRequestId);
+    });
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      hostedChatTransport: {
+        Protocol: 'ag-ui',
+        Runtime: 'copilotkit',
+        Endpoint: '/agentengine/agui',
+        Version: '0.1.19',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      },
+    });
+
+    const accepted = engine.resumeAguiInterrupt({
+      sessionId: 'session-history',
+      interruptId: 'approval-history-1',
+      status: 'resolved',
+      payload: { decision: 'approve' },
+    });
+
+    expect(accepted).toBe(true);
+    for (let attempt = 0; attempt < 20 && fetchCalls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await waitForEngineIdle(engine);
+
+    expect(fetchCalls).toEqual([
+      expect.objectContaining({
+        url: '/agentengine/agui',
+        body: expect.objectContaining({
+          threadId: 'session-history',
+          resume: [{
+            interruptId: 'approval-history-1',
+            status: 'resolved',
+            payload: { decision: 'approve' },
+          }],
+        }),
+      }),
+    ]);
+    expect(resolved).toEqual(['approval-history-1']);
   });
 
   it('uses the latest runtime config when starting a run', async () => {

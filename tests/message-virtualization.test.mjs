@@ -53,3 +53,27 @@ test('message virtualization honors measured heights when available', async () =
   assert.ok(windowed.totalHeight > items.length * 100);
   assert.ok(windowed.visibleItems.some((entry) => entry.item.id === 'msg-2'));
 });
+
+test('message virtualization moves later rows after an expanded row is remeasured', async () => {
+  const virtualization = await loadMessageVirtualizationUtils();
+  const items = [{ id: 'reasoning' }, { id: 'approval' }, { id: 'result' }];
+
+  const collapsed = virtualization.calculateVirtualMessageWindow({
+    items,
+    viewportHeight: 1000,
+    overscan: 0,
+    defaultItemHeight: 100,
+  });
+  const expanded = virtualization.calculateVirtualMessageWindow({
+    items,
+    viewportHeight: 1000,
+    overscan: 0,
+    defaultItemHeight: 100,
+    measuredHeights: new Map([['reasoning', 320]]),
+  });
+
+  assert.equal(collapsed.visibleItems[1].top, 100);
+  assert.equal(expanded.visibleItems[1].top, 320);
+  assert.equal(expanded.visibleItems[2].top, 420);
+  assert.equal(expanded.totalHeight, 520);
+});
