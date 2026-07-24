@@ -4,6 +4,9 @@ dist-hosted/
 dist-ksadk/
 dist-lib/
 coverage/
+output/
+test-results/
+.playwright-cli/
 *.tsbuildinfo
 *.tgz
 *.tgz.sha256
