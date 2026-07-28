@@ -55,7 +55,7 @@ export function ChatComposer({
   onSubmit,
   textareaRef,
 }: ChatComposerProps) {
-  const placeholderText = isMobile ? '发送消息...' : '发送消息... (Shift + Enter 换行)';
+  const placeholderText = isMobile ? '发送消息...' : '发送消息…';
   const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成';
 
   // wework 风格:model/思考 chip 放输入框工具栏(从 model store 直读,不经 props)。
@@ -155,7 +155,7 @@ export function ChatComposer({
                 event.stopPropagation();
               }}
               onDrop={handleDrop}
-              className="relative flex min-w-0 flex-1 flex-col rounded-[26px] border border-border/45 bg-background px-4 pb-1.5 pt-2 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15"
+              className="relative flex min-h-[76px] min-w-0 flex-1 flex-col rounded-[26px] border border-border/45 bg-background px-4 pb-1.5 pt-2 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15"
             >
               {attachments.length > 0 ? (
                 <div className="mb-1.5 flex flex-wrap gap-2">
@@ -196,8 +196,8 @@ export function ChatComposer({
                 onPaste={onPaste}
                 placeholder={placeholderText}
                 className={cn(
-                  'custom-scrollbar min-h-[48px] w-full resize-none border-0 bg-transparent px-0 text-[15px] leading-6 text-foreground outline-none placeholder:text-text-muted/55',
-                  isMobile ? 'text-[16px]' : 'text-[15px]',
+                  'custom-scrollbar max-h-[112px] min-h-[48px] w-full resize-none overflow-y-auto border-0 bg-transparent px-0 pb-0 pt-1 text-[14px] leading-6 text-text-primary outline-none placeholder:text-text-muted/55',
+                  isMobile ? 'text-[16px]' : 'text-[14px]',
                 )}
                 style={{ maxHeight: `${composerMaxHeight}px`, overflowY: 'auto' }}
               />
@@ -261,9 +261,9 @@ export function ChatComposer({
                     className={cn(
                       'flex h-8 w-8 items-center justify-center rounded-full transition-all',
                       isStreaming
-                        ? 'bg-foreground text-background hover:opacity-80'
+                        ? 'bg-[#1f1f1f] text-white hover:opacity-80'
                         : input.trim() || attachments.length > 0
-                          ? 'bg-foreground text-background hover:opacity-80'
+                          ? 'bg-[#1f1f1f] text-white hover:opacity-80'
                           : 'bg-muted text-text-muted/45',
                     )}
                     title={isStreaming ? activeStopTitle : '发送消息'}

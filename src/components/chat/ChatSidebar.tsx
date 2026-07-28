@@ -112,14 +112,20 @@ export function ChatSidebar({
                     'group relative flex h-[30px] items-center gap-1 rounded-[10px] px-2.5 text-sm leading-5 transition-colors',
                     currentSessionId === session.SessionId
                       ? 'bg-sidebar-active text-sidebar-text'
-                      : 'cursor-pointer text-sidebar-text-secondary hover:bg-sidebar-hover hover:text-sidebar-text',
+                      : meta.running
+                        ? 'cursor-pointer bg-primary/8 text-sidebar-text'
+                        : 'cursor-pointer text-sidebar-text-secondary hover:bg-sidebar-hover hover:text-sidebar-text',
                   )}
                 >
+                  {/* wework 风格:活跃会话行首 primary 竖条,一眼区分正在流式的会话 */}
+                  {meta.running ? (
+                    <span className="absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary" aria-hidden="true" />
+                  ) : null}
                   <div className="min-w-0 flex-1 truncate text-[13px]">
                     {sessionTitle(session)}
                   </div>
                   {meta.running ? (
-                    <LoaderCircle className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-text-muted" />
+                    <LoaderCircle className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary" />
                   ) : meta.label ? (
                     <span className="flex-shrink-0 text-[11px] leading-none text-sidebar-text-muted group-hover:hidden">
                       {meta.label}

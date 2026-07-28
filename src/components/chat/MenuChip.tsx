@@ -43,10 +43,10 @@ export function MenuChip({ label, options, value, onChange, title }: MenuChipPro
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         title={title}
-        className="flex h-8 max-w-[12rem] items-center gap-1 rounded-full px-2 text-sm leading-[18px] text-text-secondary transition-colors hover:bg-muted"
+        className="flex h-8 max-w-[12rem] items-center gap-1 overflow-hidden rounded-full px-2 text-sm font-normal leading-[18px] text-text-primary hover:bg-muted"
       >
-        <span className="min-w-0 truncate">{label}</span>
-        <ChevronDown className={cn('h-3.5 w-3.5 flex-shrink-0 text-text-muted transition-transform', open && 'rotate-180')} />
+        <span className="min-w-0 flex-1 truncate text-center">{label}</span>
+        <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-secondary transition-transform', open && 'rotate-180')} />
       </button>
       {open ? (
         <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-30 max-h-[min(50vh,20rem)] min-w-[10rem] max-w-[16rem] overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-sm shadow-[0_10px_28px_rgba(0,0,0,0.18)]">

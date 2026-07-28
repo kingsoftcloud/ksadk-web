@@ -138,3 +138,38 @@ export function finalizeThinkingBlocks(blocks: ProcessingBlock[] | undefined): P
 export function getProcessingBlocks(blocks: ProcessingBlock[] | undefined): ProcessingBlock[] {
   return blocks ?? [];
 }
+
+/**
+ * 从历史消息字段(reasoning/tools/content)重建交错 blocks。
+ * 历史没有流式时间线,按约定顺序 [思考][工具...][正文] 重建,让刷新后
+ * 历史消息也走 ProcessingBlocksView,不回退到旧 reasoning+tools+content 散装渲染。
+ *
+ * 顺序原因:ksadk 流式时思考在工具前、正文在工具后(appendTextBlock 先关 thinking)。
+ * 历史还原无法还原多段思考被工具切断的真实交错,只能近似单段思考+工具+正文。
+ */
+export function buildBlocksFromHistory(input: {
+  reasoning?: string;
+  tools?: Record<string, { name: string; args?: string; output?: string; status?: string }>;
+  content?: string;
+}): ProcessingBlock[] {
+  const blocks: ProcessingBlock[] = [];
+  if (input.reasoning && input.reasoning.trim()) {
+    blocks.push({ id: nextId('thinking'), type: 'thinking', content: input.reasoning, status: 'done' });
+  }
+  if (input.tools) {
+    for (const tool of Object.values(input.tools)) {
+      blocks.push({
+        id: nextId('tool'),
+        type: 'tool',
+        toolName: tool.name,
+        args: tool.args ?? '',
+        output: tool.output,
+        status: (tool.status as ToolBlock['status']) ?? 'completed',
+      });
+    }
+  }
+  if (input.content && input.content.trim()) {
+    blocks.push({ id: nextId('text'), type: 'text', content: input.content, status: 'done' });
+  }
+  return blocks;
+}

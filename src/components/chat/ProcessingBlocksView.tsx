@@ -6,10 +6,11 @@
  * 核心是"活动行优先、详情按需",不占大块视觉,保留时间线交错节奏。
  */
 
-import { ChevronDown, LoaderCircle, Brain, Wrench } from 'lucide-react';
+import { ChevronDown, FileDiff, Globe2, LoaderCircle, Brain, Wrench } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { MessageMarkdown } from '../MessageMarkdown';
+import { parseUnifiedDiff, summarizeDiffSection, isUnifiedDiff } from '../../utils/parse-unified-diff';
 import type { Message } from './types';
 import type { ProcessingBlock, ThinkingBlock, ToolBlock, TextBlock } from '../../core/run/blocks';
 
@@ -205,9 +206,117 @@ function ToolRow({
           </div>
         )}
         {args ? <PayloadBlock label="入参" value={args} tone="input" /> : null}
-        {output ? <PayloadBlock label="输出" value={output} tone={errored ? 'error' : 'output'} /> : null}
+        {output ? renderToolOutput(block.toolName, output, errored) : null}
       </div>
     </Collapsible>
+  );
+}
+
+/** 按 tool name + output 内容识别渲染:diff→文件改动卡,web search→来源 chip,否则通用 PayloadBlock。 */
+function renderToolOutput(toolName: string, output: string, errored: boolean): ReactNode {
+  if (isUnifiedDiff(output)) {
+    return <FileChangesCard output={output} />;
+  }
+  const name = toolName.toLowerCase();
+  if (name.includes('web_search') || name.includes('search')) {
+    const sources = parseWebSearchSources(output);
+    if (sources.length > 0) return <WebSearchSourcesChip sources={sources} />;
+  }
+  return <PayloadBlock label="输出" value={output} tone={errored ? 'error' : 'output'} />;
+}
+
+/** 轻量文件改动卡:解析 unified diff 成文件行,显示路径 + +/− 统计(wework FileChangesCard 简化版)。 */
+function FileChangesCard({ output }: { output: string }) {
+  const sections = parseUnifiedDiff(output);
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? sections : sections.slice(0, 3);
+  return (
+    <div className="my-2 overflow-hidden rounded-xl border border-border bg-background">
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-xs font-medium text-text-secondary">
+        <FileDiff className="h-3.5 w-3.5 text-primary" />
+        <span>改动 {sections.length} 个文件</span>
+      </div>
+      <div className="flex flex-col">
+        {visible.map((section) => {
+          const { added, removed } = summarizeDiffSection(section);
+          return (
+            <div
+              key={section.path}
+              className="group/file-change-row flex min-w-0 items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-text-primary">{section.path}</span>
+              <span className="flex-shrink-0 text-[11px] font-mono">
+                <span className="text-emerald-600">+{added}</span>{' '}
+                <span className="text-rose-500">−{removed}</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {sections.length > 3 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="flex w-full items-center justify-center gap-1 border-t border-border py-1.5 text-xs text-text-muted transition hover:bg-muted hover:text-text-primary"
+        >
+          {expanded ? '收起' : `展开剩余 ${sections.length - 3} 个文件`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** 尝试从 tool output 解析 web search 来源(JSON 含 url/title 数组,否则空)。 */
+function parseWebSearchSources(output: string): { url: string; title: string }[] {
+  try {
+    const parsed = JSON.parse(output);
+    const arr = Array.isArray(parsed) ? parsed : parsed?.results ?? parsed?.sources ?? [];
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((item: unknown) => {
+        const obj = item as Record<string, unknown>;
+        const url = String(obj?.url ?? obj?.link ?? obj?.href ?? '');
+        const title = String(obj?.title ?? obj?.name ?? url);
+        return url ? { url, title } : null;
+      })
+      .filter((s): s is { url: string; title: string } => s !== null);
+  } catch {
+    return [];
+  }
+}
+
+/** 轻量搜索来源 chip:wework WebSearchSourcesChip 简化版,hover 弹来源列表。 */
+function WebSearchSourcesChip({ sources }: { sources: { url: string; title: string }[] }) {
+  return (
+    <div className="mt-2 flex min-w-0">
+      <span className="group/web-search-sources relative inline-flex min-w-0">
+        <button
+          type="button"
+          className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-xs text-text-secondary transition-colors hover:bg-muted hover:text-text-primary"
+        >
+          <Globe2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.7} />
+          <span>来源 · {sources.length}</span>
+        </button>
+        <span className="absolute bottom-full left-0 z-30 hidden max-w-[calc(100vw-3rem)] pb-1 group-hover/web-search-sources:block">
+          <span className="block w-[min(26rem,calc(100vw-3rem))] rounded-xl border border-border bg-popover p-2 text-left text-text-primary shadow-2xl">
+            <span className="flex min-w-0 flex-col gap-1">
+              {sources.map((source, index) => (
+                <a
+                  key={`${source.url}-${index}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-sm leading-5 text-text-secondary transition-colors hover:bg-muted hover:text-text-primary"
+                >
+                  <Globe2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.7} />
+                  <span className="min-w-0 flex-1 truncate">{source.title}</span>
+                </a>
+              ))}
+            </span>
+          </span>
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -233,13 +342,12 @@ function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | '
 
 function TextRow({ block }: { block: TextBlock }) {
   if (!block.content) return null;
-  // 正文块用 whitespace-pre-line 保留所有 \n 换行 + 正常行距。
-  // 不走 MessageMarkdown:LLM 逐行输出(单 \n)经 markdown+remark-breaks 会被
-  // 压成一个 <p>+<br>,10 行挤成一坨、行距过紧。pre-line 直接按文本换行渲染。
-  // 简单 markdown(粗体) 如需保留,可后续加一个轻量 inline 解析;首期先保证换行正确。
+  // 正文块走 MessageMarkdown:流式时标题/列表/粗体/代码块即时渲染,
+  // 不再用 whitespace-pre-line 纯文本(那会导致 # 标题 原样显示成文本)。
+  // 单 \n 换行由 remark-breaks + p 块间距处理,不会挤一坨。
   return (
-    <div className="w-full whitespace-pre-line break-words py-0.5 text-[14px] leading-7 text-slate-700 dark:text-slate-200">
-      {block.content}
+    <div className="w-full break-words py-0.5 text-[15px] leading-6">
+      <MessageMarkdown content={block.content} />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Eye, X } from 'lucide-react';
+import { Copy, Check, Eye, X, TextWrap } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { buildSandboxedHtml, useIframeMessageHandler } from '../../utils/sandbox.js';
 
@@ -11,10 +12,16 @@ interface CodeBlockProps {
 }
 
 const PREVIEWABLE_LANGS = new Set(['html', 'svg']);
+const WRAPPABLE_LANGS = new Set(['markdown', 'md']);
+// wrap 状态按内容 key 记忆(wework 做法),同一段代码切换会话也保留。
+const wrapStateByKey = new Map<string, boolean>();
+const wrapKey = (value: string) => `len:${value.length}|head:${value.slice(0, 64)}`;
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const key = wrapKey(value);
+  const [wrap, setWrap] = useState<boolean>(() => wrapStateByKey.get(key) ?? false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // Set up iframe message handler at top level (Rules of Hooks).
@@ -30,6 +37,15 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
     return () => window.clearTimeout(timer);
   }, [copyState]);
 
+  const canToggleWrap = WRAPPABLE_LANGS.has(language.toLowerCase());
+  const toggleWrap = () => {
+    setWrap((prev) => {
+      const next = !prev;
+      wrapStateByKey.set(key, next);
+      return next;
+    });
+  };
+
   const handleCopy = async () => {
     const ok = await copyTextToClipboard(value);
     setCopyState(ok ? 'copied' : 'failed');
@@ -44,6 +60,16 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
       <div className="flex items-center justify-between px-4 py-1.5 bg-[#2d2d2d] text-slate-300 text-xs font-mono">
         <span className="uppercase">{language || 'text'}</span>
         <div className="flex items-center gap-3">
+          {canToggleWrap && (
+            <button
+              type="button"
+              onClick={toggleWrap}
+              title={wrap ? '取消自动换行' : '自动换行'}
+              className={cn('flex items-center gap-1.5 transition-colors py-1', wrap ? 'text-primary' : 'hover:text-white')}
+            >
+              <TextWrap className="w-3.5 h-3.5" />
+            </button>
+          )}
           {isPreviewable && (
             <button
               type="button"
@@ -64,11 +90,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
           </button>
         </div>
       </div>
-      <div className="overflow-x-auto text-[13.5px]">
+      <div className={cn('text-[13.5px]', wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto')}>
         <SyntaxHighlighter
           language={language}
           style={vscDarkPlus}
-          customStyle={{ margin: 0, padding: '1rem', background: 'transparent' }}
+          customStyle={{ margin: 0, padding: '1rem', background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre' }}
           PreTag="div"
         >
           {String(value).replace(/\n$/, '')}

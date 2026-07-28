@@ -101,6 +101,11 @@ export function mapBackendMessage(msg) {
     tools,
     attachments,
   };
+  // 历史消息重建交错 blocks(思考→工具→正文),刷新后也走 ProcessingBlocksView,
+  // 不回退到旧 reasoning+tools+content 散装渲染。
+  if (role === 'model') {
+    result.blocks = buildBlocksFromHistory({ reasoning, tools, content: result.content });
+  }
   // 反馈控件需要 responseId/eventId/traceId/rootSpanId(后端从 event Metadata 投出)
   if (msg.MessageId) result.eventId = msg.MessageId;
   if (msg.ResponseId) result.responseId = msg.ResponseId;
@@ -135,3 +140,4 @@ export function mapBackendMessages(messages) {
   return messages.flatMap((message) => [mapBackendMessage(message), ...mapBackendActivities(message)]);
 }
 import { normalizeA2uiOperations } from '../core/run/a2ui.js';
+import { buildBlocksFromHistory } from '../core/run/blocks.js';
