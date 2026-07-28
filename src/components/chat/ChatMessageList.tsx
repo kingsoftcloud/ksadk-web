@@ -648,7 +648,7 @@ function FeedbackControls({
   };
 
   return (
-    <div className="mt-2 flex flex-col gap-2 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 focus-within/message:opacity-100">
+    <div className="mt-2 flex flex-col gap-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
         <button
           type="button"
@@ -795,7 +795,7 @@ function ChatMessage({
   }
 
   return (
-    <div className="group/message mx-auto mb-3 w-full max-w-3xl px-6">
+    <div className="group mx-auto mb-3 w-full max-w-3xl px-6">
       <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
         <Bot className="w-3.5 h-3.5" />
         <span>{agentName}</span>
@@ -1036,6 +1036,10 @@ export function ChatMessageList({
   onResumeCheckpoint,
   scrollRef,
 }: ChatMessageListProps) {
+  // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
+  void checkpoints;
+  void onResumeCheckpoint;
+  void CheckpointPanel;
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
@@ -1106,11 +1110,6 @@ export function ChatMessageList({
       )}
     >
       <div className={cn('mx-auto flex w-full max-w-[64rem] flex-col', activity ? 'pb-10 sm:pb-10' : 'pb-6 sm:pb-8')}>
-        <CheckpointPanel
-          checkpoints={checkpoints}
-          isStreaming={isStreaming}
-          onResumeCheckpoint={onResumeCheckpoint}
-        />
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
         ) : messages.length === 0 ? (

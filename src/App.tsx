@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react
 import { useUIStore } from './stores/ui.js';
 import { useBootstrapStore } from './stores/bootstrap.js';
 import { useModelStore } from './stores/model.js';
+import { usePermissionStore } from './stores/permission.js';
 import { useStreamingStore } from './stores/streaming.js';
 import { useSessionStore } from './stores/session.js';
 import { useArtifactStore } from './stores/artifact.js';
@@ -80,6 +81,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const modelSource = useModelStore((s: ModelStore) => s.modelSource);
   const modelCatalogLoaded = useModelStore((s: ModelStore) => s.modelCatalogLoaded);
   const thinkingMode = useModelStore((s: ModelStore) => s.thinkingMode);
+  const permissionMode = usePermissionStore((s) => s.permissionMode);
   const agentFramework = useBootstrapStore((s: BootstrapStore) => s.agentFramework);
   const workspaceFiles = useBootstrapStore((s: BootstrapStore) => s.workspaceFiles) as BootstrapWorkspaceFiles | null;
   const accessMode = useBootstrapStore((s: BootstrapStore) => s.accessMode);
@@ -149,6 +151,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     selectedModel,
     selectedModelMetadata,
     thinkingMode,
+    permissionMode,
     uiCapabilities,
     isMobile,
     api,
@@ -383,6 +386,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           stopGeneration={handleStopGeneration}
           cancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
           isMobile={isMobile}
+          approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
+          approvalPolicy={uiCapabilities.ApprovalPolicy}
         />
           </>
         )}

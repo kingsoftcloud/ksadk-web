@@ -108,6 +108,7 @@ export function mapBackendMessage(msg) {
   }
   // 反馈控件需要 responseId/eventId/traceId/rootSpanId(后端从 event Metadata 投出)
   if (msg.MessageId) result.eventId = msg.MessageId;
+  if (msg.InvocationId) result.invocationId = msg.InvocationId;
   if (msg.ResponseId) result.responseId = msg.ResponseId;
   if (msg.TraceId) result.traceId = msg.TraceId;
   if (msg.RootSpanId) result.rootSpanId = msg.RootSpanId;

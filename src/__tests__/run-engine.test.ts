@@ -134,7 +134,90 @@ describe('RunEngineImpl', () => {
       approvalRequestId: 'approval-1',
       approvalProtocol: 'ag-ui',
       approvalStatus: 'approved',
-      status: 'completed',
+      status: 'running',
+    });
+  });
+
+  it('keeps an approval audit after the approved tool later reports an execution failure', () => {
+    useSessionStore.getState().setCurrentSessionId('session-approval-error');
+
+    dispatchRunEventToStores({
+      type: 'tool_upsert',
+      sessionId: 'session-approval-error',
+      messageId: 'message-approval-error',
+      name: 'web_search',
+      args: '{"query":"latest AI news"}',
+      status: 'paused',
+      extra: {
+        approvalRequestId: 'approval-web-search',
+        approvalProtocol: 'responses',
+      },
+    });
+    dispatchRunEventToStores({
+      type: 'tool_result',
+      sessionId: 'session-approval-error',
+      messageId: 'message-approval-error',
+      name: 'web_search',
+      output: '{"ok":false,"error":"request rejected"}',
+    });
+    // AG-UI sends this audit event after its resumed turn has already emitted
+    // tool output. The acknowledgement must not erase that real outcome.
+    dispatchRunEventToStores({
+      type: 'approval_resolved',
+      sessionId: 'session-approval-error',
+      approvalRequestId: 'approval-web-search',
+      decision: 'approved',
+    });
+
+    const message = useMessageStore.getState().messages[0];
+    expect(message.tools?.web_search).toMatchObject({
+      approvalStatus: 'approved',
+      status: 'error',
+    });
+    expect(message.blocks?.find((block) => block.type === 'tool')).toMatchObject({
+      toolName: 'web_search',
+      status: 'error',
+      extra: expect.objectContaining({ approvalStatus: 'approved' }),
+    });
+  });
+
+  it('keeps a Responses approval inside its tool row instead of appending an interruption notice', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine({
+      ...createApiFacade(calls),
+      async runAgent() {
+        calls.push({ stream: 'approval' });
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(
+              'event: response.output_item.done\n'
+              + 'data: {"item":{"id":"approval-1","type":"mcp_approval_request","name":"web_search","arguments":"{\\"query\\":\\"AI news\\"}"}}\n\n'
+              + 'event: response.incomplete\n'
+              + 'data: {}\n\n',
+            ));
+            controller.close();
+          },
+        });
+      },
+    });
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: '',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-inline-approval');
+
+    expect(engine.start({ text: 'search the web', attachments: [], sessionId: 'session-inline-approval' })).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+
+    expect(useMessageStore.getState().messages.some((message) => message.role === 'system')).toBe(false);
+    expect(useMessageStore.getState().messages.at(-1)?.tools?.web_search).toMatchObject({
+      approvalStatus: 'pending',
+      status: 'paused',
     });
   });
 
@@ -371,6 +454,27 @@ describe('RunEngineImpl', () => {
       ApiFormat: 'responses',
       ResponsesInput: [{ role: 'user', content: expectedContent }],
       Messages: [{ role: 'user', content: expectedContent }],
+    });
+  });
+
+  it('sends the selected conversation permission mode as runtime metadata', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      permissionMode: 'full',
+    });
+
+    engine.start({ text: 'continue without default confirmations', attachments: [], sessionId: 'session-live' });
+    await waitForCalls(calls);
+
+    expect(calls[0]).toMatchObject({
+      Metadata: { agentengine: { tool_approval_mode: 'full' } },
     });
   });
 
@@ -617,6 +721,28 @@ describe('RunEngineImpl', () => {
       phase: '等待首个输出',
       status: 'waiting',
       detail: '正在接收流式事件',
+    });
+  });
+
+  it('settles an offscreen session when its Responses stream ends after a session switch', () => {
+    useSessionStore.getState().setCurrentSessionId('session-visible');
+    useStreamingStore.getState().setSessionStreaming('session-background', true);
+    useStreamingStore.getState().updateActivity({
+      sessionId: 'session-background',
+      status: 'completed',
+      phase: '运行完成',
+      countEvent: false,
+    });
+
+    dispatchRunEventToStores({
+      type: 'stream_ended',
+      sessionId: 'session-background',
+    });
+
+    expect(useStreamingStore.getState().isSessionStreaming('session-background')).toBe(false);
+    expect(useStreamingStore.getState().getSessionActivity('session-background')).toMatchObject({
+      status: 'completed',
+      phase: '运行完成',
     });
   });
 

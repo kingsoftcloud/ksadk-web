@@ -8,6 +8,9 @@ export type RunStage =
   | 'completing' | 'recovering' | 'error'
   | 'cancelled';
 
+/** Default approval policy applied to a newly started conversation run. */
+export type PermissionMode = 'ask' | 'risk' | 'full';
+
 export type RunEvent =
   | { type: 'stage_changed'; stage: RunStage; sessionId?: string | null }
   | {
@@ -20,7 +23,7 @@ export type RunEvent =
       countEvent?: boolean;
     }
   | { type: 'user_message_added'; messageId: string; sessionId?: string | null }
-  | { type: 'assistant_message_created'; messageId: string; sessionId?: string | null }
+  | { type: 'assistant_message_created'; messageId: string; invocationId?: string; sessionId?: string | null }
   | { type: 'text_delta'; messageId: string; delta: string; sessionId?: string | null }
   | { type: 'text_final'; messageId: string; text: string; sessionId?: string | null }
   | { type: 'reasoning_delta'; messageId: string; delta: string; sessionId?: string | null }
@@ -69,6 +72,7 @@ export type RunEngineConfig = {
   selectedModel: string;
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
+  permissionMode?: PermissionMode;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;
 };

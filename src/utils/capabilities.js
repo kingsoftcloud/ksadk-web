@@ -60,6 +60,20 @@ function normalizeBuiltinTools(value) {
     });
 }
 
+function normalizeApprovalPolicy(value) {
+  const policy = asObject(value);
+  const supported = Array.isArray(policy.Modes)
+    ? policy.Modes.filter((mode) => ['ask', 'risk', 'full'].includes(mode))
+    : ['ask', 'risk', 'full'];
+  const modes = supported.length > 0 ? [...new Set(supported)] : ['ask', 'risk', 'full'];
+  const defaultMode = modes.includes(policy.DefaultMode) ? policy.DefaultMode : 'risk';
+  return {
+    Modes: modes,
+    DefaultMode: defaultMode,
+    RuntimeOverride: normalizeEnabled(policy.RuntimeOverride, true),
+  };
+}
+
 function normalizeHostedChatTransports(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -172,6 +186,7 @@ export function normalizeCapabilities(bootstrap) {
       CheckpointResume: normalizeEnabled(runLifecycle.CheckpointResume, false),
       CheckpointResumePreview: normalizeEnabled(runLifecycle.CheckpointResumePreview, false),
     },
+    ApprovalPolicy: normalizeApprovalPolicy(rawCapabilities.ApprovalPolicy),
     BuiltinTools: normalizeBuiltinTools(rawCapabilities.BuiltinTools),
   };
 }
@@ -188,7 +203,7 @@ export function isNativeTerminalEnabled(capabilities) {
   return normalizeCapabilities({ Data: { Capabilities: capabilities } }).NativeTerminal.Enabled;
 }
 
-export function resolveHostedChatTransport(capabilities) {
+export function resolveHostedChatTransport(capabilities, options = {}) {
   const hostedChat = normalizeCapabilities({ Data: { Capabilities: capabilities } }).HostedChat;
   const preferred = hostedChat.Transports.find(
     (transport) => transport.Protocol === hostedChat.PreferredTransport,
@@ -196,6 +211,12 @@ export function resolveHostedChatTransport(capabilities) {
   const responses = hostedChat.Transports.find(
     (transport) => transport.Protocol === 'responses',
   );
+  // AG-UI's direct HTTP stream is tied to the browser request. A run that
+  // must survive F5/session navigation needs the detached Responses stream,
+  // which the server can replay through SubscribeRunEvents.
+  if (options.requireResumableRun && responses) {
+    return responses;
+  }
   return preferred || responses || {
     Protocol: 'responses',
     Runtime: 'ksadk',

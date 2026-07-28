@@ -112,7 +112,20 @@ export function upsertToolBlock(
   const next = [...base];
   const existingIndex = next.findIndex((b) => b.type === 'tool' && b.toolName === toolName);
   if (existingIndex >= 0 && next[existingIndex].type === 'tool') {
-    next[existingIndex] = { ...(next[existingIndex] as ToolBlock), ...patch };
+    const existing = next[existingIndex] as ToolBlock;
+    // 已是 error/completed 终态时,不被后续 running/completed 覆盖:
+    // 避免 tool_result(error) 后 output_item.done(completed) 把 error 一闪而过。
+    // 只有新的 output 或 approval 事件可以更新已有终态块。
+    const isTerminal = existing.status === 'error' || existing.status === 'completed';
+    const patchHasOutput = patch.output !== undefined;
+    const patchIsApproval = patch.extra && (patch.extra.approvalRequestId || patch.extra.approvalStatus);
+    if (isTerminal && !patchHasOutput && !patchIsApproval) {
+      return next;
+    }
+    // 合并时保留 existing.extra:tool_upsert 的 extra 通常是 undefined(不传审批),
+    // 不能用它覆盖 approval_requested 写的 extra(否则审批卡流式时不显示,刷新才出)。
+    const mergedExtra = patch.extra ?? existing.extra;
+    next[existingIndex] = { ...existing, ...patch, extra: mergedExtra };
     return next;
   }
   return [

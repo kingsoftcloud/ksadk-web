@@ -12,10 +12,12 @@ import { ArrowUp, Paperclip, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useModelStore } from '@/stores/model.js';
 import type { ModelStore } from '@/stores/model.js';
+import type { ApprovalPolicyCapability } from '@/types/capabilities.js';
 import { normalizeThinkingMode } from '@/utils/model-options.js';
 
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { MenuChip } from './MenuChip';
+import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
 type ChatComposerProps = {
@@ -26,6 +28,8 @@ type ChatComposerProps = {
   input: string;
   isMobile: boolean;
   isStreaming: boolean;
+  approvalEnabled?: boolean;
+  approvalPolicy?: ApprovalPolicyCapability;
   queuedDrafts: Array<{ text: string; attachments: File[] }>;
   onAppendAttachments: (files: File[]) => void;
   onInputChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
@@ -45,6 +49,8 @@ export function ChatComposer({
   input,
   isMobile,
   isStreaming,
+  approvalEnabled = false,
+  approvalPolicy,
   queuedDrafts,
   onAppendAttachments,
   onInputChange,
@@ -202,7 +208,7 @@ export function ChatComposer({
                 style={{ maxHeight: `${composerMaxHeight}px`, overflowY: 'auto' }}
               />
 
-              {/* wework 风格工具栏:左组(附件+model+思考) | 右组(上下文环+发送) */}
+              {/* wework 风格工具栏:左组(附件+权限+model+思考) | 右组(上下文环+发送) */}
               <div className="mt-auto flex min-h-8 items-center justify-between gap-2 pt-1">
                 <div className="flex items-center gap-2">
                   <label
@@ -223,6 +229,8 @@ export function ChatComposer({
                     />
                     <Paperclip className="h-[18px] w-[18px]" />
                   </label>
+
+                  {approvalEnabled ? <PermissionMenu approvalPolicy={approvalPolicy} /> : null}
 
                   {availableModels.length > 0 ? (
                     <MenuChip

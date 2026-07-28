@@ -11,6 +11,7 @@ import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
+import type { PermissionMode } from '../core/run/types.js';
 
 type QueuedDraft = {
   text: string;
@@ -25,6 +26,7 @@ type RunAgentContext = {
   selectedModel: string;
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
+  permissionMode: PermissionMode;
   uiCapabilities: UiCapabilities;
   isMobile: boolean;
   api: ApiFacade;
@@ -45,6 +47,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     selectedModel,
     selectedModelMetadata,
     thinkingMode,
+    permissionMode,
     currentSessionIdRef,
     queuedDraftRef,
     onRunSettled,
@@ -59,10 +62,15 @@ export function useRunAgent(ctx: RunAgentContext) {
       selectedModel,
       selectedModelMetadata,
       thinkingMode,
-      hostedChatTransport: resolveHostedChatTransport(uiCapabilities),
+      permissionMode,
+      hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
+        requireResumableRun: Boolean(
+          uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume,
+        ),
+      }),
       checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
     });
-  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, uiCapabilities]);
+  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities]);
 
   const getEngine = useCallback((sessionId: string | null | undefined) => {
     const key = String(sessionId || 'new-session');

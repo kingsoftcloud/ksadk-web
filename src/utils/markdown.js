@@ -31,6 +31,68 @@ function isTableRow(line) {
   return trimmed.split('|').length >= 4;
 }
 
+/**
+ * 对齐表格表头与分隔行的列数。GFM 要求表头列数 == 分隔行列数,否则
+ * react-markdown 不认、降级成纯文本。LLM 常输出表头 2 列、分隔行 3 列
+ * (或反之)的不规范表格,这里按数据行多数列数补齐表头/分隔行。
+ */
+function splitPipeCells(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return [];
+  // 去掉首尾 |,按 | 切分
+  const inner = trimmed.replace(/^\|/, '').replace(/\|\s*$/, '');
+  return inner.split('|').map((c) => c.trim());
+}
+
+function joinPipeCells(cells, indentation = '') {
+  return `${indentation}| ${cells.join(' | ')} |`;
+}
+
+export function alignTableHeaderColumns(text) {
+  const lines = text.split('\n');
+  const result = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isTableRow(line) && i + 1 < lines.length && isSeparatorRow(lines[i + 1])) {
+      const indentation = line.match(/^(\s*)/)?.[1] || '';
+      const headerCells = splitPipeCells(line);
+      const sepCells = splitPipeCells(lines[i + 1]);
+      // 收集数据行
+      const dataRows = [];
+      let j = i + 2;
+      let maxCols = Math.max(headerCells.length, sepCells.length);
+      while (j < lines.length && isTableRow(lines[j])) {
+        const cells = splitPipeCells(lines[j]);
+        maxCols = Math.max(maxCols, cells.length);
+        dataRows.push(cells);
+        j += 1;
+      }
+      // 补齐表头/分隔/数据到 maxCols
+      const pad = (cells) => {
+        const out = [...cells];
+        while (out.length < maxCols) out.push('');
+        return out;
+      };
+      const padSep = (cells) => {
+        const out = [...cells];
+        while (out.length < maxCols) out.push('---');
+        return out;
+      };
+      result.push(joinPipeCells(pad(headerCells), indentation));
+      result.push(joinPipeCells(padSep(sepCells), indentation));
+      for (const dr of dataRows) {
+        result.push(joinPipeCells(pad(dr), indentation));
+      }
+      i = j;
+    } else {
+      result.push(line);
+      i += 1;
+    }
+  }
+  return result.join('\n');
+}
+
 function isInlineTableBlob(line) {
   return isSeparatorRow(line)
     || /\|\|/.test(line)
@@ -185,7 +247,10 @@ function normalizeProseBlock(block) {
   // 标题与正文/表格粘连时补开。
   normalized = normalized.replace(/^[ \t]+(#{1,6}\s*)/gm, '$1');
   // 这里只处理“正文后面直接跟标题”的粘连，不要把 `##` / `###` 自己拆成两段。
-  normalized = normalized.replace(/([^\n#])\s*(#{1,6}\s*\S)/g, '$1\n\n$2');
+  // `| # |` is a valid table heading cell, not an inline Markdown heading.
+  // Require the first heading character to be followed by non-pipe content so
+  // a numbered-column header does not get split into an empty `#` heading.
+  normalized = normalized.replace(/([^\n#])\s*(#{1,6}\s*[^\s|])/g, '$1\n\n$2');
   normalized = normalized.replace(/^(#{1,6}\s*[^\n]+)\n(?!\n)/gm, '$1\n\n');
   normalized = normalized.replace(/^(#{1,6}[^\n|]+?)\s*(\|)/gm, '$1\n$2');
 
@@ -240,6 +305,8 @@ export function preprocessMarkdown(text) {
 
   let normalized = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   normalized = normalizeBrokenThinkBlocks(normalized);
+
+  normalized = alignTableHeaderColumns(normalized);
 
   // 若代码块围栏数量为奇数，自动补一个闭合围栏，避免后续正文被整个吞掉。
   if ((normalized.match(/```/g) || []).length % 2 === 1) {

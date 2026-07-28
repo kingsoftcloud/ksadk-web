@@ -18,7 +18,7 @@ describe('ChatComposer interaction contract', () => {
     expect(source).not.toContain('终止后台');
     expect(source).toContain("const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成'");
     expect(source).toContain("title={isStreaming ? activeStopTitle : '发送消息'}");
-    expect(source).toContain('isStreaming ? <StopCircle');
+    expect(source).toContain('isStreaming ? <Square');
   });
 
   it('does not block image sends based on stale model capability metadata', () => {

@@ -18,28 +18,22 @@ type StatusBannerProps = {
 
 export function StatusBanner({ onRetry }: StatusBannerProps) {
   const banner = useStreamingStore((s) => s.banner);
-  const [remaining, setRemaining] = useState(0);
-
-  useEffect(() => {
-    if (!banner || banner.kind !== 'rate_limited' || !banner.retryAfterSec) {
-      setRemaining(0);
-      return;
-    }
-    setRemaining(banner.retryAfterSec);
-    const timer = setInterval(() => {
-      setRemaining((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [banner]);
-
   if (!banner) return null;
+
+  const rateLimitedLabel = banner.kind === 'rate_limited' ? (
+    <RateLimitLabel
+      key={banner.createdAt || `${banner.sessionId || ''}:${banner.retryAfterSec || 0}`}
+      message={banner.message}
+      retryAfterSec={banner.retryAfterSec}
+    />
+  ) : null;
 
   const config = {
     rate_limited: {
       icon: <ZapOff className="h-4 w-4 text-amber-500" />,
       bg: 'border-amber-200/70 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20',
       text: 'text-amber-700 dark:text-amber-200',
-      label: remaining > 0 ? `${banner.message}（${remaining}s 后可重试）` : banner.message,
+      label: rateLimitedLabel,
     },
     network: {
       icon: <LoaderCircle className="h-4 w-4 animate-spin text-text-secondary" />,
@@ -78,4 +72,18 @@ export function StatusBanner({ onRetry }: StatusBannerProps) {
       ) : null}
     </div>
   );
+}
+
+function RateLimitLabel({ message, retryAfterSec }: { message: string; retryAfterSec?: number }) {
+  const [remaining, setRemaining] = useState(retryAfterSec || 0);
+
+  useEffect(() => {
+    if (!retryAfterSec) return undefined;
+    const timer = setInterval(() => {
+      setRemaining((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retryAfterSec]);
+
+  return remaining > 0 ? `${message}（${remaining}s 后可重试）` : message;
 }

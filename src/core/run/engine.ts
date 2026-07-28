@@ -247,7 +247,7 @@ export class RunEngineImpl implements RunEngine {
 
         const assistantMessageId = `msg-${Date.now()}`;
 
-        const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId);
+        const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId, invocationId);
 
         if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
           retriedWithNewSession = true;
@@ -261,7 +261,7 @@ export class RunEngineImpl implements RunEngine {
             this.setStage('streaming');
             this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
             const retryMsgId = `msg-${Date.now()}`;
-            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId);
+            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
             streamResult.terminalStatus = retryResult.terminalStatus;
           }
         }
@@ -433,7 +433,7 @@ export class RunEngineImpl implements RunEngine {
             if (!chunk.trim()) continue;
             const events = parseSseChunk(chunk);
             for (const event of events) {
-              if (event.eventName === '__done__') continue;
+              if (event.eventName === '__done__' || event.eventName === '__ping__') continue;
               this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
               this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
               terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
@@ -543,6 +543,7 @@ export class RunEngineImpl implements RunEngine {
           protocol,
           protocolState,
           assistantMessageId,
+          invocationId,
         );
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
           if (streamResult.terminalStatus === 'cancelled') {
@@ -742,6 +743,13 @@ export class RunEngineImpl implements RunEngine {
       Model: this.config.selectedModel || undefined,
       ModelMetadata: this.config.selectedModelMetadata || undefined,
       ModelOptions: buildModelOptionsFromThinkingMode(normalizeThinkingMode(this.config.thinkingMode)),
+      // Keep client-selected permission semantics namespaced as runtime controls;
+      // the server can validate them and still apply a stricter deployment policy.
+      Metadata: {
+        agentengine: {
+          tool_approval_mode: this.config.permissionMode || 'risk',
+        },
+      },
     };
 
     if (!isResponsesResume) {
@@ -763,6 +771,7 @@ export class RunEngineImpl implements RunEngine {
     protocol: StreamProtocol,
     protocolState: Record<string, unknown>,
     messageId: string,
+    invocationId?: string,
   ): Promise<StreamConsumeResult> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -778,7 +787,7 @@ export class RunEngineImpl implements RunEngine {
 
         if (!messageCreated) {
           messageCreated = true;
-          this.emit({ type: 'assistant_message_created', messageId });
+          this.emit({ type: 'assistant_message_created', messageId, invocationId });
         }
 
         buffer += decoder.decode(value, { stream: true });
@@ -875,7 +884,8 @@ export class RunEngineImpl implements RunEngine {
         });
         break;
       case 'incomplete':
-        this.emit({ type: 'system_message', content: '本次运行已中断，需要人工确认后继续。' });
+        // 审批暂停已由对应的 tool_upsert(status=paused) 呈现在工具行中。
+        // 这里不再额外追加系统消息，以免把同一次审批拆成突兀的全宽提示卡。
         break;
       case 'failed':
         this.emit({ type: 'text_final', messageId, text: `生成失败：${action.message}` });

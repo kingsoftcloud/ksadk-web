@@ -181,6 +181,23 @@ test('preprocessMarkdown keeps table headers attached to delayed separator rows'
   assert.doesNotMatch(normalized, /\|:---------\|:-----\|:----:\|\n\| --- \| --- \| --- \|/);
 });
 
+test('preprocessMarkdown preserves a number-sign table header cell', () => {
+  const raw = [
+    '当前 Skill Space 下共有 **4 个技能**：',
+    '',
+    '| # | 技能名称 | 说明 | 版本 |',
+    '|---|---------|------|------|',
+    '| 1 | **ppt-translator** | 保留原始排版。 | v1 |',
+    '| 2 | **skill-creator** | 创建自定义技能。 | v1 |',
+  ].join('\n');
+
+  const normalized = preprocessMarkdown(raw);
+
+  assert.match(normalized, /\| # \| 技能名称 \| 说明 \| 版本 \|/);
+  assert.match(normalized, /\| --- \| --------- \| ------ \| ------ \|/);
+  assert.doesNotMatch(normalized, /^#\s*$/m);
+});
+
 test('preprocessMarkdown keeps consecutive heading markers intact', () => {
   assert.equal(preprocessMarkdown('##⏭️ 下一步'), '## ⏭️ 下一步');
   assert.equal(preprocessMarkdown('###📌 标题'), '### 📌 标题');

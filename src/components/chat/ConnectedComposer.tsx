@@ -12,6 +12,7 @@ import type { SessionStore } from '../../stores/session.js';
 import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
 import type { ComposerContextIndicator } from './types';
+import type { ApprovalPolicyCapability } from '../../types/capabilities.js';
 
 type ConnectedComposerProps = {
   composerMaxHeight: number;
@@ -19,6 +20,8 @@ type ConnectedComposerProps = {
   stopGeneration: () => void;
   cancelRemote?: () => void;
   isMobile: boolean;
+  approvalEnabled?: boolean;
+  approvalPolicy?: ApprovalPolicyCapability;
 };
 
 export function ConnectedComposer({
@@ -27,6 +30,8 @@ export function ConnectedComposer({
   stopGeneration,
   cancelRemote,
   isMobile,
+  approvalEnabled = false,
+  approvalPolicy,
 }: ConnectedComposerProps) {
   const input = useUIStore((s: UIStore) => s.input);
   const attachments = useUIStore((s: UIStore) => s.attachments);
@@ -93,6 +98,8 @@ export function ConnectedComposer({
       input={input}
       isMobile={isMobile}
       isStreaming={isStreaming}
+      approvalEnabled={approvalEnabled}
+      approvalPolicy={approvalPolicy}
       queuedDrafts={queuedDrafts}
       onAppendAttachments={appendAttachments}
       onInputChange={handleInputChange}

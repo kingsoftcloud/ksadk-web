@@ -127,32 +127,42 @@ export function useFeedback(ctx: UseFeedbackContext) {
     }) => {
       if (!options.approvalRequestId || isStreaming) return;
       useMessageStore.getState().patchMessages((prev) =>
-        prev.map((message) => ({
-          ...message,
-          tools: message.tools
-            ? Object.fromEntries(
-                Object.entries(message.tools).map(([name, tool]) => [
-                  name,
-                  tool.approvalRequestId === options.approvalRequestId
-                    ? {
-                        ...tool,
-                        approvalStatus: options.approve ? 'approved' : 'rejected',
-                      }
-                    : tool,
-                ]),
-              )
-            : message.tools,
-        })),
+        prev.map((message) => {
+          const approvalStatus = options.approve ? 'approved' : 'rejected';
+          const nextStatus = (status: 'running' | 'completed' | 'error' | 'paused') =>
+            options.approve && status === 'paused'
+              ? 'running' as const
+              : !options.approve
+                ? 'completed' as const
+                : status;
+          return {
+            ...message,
+            tools: message.tools
+              ? Object.fromEntries(
+                  Object.entries(message.tools).map(([name, tool]) => [
+                    name,
+                    tool.approvalRequestId === options.approvalRequestId
+                      ? {
+                          ...tool,
+                          status: nextStatus(tool.status),
+                          approvalStatus,
+                        }
+                      : tool,
+                  ]),
+                )
+              : message.tools,
+            blocks: message.blocks?.map((block) =>
+              block.type === 'tool' && block.extra?.approvalRequestId === options.approvalRequestId
+                ? {
+                    ...block,
+                    status: nextStatus(block.status),
+                    extra: { ...block.extra, approvalStatus },
+                  }
+                : block,
+            ),
+          };
+        }),
       );
-      useMessageStore.getState().patchMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + Math.random()),
-          role: 'system',
-          content: options.approve ? '已批准工具调用，正在继续运行。' : '已拒绝工具调用，正在通知运行时。',
-          timestamp: Date.now(),
-        },
-      ]);
       void submitDraft(
         '',
         [],

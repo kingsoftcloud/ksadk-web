@@ -33,6 +33,21 @@ describe('HostedChat transport selection', () => {
     expect(resolveHostedChatTransport(capabilities)).toMatchObject(agui);
   });
 
+  it('prefers the detached Responses stream when the UI must recover an active run', () => {
+    const capabilities = normalizeCapabilities({
+      Data: {
+        HostedChat: { PreferredTransport: 'ag-ui', Transports: [agui, responses] },
+        Capabilities: {
+          HostedChat: { Enabled: true },
+          RunLifecycle: { Enabled: true, Resume: true },
+        },
+      },
+    });
+
+    expect(resolveHostedChatTransport(capabilities, { requireResumableRun: true }))
+      .toMatchObject(responses);
+  });
+
   it('falls back to Responses when AG-UI is absent or malformed', () => {
     const capabilities = normalizeCapabilities({
       Data: {

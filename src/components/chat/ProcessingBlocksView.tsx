@@ -61,7 +61,7 @@ function Collapsible({
 
 /** 去 markdown 标记取末句预览(粗略:取最后一段非空文本)。 */
 function plainPreview(text: string, max = 96): string {
-  const stripped = text.replace(/[#*`>\-]/g, '').replace(/\s+/g, ' ').trim();
+  const stripped = text.replace(/[#*`>-]/g, '').replace(/\s+/g, ' ').trim();
   if (stripped.length <= max) return stripped;
   return stripped.slice(-max);
 }
@@ -120,29 +120,33 @@ function ToolRow({
   const status = tool?.status ?? block.status;
   const args = tool?.args ?? block.args;
   const output = tool?.output ?? block.output;
-  const approvalStatus = tool?.approvalStatus;
-  const approvalRequestId = tool?.approvalRequestId;
-  const approvalMessage = tool?.approvalMessage;
-  const approvalProtocol = tool?.approvalProtocol;
-  const previousResponseId = tool?.previousResponseId;
+  // 审批字段优先从 block.extra 读(approval_requested 同步写进 blocks,key=toolName 一致);
+  // fallback 从 tool 读(旧路径,msg.tools 用 approvalRequestId 做 key 可能和 toolName 不一致。
+  const extra = (block.extra || {}) as Record<string, unknown>;
+  const approvalStatus = (extra.approvalStatus as string) || tool?.approvalStatus;
+  const approvalRequestId = (extra.approvalRequestId as string) || tool?.approvalRequestId;
+  const approvalMessage = (extra.approvalMessage as string) || tool?.approvalMessage;
+  const approvalProtocol = (extra.approvalProtocol as string) || tool?.approvalProtocol;
+  const previousResponseId = (extra.previousResponseId as string) || tool?.previousResponseId;
   const running = status === 'running';
   const errored = status === 'error';
   const paused = status === 'paused';
 
-  // 状态文案前缀(wework 风格:文案承载状态,不用胶囊)
-  const prefix = approvalStatus === 'pending'
-    ? '等待审批'
-    : approvalStatus === 'approved'
-      ? '已批准'
+  // Approval is an audit trail. The execution result is the primary state,
+  // otherwise an earlier “approved” label can hide a later tool failure.
+  const prefix = errored
+    ? '执行失败'
+    : approvalStatus === 'pending'
+      ? '等待确认'
       : approvalStatus === 'rejected'
         ? '已拒绝'
         : running
-          ? '正在运行'
-          : errored
-            ? '运行失败'
+          ? approvalStatus === 'approved' ? '已授权 · 执行中' : '正在运行'
+          : approvalStatus === 'approved'
+            ? '已授权'
             : paused
               ? '已暂停'
-              : '已运行';
+              : '已完成';
 
   const tone = errored
     ? 'text-rose-500 dark:text-rose-400'
@@ -166,17 +170,14 @@ function ToolRow({
       }
     >
       <div className="flex flex-col gap-2.5 py-1 text-[13px]">
-        {approvalRequestId && (
-          <div className="font-sans text-[13px] text-slate-700 dark:text-slate-200">
-            <div className="font-medium">
-              {approvalStatus === 'approved'
-                ? '已批准该工具调用。'
-                : approvalStatus === 'rejected'
-                  ? '已拒绝该工具调用。'
-                  : approvalMessage || '该工具调用需要人工确认后继续。'}
+        {approvalRequestId && approvalStatus === 'pending' && (
+          <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200/90 bg-white/70 px-2.5 py-2 font-sans text-[12px] text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
+              <span className="shrink-0 font-medium text-slate-700 dark:text-slate-200">需要确认</span>
+              <span className="min-w-0 truncate text-slate-500 dark:text-slate-400">{approvalMessage || '允许后将执行此工具调用。'}</span>
             </div>
-            {approvalStatus === 'pending' && (
-              <div className="mt-2 flex flex-wrap gap-2">
+            <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
                   disabled={isStreaming}
@@ -185,9 +186,9 @@ function ToolRow({
                       ? onRespondToAguiApproval?.({ interruptId: approvalRequestId || '', approve: true })
                       : onRespondToApproval?.({ approvalRequestId: approvalRequestId || '', approve: true, previousResponseId })
                   }
-                  className="inline-flex h-8 items-center gap-1.5 rounded-full bg-foreground px-4 text-xs font-semibold text-background transition hover:opacity-80 disabled:opacity-55"
+                  className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[12px] font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-55"
                 >
-                  批准并继续
+                  允许执行
                 </button>
                 <button
                   type="button"
@@ -197,12 +198,18 @@ function ToolRow({
                       ? onRespondToAguiApproval?.({ interruptId: approvalRequestId || '', approve: false })
                       : onRespondToApproval?.({ approvalRequestId: approvalRequestId || '', approve: false, previousResponseId })
                   }
-                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-4 text-xs font-semibold text-text-secondary transition hover:border-rose-300 hover:text-rose-600 disabled:opacity-55"
+                  className="inline-flex h-7 items-center rounded-md px-2 text-[12px] font-medium text-slate-500 transition hover:bg-slate-100 hover:text-rose-600 disabled:opacity-55 dark:text-slate-400 dark:hover:bg-slate-800"
                 >
                   拒绝
                 </button>
-              </div>
-            )}
+            </div>
+          </section>
+        )}
+        {approvalRequestId && approvalStatus && approvalStatus !== 'pending' && (
+          <div className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
+            <span>{approvalStatus === 'approved' ? '已授权' : '已拒绝'}</span>
+            {approvalStatus === 'approved' && running ? <span>· 工具执行中</span> : null}
+            {approvalStatus === 'approved' && errored ? <span>· 工具执行失败</span> : null}
           </div>
         )}
         {args ? <PayloadBlock label="入参" value={args} tone="input" /> : null}
@@ -342,11 +349,9 @@ function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | '
 
 function TextRow({ block }: { block: TextBlock }) {
   if (!block.content) return null;
-  // 正文块走 MessageMarkdown:流式时标题/列表/粗体/代码块即时渲染,
-  // 不再用 whitespace-pre-line 纯文本(那会导致 # 标题 原样显示成文本)。
-  // 单 \n 换行由 remark-breaks + p 块间距处理,不会挤一坨。
+  // 正文块走 MessageMarkdown:流式时标题/列表/粗体/代码块即时渲染。
   return (
-    <div className="w-full break-words py-0.5 text-[15px] leading-6">
+    <div className="w-full break-words py-0.5 text-[14px] leading-[1.65]">
       <MessageMarkdown content={block.content} />
     </div>
   );

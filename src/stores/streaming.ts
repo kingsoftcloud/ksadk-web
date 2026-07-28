@@ -9,6 +9,7 @@ export type StatusBanner = {
   message: string;
   retryAfterSec?: number;
   sessionId?: string | null;
+  createdAt?: number;
 };
 
 export type RunActivity = {
@@ -89,7 +90,9 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   lastSeqId: 0,
   activeInvocationId: '',
   setStreaming: (streaming) => set({ isStreaming: streaming }),
-  setBanner: (banner) => set({ banner }),
+  setBanner: (banner) => set({
+    banner: banner ? { ...banner, createdAt: Date.now() } : null,
+  }),
   setLastSeqId: (seqId) => set({ lastSeqId: seqId }),
   setActiveInvocationId: (invocationId) => set({ activeInvocationId: invocationId }),
   setSessionStreaming: (sessionId, streaming) => set((state) => {

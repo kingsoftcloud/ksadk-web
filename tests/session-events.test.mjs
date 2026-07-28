@@ -71,6 +71,107 @@ test('session event utils restore persisted reasoning events', async () => {
   );
 });
 
+test('session event utils replay RuntimeEvent deltas emitted by LangGraph', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-run-start',
+      EventType: 'run.started',
+      InvocationId: 'run-runtime',
+      SeqId: 1,
+      Content: { phase: null, payload: { status: 'in_progress' } },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-reasoning-1',
+      EventType: 'reasoning.delta',
+      InvocationId: 'run-runtime',
+      SeqId: 2,
+      Content: { phase: 'commentary', payload: { text: '先分析' } },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 2,
+    },
+    {
+      EventId: 'evt-reasoning-2',
+      EventType: 'reasoning.delta',
+      InvocationId: 'run-runtime',
+      SeqId: 3,
+      Content: { phase: 'commentary', payload: { text: '可用工具。' } },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 3,
+    },
+    {
+      EventId: 'evt-tool-begin',
+      EventType: 'tool.call.begin',
+      InvocationId: 'run-runtime',
+      SeqId: 4,
+      Content: {
+        phase: null,
+        payload: { call_id: 'call-1', name: 'list_skills', args: { include: 'skill' } },
+      },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 4,
+    },
+    {
+      EventId: 'evt-tool-end',
+      EventType: 'tool.call.end',
+      InvocationId: 'run-runtime',
+      SeqId: 5,
+      Content: {
+        phase: null,
+        payload: { call_id: 'call-1', name: 'list_skills', result: { ok: true } },
+      },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 5,
+    },
+    {
+      EventId: 'evt-text-1',
+      EventType: 'text.delta',
+      InvocationId: 'run-runtime',
+      SeqId: 6,
+      Content: { phase: 'final_answer', payload: { text: '可以使用' } },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 6,
+    },
+    {
+      EventId: 'evt-text-2',
+      EventType: 'text.delta',
+      InvocationId: 'run-runtime',
+      SeqId: 7,
+      Content: { phase: 'final_answer', payload: { text: '这些技能。' } },
+      Metadata: { ksadk_runtime_event: true },
+      Timestamp: 7,
+    },
+  ]);
+
+  assert.deepEqual(
+    messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      reasoning: message.reasoning,
+      tools: message.tools,
+      invocationId: message.invocationId,
+    })),
+    [{
+      role: 'model',
+      content: '可以使用这些技能。',
+      reasoning: '先分析可用工具。',
+      tools: {
+        list_skills: {
+          name: 'list_skills',
+          args: '{\n  "include": "skill"\n}',
+          output: '{\n  "ok": true\n}',
+          status: 'completed',
+        },
+      },
+      invocationId: 'run-runtime',
+    }],
+  );
+});
+
 test('session event utils merge replayed subscription events before rebuilding active runs', async () => {
   const sessionEvents = await loadSessionEventUtils();
 

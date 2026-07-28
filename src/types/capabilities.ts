@@ -16,9 +16,16 @@ export type BuiltinToolCapability = {
   boundary?: string;
 };
 
+export type ApprovalPolicyCapability = {
+  Modes: Array<'ask' | 'risk' | 'full'>;
+  DefaultMode: 'ask' | 'risk' | 'full';
+  RuntimeOverride: boolean;
+};
+
 export type UiCapabilities = {
   Attachments?: boolean;
   Approval?: boolean;
+  ApprovalPolicy?: ApprovalPolicyCapability;
   Thinking?: boolean;
   StopRun?: boolean;
   ResumeRun?: boolean;

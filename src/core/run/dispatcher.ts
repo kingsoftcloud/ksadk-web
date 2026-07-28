@@ -3,25 +3,38 @@ import {
   appendThinkingBlock,
   appendTextBlock,
   finalizeTextBlock,
+  finalizeThinkingBlocks,
   upsertToolBlock,
 } from './blocks.js';
 import { useMessageStore } from '../../stores/message.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useCheckpointStore } from '../../stores/checkpoint.js';
-import { buildCompactionMessage } from '../../utils/session-events.js';
+import {
+  buildCompactionMessage,
+  eventHasTerminalRunStatus,
+  mergeSessionEventRecords,
+  sessionEventRunStatus,
+} from '../../utils/session-events.js';
+import { mergeRecoveredRunMessages } from '../../utils/recovered-run.js';
 import { isFailedToolOutput } from '../../utils/tool-display.js';
 import type { Message } from '../../components/chat/types.js';
 
 const TERMINAL_COMPLETE_STATUSES = new Set(['completed']);
 const TERMINAL_ERROR_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'incomplete']);
 
-function ensureAssistantMessage(id: string) {
+const recoveredEventsByRun = new Map<string, import('../../types/session-events.js').SessionEventRecord[]>();
+
+function ensureAssistantMessage(id: string, invocationId?: string) {
   useMessageStore.getState().patchMessages((prev) => {
-    if (prev.some((message) => message.id === id)) return prev;
+    if (prev.some((message) => message.id === id)) {
+      return invocationId
+        ? prev.map((message) => message.id === id ? { ...message, invocationId } : message)
+        : prev;
+    }
     return [
       ...prev,
-      { id, role: 'model', content: '', timestamp: Date.now(), reasoning: '' },
+      { id, role: 'model', content: '', timestamp: Date.now(), reasoning: '', invocationId },
     ];
   });
 }
@@ -52,11 +65,30 @@ function settleRunningToolsForTerminalStatus(status: string) {
 }
 
 export function dispatchRunEventToStores(event: RunEvent) {
-  if (event.sessionId && useSessionStore.getState().currentSessionId !== event.sessionId) {
+  const sessionIsOffscreen = Boolean(
+    event.sessionId && useSessionStore.getState().currentSessionId !== event.sessionId,
+  );
+  // Text blocks belong to the visible transcript and must not leak across a
+  // session switch. Lifecycle events are different: a Responses stream can
+  // complete while its session is offscreen, and dropping that terminal event
+  // leaves the session permanently marked as "generating" when the user
+  // returns.
+  if (
+    sessionIsOffscreen
+    && !['activity', 'stage_changed', 'stream_ended', 'error', 'rate_limited', 'terminal'].includes(event.type)
+  ) {
     return;
   }
 
   const ms = useMessageStore.getState();
+
+  // 真正的流式事件(text/tool/reasoning delta)也计入 ev 计数 + 更新 lastEventAt。
+  // 以前这些事件走 activity 通道会自然累加;改走 blocks 后不再触发 updateActivity,
+  // 导致 ev 一直 0。这里显式 bump,保持"运行中"心跳 + 事件计数准确。
+  const bumpEventCount = (sessionId?: string | null) => {
+    if (!sessionId) return;
+    useStreamingStore.getState().updateActivity({ sessionId });
+  };
 
   switch (event.type) {
     case 'activity':
@@ -79,11 +111,12 @@ export function dispatchRunEventToStores(event: RunEvent) {
       break;
 
     case 'assistant_message_created':
-      ensureAssistantMessage(event.messageId);
+      ensureAssistantMessage(event.messageId, event.invocationId);
       break;
 
     case 'text_delta':
       ensureAssistantMessage(event.messageId);
+      bumpEventCount(event.sessionId);
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
@@ -99,6 +132,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'text_final':
       ensureAssistantMessage(event.messageId);
+      bumpEventCount(event.sessionId);
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
@@ -114,6 +148,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'reasoning_delta':
       ensureAssistantMessage(event.messageId);
+      bumpEventCount(event.sessionId);
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
@@ -129,15 +164,21 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'tool_upsert': {
       ensureAssistantMessage(event.messageId);
+      bumpEventCount(event.sessionId);
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
           const current = msg.tools?.[event.name];
           const currentApprovalResolved = current?.approvalStatus === 'approved'
             || current?.approvalStatus === 'rejected';
-          const status = currentApprovalResolved
+          const requestedStatus = event.status as NonNullable<Message['tools']>[string]['status'];
+          // Approval is an audit state, not the tool outcome. A granted tool
+          // still needs to enter running and may subsequently fail.
+          const status = current?.approvalStatus === 'rejected'
             ? 'completed'
-            : event.status as NonNullable<Message['tools']>[string]['status'];
+            : current?.status === 'error' && requestedStatus !== 'error'
+              ? 'error'
+              : requestedStatus;
           return {
             ...msg,
             blocks: upsertToolBlock(msg.blocks, event.name, {
@@ -166,6 +207,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'tool_result':
       ensureAssistantMessage(event.messageId);
+      bumpEventCount(event.sessionId);
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
@@ -197,20 +239,30 @@ export function dispatchRunEventToStores(event: RunEvent) {
           const existing = msg.tools?.[event.approvalRequestId];
           const alreadyResolved = existing?.approvalStatus === 'approved'
             || existing?.approvalStatus === 'rejected';
+          const approvalExtra = {
+            approvalRequestId: event.approvalRequestId,
+            approvalProtocol: event.protocol,
+            approvalStatus: alreadyResolved ? existing.approvalStatus : 'pending' as const,
+            ...(event.message ? { approvalMessage: event.message } : {}),
+            ...(event.approvalLevel ? { approvalLevel: event.approvalLevel } : {}),
+          };
+          const status = alreadyResolved ? existing.status : 'paused';
           return {
             ...msg,
+            // 同步审批状态到 blocks(ToolRow 从 block.extra 读审批字段渲染审批卡)
+            blocks: upsertToolBlock(msg.blocks, event.name, {
+              args: event.args,
+              status,
+              extra: approvalExtra,
+            }),
             tools: {
               ...(msg.tools || {}),
               [event.approvalRequestId]: {
                 ...(existing || {}),
                 name: event.name,
                 args: event.args,
-                status: alreadyResolved ? 'completed' : 'paused',
-                approvalRequestId: event.approvalRequestId,
-                approvalProtocol: event.protocol,
-                approvalStatus: alreadyResolved ? existing.approvalStatus : 'pending',
-                ...(event.message ? { approvalMessage: event.message } : {}),
-                ...(event.approvalLevel ? { approvalLevel: event.approvalLevel } : {}),
+                status,
+                ...approvalExtra,
               },
             },
           };
@@ -228,14 +280,38 @@ export function dispatchRunEventToStores(event: RunEvent) {
             Object.entries(msg.tools).map(([key, tool]) => {
               if (tool.approvalRequestId !== event.approvalRequestId) return [key, tool];
               changed = true;
+              const status = event.decision === 'rejected'
+                ? 'completed' as const
+                : tool.status === 'paused'
+                  ? 'running' as const
+                  : tool.status;
               return [key, {
                 ...tool,
-                status: 'completed' as const,
+                status,
                 approvalStatus: event.decision,
               }];
             }),
           ) as NonNullable<Message['tools']>;
-          return changed ? { ...msg, tools } : msg;
+          if (!changed) return msg;
+          return {
+            ...msg,
+            tools,
+            blocks: msg.blocks?.map((block) => {
+              if (block.type !== 'tool' || block.extra?.approvalRequestId !== event.approvalRequestId) {
+                return block;
+              }
+              const status = event.decision === 'rejected'
+                ? 'completed' as const
+                : block.status === 'paused'
+                  ? 'running' as const
+                  : block.status;
+              return {
+                ...block,
+                status,
+                extra: { ...block.extra, approvalStatus: event.decision },
+              };
+            }),
+          };
         }),
       );
       break;
@@ -283,6 +359,28 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'stream_ended':
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
+      // 流式结束:把该 session 所有 assistant 消息里仍 streaming 的
+      // thinking/text 块置 done。否则纯思考结束(后面无工具/正文打断)时
+      // thinking 块一直卡在 streaming,显示"思考中"不完成,要刷新才好。
+      if (!sessionIsOffscreen) {
+        useMessageStore.getState().patchMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.role !== 'model' || !msg.blocks?.some((b) => b.status === 'streaming')) {
+              return msg;
+            }
+            return {
+              ...msg,
+              blocks: finalizeThinkingBlocks(
+                msg.blocks.map((b) =>
+                  b.type === 'text' && b.status === 'streaming'
+                    ? { ...b, status: 'done' as const }
+                    : b,
+                ),
+              ),
+            };
+          }),
+        );
+      }
       globalThis.setTimeout(() => {
         const state = useStreamingStore.getState();
         const activity = state.getSessionActivity(event.sessionId);
@@ -300,20 +398,22 @@ export function dispatchRunEventToStores(event: RunEvent) {
         phase: '连接断开或生成出错',
         countEvent: false,
       });
-      useStreamingStore.getState().setBanner({
-        kind: 'error',
-        message: '连接断开或生成出错，请重试',
-        sessionId: event.sessionId,
-      });
-      ms.patchMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now()),
-          role: 'model',
-          content: '连接断开或生成出错。',
-          timestamp: Date.now(),
-        },
-      ]);
+      if (!sessionIsOffscreen) {
+        useStreamingStore.getState().setBanner({
+          kind: 'error',
+          message: '连接断开或生成出错，请重试',
+          sessionId: event.sessionId,
+        });
+        ms.patchMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now()),
+            role: 'model',
+            content: '连接断开或生成出错。',
+            timestamp: Date.now(),
+          },
+        ]);
+      }
       break;
 
     case 'rate_limited':
@@ -324,16 +424,20 @@ export function dispatchRunEventToStores(event: RunEvent) {
         phase: '请求被限流',
         countEvent: false,
       });
-      useStreamingStore.getState().setBanner({
-        kind: 'rate_limited',
-        message: event.message || '请求过于频繁，请稍后重试',
-        retryAfterSec: event.retryAfterSec,
-        sessionId: event.sessionId,
-      });
+      if (!sessionIsOffscreen) {
+        useStreamingStore.getState().setBanner({
+          kind: 'rate_limited',
+          message: event.message || '请求过于频繁，请稍后重试',
+          retryAfterSec: event.retryAfterSec,
+          sessionId: event.sessionId,
+        });
+      }
       break;
 
     case 'terminal':
-      settleRunningToolsForTerminalStatus(event.status);
+      if (!sessionIsOffscreen) {
+        settleRunningToolsForTerminalStatus(event.status);
+      }
       break;
 
     case 'stream_event': {
@@ -343,11 +447,29 @@ export function dispatchRunEventToStores(event: RunEvent) {
       if (typeof evtSeq === 'number' && evtSeq > 0) {
         useStreamingStore.getState().setLastSeqId(evtSeq);
       }
+      if (streamSessionId) {
+        useStreamingStore.getState().updateActivity({ sessionId: streamSessionId });
+      }
+      const invocationId = String(event.event.InvocationId || '').trim();
+      if (streamSessionId && invocationId) {
+        const runKey = `${streamSessionId}:${invocationId}`;
+        const recoveredEvents = mergeSessionEventRecords(
+          recoveredEventsByRun.get(runKey) || [],
+          [event.event],
+        );
+        recoveredEventsByRun.set(runKey, recoveredEvents);
+        useMessageStore.getState().patchMessages((prev) =>
+          mergeRecoveredRunMessages(prev, recoveredEvents, invocationId),
+        );
+        if (eventHasTerminalRunStatus(event.event)) {
+          recoveredEventsByRun.delete(runKey);
+        }
+      }
       if (event.event.EventType === 'run_checkpoint' && streamSessionId) {
         useCheckpointStore.getState().upsertSessionCheckpoint(streamSessionId, event.event);
       }
-      if (event.event.EventType === 'run_status') {
-        const status = String((event.event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+      {
+        const status = sessionEventRunStatus(event.event);
         if (status === 'completed') {
           useStreamingStore.getState().updateActivity({
             sessionId: streamSessionId,
@@ -478,6 +600,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
 }
 
 export function resetDispatcherState() {
+  recoveredEventsByRun.clear();
   // Kept for test and session lifecycle callers. Message existence is now the
   // source of truth, so switching sessions cannot drop a live AG-UI event.
 }

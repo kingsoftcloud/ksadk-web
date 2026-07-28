@@ -34,16 +34,16 @@ type MarkdownLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement>;
 
 const markdownComponents = {
   h1({ children }: { children?: React.ReactNode }) {
-    return <h1 className="mb-4 mt-6 text-lg font-semibold text-foreground">{children}</h1>;
+    return <h1 className="mb-3.5 mt-5 text-[17px] font-semibold text-foreground">{children}</h1>;
   },
   h2({ children }: { children?: React.ReactNode }) {
-    return <h2 className="mb-3 mt-5 text-base font-semibold text-foreground">{children}</h2>;
+    return <h2 className="mb-2.5 mt-4.5 text-[15px] font-semibold text-foreground">{children}</h2>;
   },
   h3({ children }: { children?: React.ReactNode }) {
-    return <h3 className="mb-2 mt-4 text-sm font-semibold text-foreground">{children}</h3>;
+    return <h3 className="mb-2 mt-3.5 text-[14px] font-semibold text-foreground">{children}</h3>;
   },
   p({ children }: { children?: React.ReactNode }) {
-    return <p className="mb-3 min-w-0 break-words leading-6 text-foreground">{children}</p>;
+    return <p className="mb-2.5 min-w-0 break-words leading-[1.65] text-foreground">{children}</p>;
   },
   ul({ children }: { children?: React.ReactNode }) {
     return <ul className="mb-3 list-disc space-y-1.5 pl-5 text-foreground">{children}</ul>;
@@ -113,7 +113,7 @@ const PlainMarkdown: React.FC<{ content: string }> = React.memo(({ content }) =>
   const processedContent = preprocessMarkdown(content);
 
   return (
-    <div className="max-w-none break-words text-[15px] leading-6 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    <div className="max-w-none break-words text-[14px] leading-[1.65] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         components={markdownComponents}

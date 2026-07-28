@@ -96,11 +96,13 @@ export function ChatSidebar({
             visibleSessions.map((session) => {
               const meta = resolveCompactSessionMeta(session);
               const pinned = pinnedSet.has(session.SessionId);
+              const selected = currentSessionId === session.SessionId;
               return (
                 <div
                   key={session.SessionId}
                   role="button"
                   tabIndex={0}
+                  aria-current={selected ? 'page' : undefined}
                   onClick={() => onSelectSession(session.SessionId)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -109,9 +111,9 @@ export function ChatSidebar({
                     }
                   }}
                   className={cn(
-                    'group relative flex h-[30px] items-center gap-1 rounded-[10px] px-2.5 text-sm leading-5 transition-colors',
-                    currentSessionId === session.SessionId
-                      ? 'bg-sidebar-active text-sidebar-text'
+                    'group relative flex h-[30px] items-center gap-1 rounded-[10px] border-l-2 border-transparent px-2 text-sm leading-5 transition-colors',
+                    selected
+                      ? 'border-l-2 border-primary bg-primary/10 font-medium text-sidebar-text'
                       : meta.running
                         ? 'cursor-pointer bg-primary/8 text-sidebar-text'
                         : 'cursor-pointer text-sidebar-text-secondary hover:bg-sidebar-hover hover:text-sidebar-text',

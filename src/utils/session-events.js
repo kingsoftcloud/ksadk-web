@@ -26,6 +26,122 @@ const TOOL_EVENT_TYPES = new Set([
   'stage_tool_result',
 ]);
 
+const RUNTIME_RUN_STATUS_BY_EVENT_TYPE = {
+  'run.started': 'in_progress',
+  'run.progress': 'in_progress',
+  'run.interrupted': 'interrupted',
+  'run.completed': 'completed',
+  'run.failed': 'failed',
+  'run.canceled': 'cancelled',
+};
+
+function runtimePayload(event) {
+  const payload = event?.Content?.payload;
+  return payload && typeof payload === 'object' ? payload : {};
+}
+
+function mergeRuntimeDelta(previous, incoming) {
+  const left = String(previous || '');
+  const right = String(incoming || '');
+  if (!left) return right;
+  if (!right || left.endsWith(right)) return left;
+  if (right.startsWith(left)) return right;
+  return `${left}${right}`;
+}
+
+function normalizeRuntimeSessionEvent(event) {
+  const eventType = String(event?.EventType || '');
+  const payload = runtimePayload(event);
+  if (RUNTIME_RUN_STATUS_BY_EVENT_TYPE[eventType]) {
+    return {
+      ...event,
+      EventType: 'run_status',
+      Content: {
+        status: String(payload.status || RUNTIME_RUN_STATUS_BY_EVENT_TYPE[eventType]),
+        ...(payload.detail ? { detail: String(payload.detail) } : {}),
+      },
+    };
+  }
+  if (eventType === 'reasoning.delta' || eventType === 'reasoning.completed') {
+    return {
+      ...event,
+      EventType: 'reasoning',
+      Content: { role: 'model', parts: [{ text: String(payload.text || '') }] },
+    };
+  }
+  if (eventType === 'tool.call.begin') {
+    return {
+      ...event,
+      EventType: 'tool_call',
+      Metadata: {
+        ...(event.Metadata || {}),
+        tool_name: payload.name,
+        tool_args: payload.args,
+        tool_call_id: payload.call_id,
+      },
+      Content: { role: 'model', parts: [] },
+    };
+  }
+  if (eventType === 'tool.call.end') {
+    return {
+      ...event,
+      EventType: 'tool_result',
+      Metadata: {
+        ...(event.Metadata || {}),
+        tool_name: payload.name,
+        tool_output: payload.error || payload.result,
+        tool_call_id: payload.call_id,
+      },
+      Content: { role: 'model', parts: [] },
+    };
+  }
+  return event;
+}
+
+function normalizeRuntimeSessionEvents(events) {
+  const normalized = [];
+  const textByInvocation = new Map();
+  for (const event of Array.isArray(events) ? events : []) {
+    const eventType = String(event?.EventType || '');
+    if (eventType === 'text.delta' || eventType === 'text.completed') {
+      const invocationId = String(event?.InvocationId || '').trim();
+      if (!invocationId) {
+        continue;
+      }
+      const previous = textByInvocation.get(invocationId);
+      textByInvocation.set(invocationId, {
+        event,
+        text: mergeRuntimeDelta(previous?.text, runtimePayload(event).text),
+      });
+      continue;
+    }
+    normalized.push(normalizeRuntimeSessionEvent(event));
+  }
+  for (const { event, text } of textByInvocation.values()) {
+    normalized.push({
+      ...event,
+      EventType: 'assistant_stream_snapshot',
+      Content: { role: 'model', parts: [{ text }] },
+      Metadata: {
+        ...(event.Metadata || {}),
+        stream_snapshot: true,
+      },
+    });
+  }
+  return normalized.sort((left, right) => eventOrderValue(left) - eventOrderValue(right));
+}
+
+export function sessionEventRunStatus(event) {
+  const eventType = String(event?.EventType || '').trim();
+  const payload = runtimePayload(event);
+  return String(
+    event?.Content?.status
+      || payload.status
+      || RUNTIME_RUN_STATUS_BY_EVENT_TYPE[eventType]
+      || '',
+  ).trim().toLowerCase();
+}
+
 function textFromUnknown(value) {
   if (typeof value === 'string') {
     return value;
@@ -564,7 +680,7 @@ export function buildMessagesFromSessionEvents(events = []) {
   const userMessageByInvocation = new Set();
   const assistantOutputKeys = new Set();
   const seenEventIds = new Set();
-  const normalizedEvents = Array.isArray(events) ? events : [];
+  const normalizedEvents = normalizeRuntimeSessionEvents(events);
   const uniqueEvents = [];
   for (const event of normalizedEvents) {
     const eventId = String(event?.EventId || '').trim();
@@ -696,6 +812,10 @@ export function buildMessagesFromSessionEvents(events = []) {
     if (!message) {
       continue;
     }
+    const eventInvocationId = String(event.InvocationId || '').trim();
+    if (eventInvocationId) {
+      message.invocationId = eventInvocationId;
+    }
     if (TOOL_EVENT_TYPES.has(message.eventType)) {
       const invocationId = String(event.InvocationId || '').trim();
       if (!invocationId) {
@@ -807,7 +927,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     });
   }
 
-  return messages.map(({ invocationId: _invocationId, ...message }) => message);
+  return messages;
 }
 
 export function mergeSessionEventRecords(baseEvents = [], incomingEvents = []) {
@@ -841,8 +961,5 @@ export function maxSeqIdFromEvents(events = []) {
 }
 
 export function eventHasTerminalRunStatus(event) {
-  if (event?.EventType !== 'run_status') {
-    return false;
-  }
-  return RUN_TERMINAL_STATUSES.has(String(event.Content?.status || '').trim().toLowerCase());
+  return RUN_TERMINAL_STATUSES.has(sessionEventRunStatus(event));
 }

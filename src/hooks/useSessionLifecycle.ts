@@ -7,6 +7,7 @@ import { useBootstrapStore } from '../stores/bootstrap.js';
 import { CancelledError } from '../api/client.js';
 import {
   eventHasTerminalRunStatus,
+  sessionEventRunStatus,
 } from '../utils/session-events.js';
 import { mapBackendMessages } from '../utils/messages.js';
 import { useStreamingStore } from '../stores/streaming.js';
@@ -17,10 +18,27 @@ import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
+import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
+import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 
-const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
+const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
+const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+
+function waitForRestoreRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = globalThis.setTimeout(resolve, RESTORE_RECONNECT_DELAY_MS);
+    signal.addEventListener('abort', () => {
+      globalThis.clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
 
 // 重连判据:ActiveRunStatus 属于这些态时认为有活跃 run(对齐后端 RUN_STATUS_ACTIVE)。
 const ACTIVE_RUN_STATUSES = new Set([
@@ -30,12 +48,22 @@ const ACTIVE_RUN_STATUSES = new Set([
   'starting',
 ]);
 
+function isRecentlyUpdatedSession(session: { UpdatedAt?: string; ActiveRunUpdatedAt?: string }): boolean {
+  const rawTimestamp = session.ActiveRunUpdatedAt || session.UpdatedAt;
+  const timestamp = typeof rawTimestamp === 'number'
+    ? (rawTimestamp > 1e11 ? rawTimestamp : rawTimestamp * 1000)
+    : Date.parse(String(rawTimestamp || ''));
+  return Number.isFinite(timestamp)
+    && timestamp <= Date.now() + EMPTY_STATUS_RECOVERY_WINDOW_MS
+    && Date.now() - timestamp <= EMPTY_STATUS_RECOVERY_WINDOW_MS;
+}
+
 function terminalActivityForRunEvent(event: SessionEventRecord): {
   status: 'completed' | 'failed' | 'stopped';
   phase: string;
 } | null {
-  if (event.EventType !== 'run_status') return null;
-  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  const rawStatus = sessionEventRunStatus(event);
+  if (!rawStatus) return null;
   if (rawStatus === 'completed') {
     return { status: 'completed', phase: '后台长任务已完成' };
   }
@@ -152,37 +180,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       runSubscriptionAbortRef.current = controller;
       let shouldReloadSession = false;
       let terminalStatusSeen = false;
+      let afterSeqId = options.afterSeqId;
       const isCurrentSubscription = () => (
         runSubscriptionAbortRef.current === controller
         && currentSessionIdRef.current === options.sessionId
       );
-      const stopRestoreSubscription = () => {
-        if (runSubscriptionAbortRef.current !== controller || controller.signal.aborted) {
-          return;
-        }
-        controller.abort();
-      };
-      const timeoutTimer = globalThis.setTimeout(() => {
-        stopRestoreSubscription();
-      }, RESTORE_SUBSCRIPTION_TIMEOUT_MS);
 
       try {
-        const stream = await api.subscribeRunEvents(
-          {
-            sessionId: options.sessionId,
-            invocationId: options.invocationId,
-            afterSeqId: options.afterSeqId,
-          },
-          { signal: controller.signal },
-        );
-        if (!isCurrentSubscription()) {
-          controller.abort();
-          return;
-        }
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
         useStreamingStore.getState().setCurrentRunId(options.invocationId);
+        useStreamingStore.getState().setActiveInvocationId(options.invocationId);
+        useStreamingStore.getState().setSessionStreaming(options.sessionId, true);
         useStreamingStore.getState().updateActivity({
           sessionId: options.sessionId,
           status: 'running',
@@ -191,55 +198,103 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           countEvent: false,
         });
 
-        while (!terminalStatusSeen) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const chunks = buffer.split('\n\n');
-          buffer = chunks.pop() || '';
+        while (!terminalStatusSeen && isCurrentSubscription()) {
+          try {
+            const stream = await api.subscribeRunEvents(
+              {
+                sessionId: options.sessionId,
+                invocationId: options.invocationId,
+                afterSeqId,
+              },
+              { signal: controller.signal },
+            );
+            if (!isCurrentSubscription()) {
+              controller.abort();
+              return;
+            }
+            const reader = stream.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-          for (const chunk of chunks) {
-            if (!chunk.trim()) continue;
-            const dataLines: string[] = [];
-            for (const line of chunk.split('\n')) {
-              if (line.startsWith('data:')) {
-                dataLines.push(line.substring(5).trim());
+            while (!terminalStatusSeen && isCurrentSubscription()) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const split = splitSseBuffer(buffer);
+              buffer = split.remainder;
+
+              for (const chunk of split.chunks) {
+                if (!chunk.trim()) continue;
+                for (const transportEvent of parseSseChunk(chunk)) {
+                  if (transportEvent.eventName === '__ping__') {
+                    // SubscribeRunEvents heartbeats mean the recovery stream is still
+                    // open even when the runtime has not produced a new durable event.
+                    useStreamingStore.getState().updateActivity({
+                      sessionId: options.sessionId,
+                      status: 'running',
+                      countEvent: false,
+                    });
+                    continue;
+                  }
+                  if (transportEvent.eventName === '__done__') {
+                    terminalStatusSeen = true;
+                    shouldReloadSession = true;
+                    break;
+                  }
+                  if (!transportEvent.data || typeof transportEvent.data !== 'object') continue;
+                  const event = transportEvent.data as SessionEventRecord;
+                  if (!isCurrentSubscription()) break;
+                  if (event.InvocationId && event.InvocationId !== options.invocationId) continue;
+
+                  const seqId = Number(event.SeqId || 0);
+                  if (Number.isFinite(seqId)) {
+                    afterSeqId = Math.max(afterSeqId, seqId);
+                  }
+                  dispatchRunEventToStores({
+                    type: 'stream_event',
+                    sessionId: options.sessionId,
+                    event,
+                  });
+                  terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
+                  shouldReloadSession = shouldReloadSession || terminalStatusSeen;
+                  const terminalActivity = terminalActivityForRunEvent(event);
+                  if (terminalActivity) {
+                    useStreamingStore.getState().updateActivity({
+                      sessionId: options.sessionId,
+                      status: terminalActivity.status,
+                      phase: terminalActivity.phase,
+                      detail: options.invocationId,
+                      countEvent: false,
+                    });
+                  }
+                  if (terminalStatusSeen) break;
+                }
+                if (terminalStatusSeen) break;
               }
             }
-            const dataString = dataLines.join('\n').trim();
-            if (!dataString || dataString === '[DONE]') {
-              terminalStatusSeen = dataString === '[DONE]';
-              shouldReloadSession = shouldReloadSession || terminalStatusSeen;
-              continue;
+            if (terminalStatusSeen) {
+              void reader.cancel().catch(() => {});
             }
-            try {
-              const event = JSON.parse(dataString) as SessionEventRecord;
-              if (!isCurrentSubscription()) {
-                stopRestoreSubscription();
-                break;
-              }
-              terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
-              shouldReloadSession = shouldReloadSession || terminalStatusSeen;
-              if (event.EventType === 'run_checkpoint') {
-                useCheckpointStore.getState().upsertSessionCheckpoint(options.sessionId, event);
-              }
-              const terminalActivity = terminalActivityForRunEvent(event);
-              if (terminalActivity) {
-                useStreamingStore.getState().updateActivity({
-                  sessionId: options.sessionId,
-                  status: terminalActivity.status,
-                  phase: terminalActivity.phase,
-                  detail: options.invocationId,
-                  countEvent: false,
-                });
-              }
-              // 重连期间不覆盖消息列表(保持 loadSession 的 ListSessionMessages 结果)。
-              // run 结束后 shouldReloadSession 会重新 loadSession 拿最终消息。
-              // 增量事件仅更新 streaming activity(上方 terminalActivity 已处理)。
-            } catch (error) {
-              console.warn('Failed to parse run event data', dataString, error);
-            }
+          } catch (error) {
+            const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+            if (isAbortError || !isCurrentSubscription()) break;
+            console.warn('Run event subscription disconnected; retrying:', error);
+            useStreamingStore.getState().updateActivity({
+              sessionId: options.sessionId,
+              status: 'waiting',
+              phase: '恢复连接中',
+              detail: options.invocationId,
+              countEvent: false,
+            });
           }
+
+          if (!terminalStatusSeen && isCurrentSubscription()) {
+            await waitForRestoreRetry(controller.signal);
+          }
+        }
+
+        if (terminalStatusSeen && isCurrentSubscription()) {
+          dispatchRunEventToStores({ type: 'stream_ended', sessionId: options.sessionId });
         }
       } catch (error) {
         const isAbortError = error instanceof DOMException && error.name === 'AbortError';
@@ -247,13 +302,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           console.error('Failed to subscribe run events:', error);
         }
       } finally {
-        globalThis.clearTimeout(timeoutTimer);
         const ownedCurrentSubscription = runSubscriptionAbortRef.current === controller;
         if (ownedCurrentSubscription) {
           runSubscriptionAbortRef.current = null;
         }
         if (ownedCurrentSubscription && currentSessionIdRef.current === options.sessionId) {
           useStreamingStore.getState().setCurrentRunId('');
+          useStreamingStore.getState().setActiveInvocationId('');
           if (shouldReloadSession) {
             void loadSessionRef.current?.(options.sessionId);
           }
@@ -268,15 +323,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     async (sessionId: string) => {
       const previousSessionId = currentSessionIdRef.current;
       const generation = ++loadSessionGenerationRef.current;
-      if (previousSessionId !== sessionId) {
-        disconnectRun?.();
+      // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
+      // 切回时用历史快照和 afterSeqId 订阅追平遗漏内容。
+      if (previousSessionId && previousSessionId !== sessionId) {
         useMessageStore.getState().setMessages([]);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
         useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
         useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
         useStreamingStore.getState().setCurrentRunId('');
         useStreamingStore.getState().clearActivity();
-        useStreamingStore.getState().clearSessionActivity(previousSessionId);
       }
       currentSessionIdRef.current = sessionId;
       const isStillCurrentSession = () => (
@@ -342,7 +397,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
         }
 
-        // 重连判据:读 GetSession.ActiveRunStatus(不靠扫 events 反推)。
+        // 正式判据是后端的 ActiveRunStatus。旧本地 runtime 会漏投该字段，
+        // 此时仅对近期更新、仍带 invocation 的会话做一次兼容恢复。
         if (
           runtimeCapabilities.RunLifecycle.Enabled &&
           runtimeCapabilities.RunLifecycle.Resume
@@ -353,7 +409,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               return;
             }
             const status = String(session.ActiveRunStatus || '').toLowerCase();
-            const isActive = ACTIVE_RUN_STATUSES.has(status) && !!session.ActiveInvocationId;
+            const isActive = !!session.ActiveInvocationId && (
+              ACTIVE_RUN_STATUSES.has(status)
+              || (status === '' && isRecentlyUpdatedSession(session))
+            );
             if (isActive) {
               void subscribeRunEvents({
                 sessionId,
@@ -481,7 +540,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const createNewSession = useCallback(async () => {
     try {
-      disconnectRun?.();
       loadSessionGenerationRef.current += 1;
       runSubscriptionAbortRef.current?.abort();
       const session = await api.createSession(agentId);
@@ -508,7 +566,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       if (error instanceof CancelledError) return;
       console.error('Failed to create session:', error);
     }
-  }, [agentId, api, disconnectRun, fetchSessions, isMobile]);
+  }, [agentId, api, fetchSessions, isMobile]);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {

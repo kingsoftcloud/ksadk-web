@@ -16,6 +16,7 @@ export type Message = {
   content: string;
   timestamp: number;
   responseId?: string;
+  invocationId?: string;
   eventId?: string;
   traceId?: string;
   rootSpanId?: string;

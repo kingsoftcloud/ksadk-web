@@ -160,9 +160,11 @@ describe('chat message list contracts', () => {
 
   it('updates checkpoint panel while subscribing to a background run', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+    const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
 
-    expect(lifecycleSource).toContain("event.EventType === 'run_checkpoint'");
-    expect(lifecycleSource).toContain('upsertSessionCheckpoint(options.sessionId, event)');
+    expect(lifecycleSource).toContain('dispatchRunEventToStores({');
+    expect(dispatcherSource).toContain("event.event.EventType === 'run_checkpoint'");
+    expect(dispatcherSource).toContain('upsertSessionCheckpoint(streamSessionId, event.event)');
     expect(lifecycleSource).toContain('setCurrentRunId(options.invocationId)');
     expect(lifecycleSource).toContain('后台长任务运行中');
   });
@@ -190,6 +192,7 @@ describe('chat message list contracts', () => {
   it('does not let stale session history overwrite the active transcript', () => {
     const appSource = readFileSync(resolve(repoRoot, 'src/App.tsx'), 'utf8');
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+    const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
 
     expect(appSource).not.toContain('void loadSession(sessionId);');
     expect(appSource).toContain('clearSessionMessageHistory(sessionId)');
@@ -197,9 +200,8 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('loadSessionGenerationRef.current === generation');
     expect(lifecycleSource).toContain('if (!isStillCurrentSession()) {');
     expect(lifecycleSource).toContain('currentSessionIdRef.current === options.sessionId');
-    // PR4:重连期间不覆盖消息列表(保持 loadSession 的 ListSessionMessages 结果),
-    // run 结束后 shouldReloadSession 重新 loadSession 拿最终消息。
-    expect(lifecycleSource).toContain('重连期间不覆盖消息列表');
+    expect(lifecycleSource).toContain('dispatchRunEventToStores({');
+    expect(dispatcherSource).toContain('mergeRecoveredRunMessages');
   });
 
   it('keeps an initial transcript load distinct from an actually empty session', () => {
