@@ -1,0 +1,140 @@
+/**
+ * 交错 "思考-行动-思考-输出" 的有序 block 模型(照抄 Wegent wework 的
+ * workbench ProcessingBlock 方案,见 packages/chat-core/workbench-message-reducer.ts)。
+ *
+ * 核心思想:一条 assistant message 不是 "reasoning 单串 + tools map + content",
+ * 而是一个**有序的 ProcessingBlock 数组**。思考块会被工具调用"切断"成多段,
+ * 从而自然形成 [思考1][工具][思考2][正文] 的时间线交错布局。
+ */
+
+export type BlockStatus = 'streaming' | 'done' | 'error';
+
+export interface ThinkingBlock {
+  id: string;
+  type: 'thinking';
+  content: string;
+  status: BlockStatus;
+}
+
+export interface ToolBlock {
+  id: string;
+  type: 'tool';
+  toolName: string;
+  args: string;
+  output?: string;
+  status: 'running' | 'completed' | 'error' | 'paused';
+  /** 透传现有 Message.tools 的附加字段(approval 等),渲染层按需取。 */
+  extra?: Record<string, unknown>;
+}
+
+export interface TextBlock {
+  id: string;
+  type: 'text';
+  content: string;
+  status: BlockStatus;
+}
+
+export type ProcessingBlock = ThinkingBlock | ToolBlock | TextBlock;
+
+let blockSeq = 0;
+function nextId(prefix: string): string {
+  blockSeq += 1;
+  return `${prefix}-${blockSeq}`;
+}
+
+/** 关闭所有仍处于 streaming 的 thinking 块(不动 text 块)。
+ *  text 块的开关由 appendTextBlock/finalizeTextBlock 自管,这里不干预,
+ *  否则会把流式 text 错误置 done,导致后续 delta 新建第二个 text 块(正文重复)。 */
+function finalizeOpenThinkingBlocks(blocks: ProcessingBlock[]): ProcessingBlock[] {
+  return blocks.map((block) =>
+    block.type === 'thinking' && block.status === 'streaming'
+      ? { ...block, status: 'done' as const }
+      : block,
+  );
+}
+
+/** 追加思考 delta(对应 wework appendThinkingChunk):
+ *  最后一个块是流式 thinking 则追加,否则新建一个 thinking 块。 */
+export function appendThinkingBlock(
+  blocks: ProcessingBlock[] | undefined,
+  delta: string,
+): ProcessingBlock[] {
+  const next = [...(blocks ?? [])];
+  const last = next[next.length - 1];
+  if (last?.type === 'thinking' && last.status === 'streaming') {
+    next[next.length - 1] = { ...last, content: last.content + delta };
+    return next;
+  }
+  return [
+    ...next,
+    { id: nextId('thinking'), type: 'thinking', content: delta, status: 'streaming' },
+  ];
+}
+
+/** 追加正文 delta:先关闭打开的 thinking,再追加到最后一个流式 text 块(或新建)。 */
+export function appendTextBlock(
+  blocks: ProcessingBlock[] | undefined,
+  delta: string,
+): ProcessingBlock[] {
+  const base = finalizeOpenThinkingBlocks(blocks ?? []);
+  const next = [...base];
+  const last = next[next.length - 1];
+  if (last?.type === 'text' && last.status === 'streaming') {
+    next[next.length - 1] = { ...last, content: last.content + delta };
+    return next;
+  }
+  return [...next, { id: nextId('text'), type: 'text', content: delta, status: 'streaming' }];
+}
+
+/** 正文收尾(text_final):把最后一个流式 text 块设为终值并关闭。 */
+export function finalizeTextBlock(
+  blocks: ProcessingBlock[] | undefined,
+  text: string,
+): ProcessingBlock[] {
+  const base = finalizeOpenThinkingBlocks(blocks ?? []);
+  const next = [...base];
+  const lastIndex = next.map((b) => b.type).lastIndexOf('text');
+  if (lastIndex >= 0 && next[lastIndex].type === 'text') {
+    next[lastIndex] = { ...(next[lastIndex] as TextBlock), content: text, status: 'done' };
+    return next;
+  }
+  return [...next, { id: nextId('text'), type: 'text', content: text, status: 'done' }];
+}
+
+/** upsert 工具块(对应 wework mergeProcessingBlock + finalize):
+ *  先关闭打开的 thinking 块,再按 toolName 找已有 tool 块更新,否则新建。 */
+export function upsertToolBlock(
+  blocks: ProcessingBlock[] | undefined,
+  toolName: string,
+  patch: Partial<Omit<ToolBlock, 'id' | 'type' | 'toolName'>>,
+): ProcessingBlock[] {
+  const base = finalizeOpenThinkingBlocks(blocks ?? []);
+  const next = [...base];
+  const existingIndex = next.findIndex((b) => b.type === 'tool' && b.toolName === toolName);
+  if (existingIndex >= 0 && next[existingIndex].type === 'tool') {
+    next[existingIndex] = { ...(next[existingIndex] as ToolBlock), ...patch };
+    return next;
+  }
+  return [
+    ...next,
+    {
+      id: nextId('tool'),
+      type: 'tool',
+      toolName,
+      args: patch.args ?? '',
+      output: patch.output,
+      status: patch.status ?? 'running',
+      extra: patch.extra,
+    },
+  ];
+}
+
+/** 关闭最后一个 thinking 块(turn 结束/被工具打断后调用)。 */
+export function finalizeThinkingBlocks(blocks: ProcessingBlock[] | undefined): ProcessingBlock[] {
+  return finalizeOpenThinkingBlocks(blocks ?? []);
+}
+
+/** 取某 message 的有序 blocks(无则空数组,便于渲染层判空回退)。 */
+export function getProcessingBlocks(blocks: ProcessingBlock[] | undefined): ProcessingBlock[] {
+  return blocks ?? [];
+}

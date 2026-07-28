@@ -26,6 +26,11 @@ export type Message = {
   compactedUntilSeqId?: number;
   historical?: boolean;
   reasoning?: string;
+  /**
+   * 有序 "思考-行动-思考-输出" 交错 blocks(照抄 Wegent wework)。
+   * 存在时渲染层按数组顺序交错展示;为空则回退 reasoning/tools/content 旧渲染。
+   */
+  blocks?: import('../../core/run/blocks.js').ProcessingBlock[];
   a2ui?: {
     surfaceId: string;
     surface: import('../../core/stream/types.js').A2UISurface;

@@ -6,6 +6,7 @@ import { shouldStopReadingRunStream } from '../../utils/stream-control.js';
 import { parseSseChunk, splitSseBuffer } from '../transport/sse-parser.js';
 import type { SessionEventRecord } from '../../types/session-events.js';
 import { getErrorMessage } from '../../utils/error.js';
+import { ApiError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
 import { useStreamingStore } from '../../stores/streaming.js';
@@ -199,6 +200,8 @@ export class RunEngineImpl implements RunEngine {
 
         const invocationId = createInvocationId();
         useStreamingStore.getState().setCurrentRunId(invocationId);
+        useStreamingStore.getState().setActiveInvocationId(invocationId);
+        useStreamingStore.getState().setLastSeqId(0);
 
         const hostedTransport = this.config.hostedChatTransport;
         const useAgui = !isResponsesResume
@@ -299,6 +302,30 @@ export class RunEngineImpl implements RunEngine {
           if (isNetwork) {
             this.setStage('recovering');
             this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
+            // 断线续订:有 lastSeqId + invocationId 时用 subscribeRunEvents(afterSeqId) 续订,
+            // 避免从头 runAgent 导致已流式内容重复。续订失败再回退普通 error。
+            const lastSeq = useStreamingStore.getState().lastSeqId;
+            const resumeInvocationId = useStreamingStore.getState().activeInvocationId;
+            if (lastSeq > 0 && resumeInvocationId && this.activeSessionId) {
+              try {
+                this.resumeRun({
+                  sessionId: this.activeSessionId,
+                  invocationId: resumeInvocationId,
+                  afterSeqId: lastSeq,
+                });
+                return;
+              } catch (resumeErr) {
+                console.warn('[RunEngine] afterSeqId resume failed, fall back to error:', resumeErr);
+              }
+            }
+          } else if (error instanceof ApiError && error.code === 429) {
+            // 限流:单独事件,前端显示友好提示而非"运行失败"白屏。
+            this.setStage('error');
+            this.emit({
+              type: 'rate_limited',
+              message: error.message || '请求过于频繁，请稍后重试',
+              sessionId,
+            });
           } else {
             this.setStage('error');
             this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });

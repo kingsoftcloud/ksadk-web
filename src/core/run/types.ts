@@ -47,6 +47,7 @@ export type RunEvent =
   | { type: 'system_message'; content: string; sessionId?: string | null }
   | { type: 'stream_ended'; sessionId?: string | null }
   | { type: 'error'; error: Error; sessionId?: string | null }
+  | { type: 'rate_limited'; retryAfterSec?: number; message?: string; sessionId?: string | null }
   | { type: 'terminal'; status: string; sessionId?: string | null }
   | { type: 'stream_event'; event: import('../../types/session-events.js').SessionEventRecord; sessionId?: string | null }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }

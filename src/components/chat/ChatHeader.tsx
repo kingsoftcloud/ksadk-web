@@ -166,8 +166,8 @@ export function ChatHeader({
     <>
       <header
         className={cn(
-          'flex flex-shrink-0 items-center justify-between border-b border-slate-200/30 bg-white/95 px-3 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 sm:px-4',
-          isMobile ? 'pt-[calc(var(--safe-area-top)+0.5rem)]' : 'h-14',
+          'flex flex-shrink-0 items-center justify-between border-b border-black/[0.06] bg-background/95 px-3 py-2 backdrop-blur dark:border-white/[0.08] dark:bg-background/95 sm:px-4',
+          isMobile ? 'pt-[calc(var(--safe-area-top)+0.5rem)]' : 'h-12',
         )}
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -234,7 +234,8 @@ export function ChatHeader({
                 <span>TUI</span>
               </button>
             ) : null}
-            {!nativeLauncherMode ? (
+            {/* 桌面:model/思考已移到输入框工具栏(ChatComposer),顶栏不再重复渲染 */}
+            {!nativeLauncherMode && isMobile ? (
               <ModelSelector
                 availableModels={availableModels}
                 selectedModel={selectedModel}
@@ -245,6 +246,7 @@ export function ChatHeader({
                 thinkingEnabled={thinkingEnabled}
                 thinkingMode={thinkingMode}
                 onSelectThinkingMode={onSelectThinkingMode}
+                compact
               />
             ) : null}
             {!nativeLauncherMode && currentSessionId ? (

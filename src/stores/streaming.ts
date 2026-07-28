@@ -2,6 +2,15 @@ import { create } from 'zustand';
 
 export type RunActivityStatus = 'connecting' | 'running' | 'waiting' | 'stopped' | 'completed' | 'failed';
 
+export type StatusBannerKind = 'rate_limited' | 'network' | 'error';
+
+export type StatusBanner = {
+  kind: StatusBannerKind;
+  message: string;
+  retryAfterSec?: number;
+  sessionId?: string | null;
+};
+
 export type RunActivity = {
   runId?: string;
   source: 'run' | 'restore';
@@ -20,6 +29,11 @@ export type StreamingState = {
   activity: RunActivity | null;
   sessionActivities: Record<string, RunActivity>;
   sessionStreaming: Record<string, true>;
+  banner: StatusBanner | null;
+  /** 当前 run 的最后事件 seq_id,用于网络断线后 afterSeqId 续订重连。 */
+  lastSeqId: number;
+  /** 当前 run 的 invocationId(afterSeqId 续订需要)。 */
+  activeInvocationId: string;
 };
 
 export type StreamingActions = {
@@ -29,6 +43,9 @@ export type StreamingActions = {
   getSessionActivity: (sessionId: string | null | undefined) => RunActivity | null;
   setCurrentRunId: (runId: string) => void;
   requestStop: () => void;
+  setBanner: (banner: StatusBanner | null) => void;
+  setLastSeqId: (seqId: number) => void;
+  setActiveInvocationId: (invocationId: string) => void;
   beginActivity: (activity: {
     runId?: string;
     source?: RunActivity['source'];
@@ -68,7 +85,13 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   activity: null,
   sessionActivities: {},
   sessionStreaming: {},
+  banner: null,
+  lastSeqId: 0,
+  activeInvocationId: '',
   setStreaming: (streaming) => set({ isStreaming: streaming }),
+  setBanner: (banner) => set({ banner }),
+  setLastSeqId: (seqId) => set({ lastSeqId: seqId }),
+  setActiveInvocationId: (invocationId) => set({ activeInvocationId: invocationId }),
   setSessionStreaming: (sessionId, streaming) => set((state) => {
     const key = String(sessionId || '');
     if (!key) return { isStreaming: streaming };
@@ -198,5 +221,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
     activity: null,
     sessionActivities: {},
     sessionStreaming: {},
+    lastSeqId: 0,
+    activeInvocationId: '',
   }),
 }));

@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import {
+  ArrowDown,
   Bot,
   Check,
   ChevronDown,
@@ -27,6 +28,8 @@ import {
 import { cn } from '@/lib/utils';
 
 import { MessageMarkdown } from '../MessageMarkdown';
+import { ProcessingBlocksView } from './ProcessingBlocksView';
+import { StatusBanner } from './StatusBanner';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
@@ -630,6 +633,11 @@ function FeedbackControls({
   const pending = Boolean(message.feedback?.pending);
   const rating = message.feedback?.rating;
 
+  const copyMessageText = async () => {
+    const text = message.content || '';
+    if (text) void (copyTextToClipboard as (t: string) => Promise<boolean>)(text);
+  };
+
   if (!visible) {
     return null;
   }
@@ -640,8 +648,17 @@ function FeedbackControls({
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+    <div className="mt-2 flex flex-col gap-2 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 focus-within/message:opacity-100">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
+        <button
+          type="button"
+          onClick={() => { void copyMessageText(); }}
+          className="inline-flex items-center gap-1 rounded-full px-2 py-1 font-medium text-text-secondary transition hover:bg-muted hover:text-text-primary"
+          title="复制"
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+        <span className="text-text-muted/60">·</span>
         <span className="font-medium">本次回复有帮助吗？</span>
         <button
           type="button"
@@ -650,8 +667,8 @@ function FeedbackControls({
           className={cn(
             'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-medium transition disabled:cursor-not-allowed disabled:opacity-60',
             rating === 'up'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-200'
-              : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-emerald-900/70 dark:hover:text-emerald-200',
+              ? 'border-primary/30 bg-primary/10 text-primary'
+              : 'border-border bg-background text-text-secondary hover:border-primary/30 hover:text-primary',
           )}
         >
           <ThumbsUp className="h-3.5 w-3.5" />
@@ -667,8 +684,8 @@ function FeedbackControls({
           className={cn(
             'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-medium transition disabled:cursor-not-allowed disabled:opacity-60',
             rating === 'down'
-              ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200'
-              : 'border-slate-200 bg-white text-slate-600 hover:border-rose-200 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-rose-900/70 dark:hover:text-rose-200',
+              ? 'border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-300'
+              : 'border-border bg-background text-text-secondary hover:border-rose-300 hover:text-rose-600',
           )}
         >
           <ThumbsDown className="h-3.5 w-3.5" />
@@ -753,7 +770,7 @@ function ChatMessage({
   if (message.role === 'user') {
     return (
       <div className="mb-3 flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-blue-600 px-3.5 py-2.5 text-[14px] leading-relaxed text-white dark:bg-blue-500">
+        <div className="max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-[14px] leading-relaxed text-foreground">
           {message.attachments?.length ? (
             <MessageAttachments
               attachments={message.attachments}
@@ -778,8 +795,8 @@ function ChatMessage({
   }
 
   return (
-    <div className="mb-3 max-w-none">
-      <div className="mb-1.5 flex items-center gap-2 text-xs text-slate-400">
+    <div className="group/message mx-auto mb-3 w-full max-w-3xl px-6">
+      <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
         <Bot className="w-3.5 h-3.5" />
         <span>{agentName}</span>
       </div>
@@ -792,6 +809,15 @@ function ChatMessage({
         />
       ) : null}
 
+      {message.blocks?.length ? (
+        <ProcessingBlocksView
+          message={message}
+          isStreaming={isStreaming}
+          onRespondToApproval={onRespondToApproval}
+          onRespondToAguiApproval={onRespondToAguiApproval}
+        />
+      ) : (
+        <>
       {message.reasoning ? (
         <details className="group/details mb-3 overflow-hidden rounded-md border border-slate-200/80 bg-slate-50/60 text-sm text-slate-600 transition-colors open:bg-white dark:border-slate-700/80 dark:bg-slate-900/40 dark:text-slate-300 dark:open:bg-slate-950/30">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-medium outline-none marker:hidden">
@@ -967,6 +993,8 @@ function ChatMessage({
           <span className="ml-1 mt-2 inline-block h-4 w-2 animate-pulse rounded-sm bg-emerald-500 align-middle opacity-80 shadow-sm" />
         ) : null}
       </div>
+        </>
+      )}
 
       {message.aguiActivities?.map((activity) => (
         <A2UIActivityMessage
@@ -1118,6 +1146,21 @@ export function ChatMessageList({
           </div>
         )}
       </div>
+      <StatusBanner />
+      {/* wework 风格:滚走后显示回到底部圆钮 */}
+      {scrollTop > 320 ? (
+        <button
+          type="button"
+          onClick={() => {
+            const scroller = scrollRef.current;
+            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+          }}
+          className="sticky bottom-4 left-1/2 z-20 mx-auto flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
+          title="回到底部"
+        >
+          <ArrowDown className="h-4 w-4" />
+        </button>
+      ) : null}
       {activity ? (
         <div className="sticky bottom-1 z-20 mx-auto flex w-full max-w-[64rem] justify-end">
           <RunActivityBanner

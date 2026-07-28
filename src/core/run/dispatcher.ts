@@ -1,4 +1,10 @@
 import type { RunEvent } from './types.js';
+import {
+  appendThinkingBlock,
+  appendTextBlock,
+  finalizeTextBlock,
+  upsertToolBlock,
+} from './blocks.js';
 import { useMessageStore } from '../../stores/message.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useSessionStore } from '../../stores/session.js';
@@ -65,6 +71,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
       break;
 
     case 'user_message_added':
+      useStreamingStore.getState().setBanner(null);
       ms.patchMessages((prev) => [
         ...prev,
         { id: event.messageId, role: 'user', content: '', timestamp: Date.now() },
@@ -80,7 +87,11 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
-            ? { ...msg, content: msg.content + event.delta }
+            ? {
+                ...msg,
+                content: msg.content + event.delta,
+                blocks: appendTextBlock(msg.blocks, event.delta),
+              }
             : msg,
         ),
       );
@@ -91,7 +102,11 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
-            ? { ...msg, content: event.text }
+            ? {
+                ...msg,
+                content: event.text,
+                blocks: finalizeTextBlock(msg.blocks, event.text),
+              }
             : msg,
         ),
       );
@@ -102,7 +117,11 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
-            ? { ...msg, reasoning: (msg.reasoning || '') + event.delta }
+            ? {
+                ...msg,
+                reasoning: (msg.reasoning || '') + event.delta,
+                blocks: appendThinkingBlock(msg.blocks, event.delta),
+              }
             : msg,
         ),
       );
@@ -116,17 +135,23 @@ export function dispatchRunEventToStores(event: RunEvent) {
           const current = msg.tools?.[event.name];
           const currentApprovalResolved = current?.approvalStatus === 'approved'
             || current?.approvalStatus === 'rejected';
+          const status = currentApprovalResolved
+            ? 'completed'
+            : event.status as NonNullable<Message['tools']>[string]['status'];
           return {
             ...msg,
+            blocks: upsertToolBlock(msg.blocks, event.name, {
+              args: event.args,
+              status,
+              extra: event.extra as Record<string, unknown> | undefined,
+            }),
             tools: {
               ...(msg.tools || {}),
               [event.name]: {
                 ...(current || { name: event.name, args: '' }),
                 name: event.name,
                 args: event.args,
-                status: currentApprovalResolved
-                  ? 'completed'
-                  : event.status as NonNullable<Message['tools']>[string]['status'],
+                status,
                 ...(event.extra || {}),
                 ...(event.extra?.approvalRequestId && !currentApprovalResolved
                   ? { approvalStatus: 'pending' as const }
@@ -144,14 +169,19 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
+          const status = isFailedToolOutput(event.output) ? 'error' : 'completed';
           return {
             ...msg,
+            blocks: upsertToolBlock(msg.blocks, event.name, {
+              output: event.output,
+              status,
+            }),
             tools: {
               ...(msg.tools || {}),
               [event.name]: {
                 ...(msg.tools?.[event.name] || { name: event.name, args: '' }),
                 output: event.output,
-                status: isFailedToolOutput(event.output) ? 'error' : 'completed',
+                status,
               },
             },
           };
@@ -270,6 +300,11 @@ export function dispatchRunEventToStores(event: RunEvent) {
         phase: '连接断开或生成出错',
         countEvent: false,
       });
+      useStreamingStore.getState().setBanner({
+        kind: 'error',
+        message: '连接断开或生成出错，请重试',
+        sessionId: event.sessionId,
+      });
       ms.patchMessages((prev) => [
         ...prev,
         {
@@ -281,12 +316,33 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ]);
       break;
 
+    case 'rate_limited':
+      useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
+      useStreamingStore.getState().updateActivity({
+        sessionId: event.sessionId,
+        status: 'failed',
+        phase: '请求被限流',
+        countEvent: false,
+      });
+      useStreamingStore.getState().setBanner({
+        kind: 'rate_limited',
+        message: event.message || '请求过于频繁，请稍后重试',
+        retryAfterSec: event.retryAfterSec,
+        sessionId: event.sessionId,
+      });
+      break;
+
     case 'terminal':
       settleRunningToolsForTerminalStatus(event.status);
       break;
 
     case 'stream_event': {
       const streamSessionId = event.sessionId || event.event.SessionId;
+      // 记录最后事件 seq,供网络断线后 afterSeqId 续订重连。
+      const evtSeq = (event.event as { SeqId?: number }).SeqId;
+      if (typeof evtSeq === 'number' && evtSeq > 0) {
+        useStreamingStore.getState().setLastSeqId(evtSeq);
+      }
       if (event.event.EventType === 'run_checkpoint' && streamSessionId) {
         useCheckpointStore.getState().upsertSessionCheckpoint(streamSessionId, event.event);
       }

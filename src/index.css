@@ -29,26 +29,38 @@
 
 @layer base {
   :root {
-    --primary: 215 78% 52%;
+    --primary: 173 80% 40%;          /* wework teal 20 184 166 */
     --primary-foreground: 0 0% 100%;
-    --accent: 215 78% 95%;
-    --accent-foreground: 215 78% 25%;
-    --radius: 0.75rem;
-    --background: 210 20% 99%;
-    --foreground: 215 25% 15%;
-    --muted: 210 15% 96%;
-    --border: 210 12% 90%;
+    --accent: 173 80% 95%;
+    --accent-foreground: 173 80% 25%;
+    --radius: 0.5rem;                /* wework 基础 8px */
+    --background: 0 0% 100%;         /* wework bg-base 255 255 255 */
+    --foreground: 0 0% 10%;           /* wework text-primary 26 26 26 */
+    /* wework 风格语义层:RGB 精确值 */
+    --surface: 240 7% 97%;           /* 247 247 248 */
+    --text-secondary: 0 0% 40%;      /* 102 102 102 */
+    --text-muted: 0 0% 60%;          /* 153 153 153 */
+    --code-bg: 220 14% 96%;          /* 243 244 246 */
+    /* 侧边栏独立灰阶(wework 半透明灰) */
+    --sidebar: 0 0% 95%;             /* 243 243 243 */
+    --sidebar-hover: 0 0% 90%;       /* hover 态 */
+    --sidebar-active: 0 0% 88%;      /* active 态 */
+    --sidebar-text: 0 0% 23%;         /* 56 58 61 */
+    --sidebar-text-secondary: 0 0% 35%;/* 87 88 91 */
+    --sidebar-text-muted: 0 0% 50%;  /* 128 129 131 */
+    --muted: 0 0% 96%;               /* 245 245 245 */
+    --border: 0 0% 88%;              /* 224 224 224 */
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
-    --secondary: 210 40% 96.1%;
+    --secondary: 0 0% 96%;
     --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted-foreground: 0 0% 60%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --input: 0 0% 88%;
+    --ring: 173 80% 40%;
     --app-height: 100vh;
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-right: env(safe-area-inset-right, 0px);
@@ -57,25 +69,35 @@
   }
 
   .dark {
-    --primary: 215 70% 58%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --background: 220 20% 8%;
-    --foreground: 210 15% 95%;
-    --card: 222.2 84% 4.9%;
+    --primary: 173 77% 49%;          /* wework dark teal 45 212 191 */
+    --primary-foreground: 200 30% 10%;/* 11 18 20 */
+    --background: 210 13% 8%;        /* 17 19 22 */
+    --foreground: 200 18% 95%;       /* 241 245 249 */
+    --surface: 215 16% 13%;          /* 28 31 36 */
+    --text-secondary: 215 28% 80%;   /* 203 213 225 */
+    --text-muted: 220 14% 65%;       /* 148 163 184 */
+    --code-bg: 222 40% 11%;          /* 15 23 42 */
+    --sidebar: 0 0% 13%;             /* 33 33 33 */
+    --sidebar-hover: 0 0% 20%;
+    --sidebar-active: 0 0% 28%;
+    --sidebar-text: 220 4% 87%;      /* 221 222 223 */
+    --sidebar-text-secondary: 220 4% 74%;/* 188 189 191 */
+    --sidebar-text-muted: 220 3% 57%;/* 143 145 148 */
+    --card: 215 16% 13%;
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 215 16% 13%;
     --popover-foreground: 210 40% 98%;
-    --secondary: 217.2 32.6% 17.5%;
+    --secondary: 215 16% 16%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
+    --muted: 215 16% 16%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 215 16% 16%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 215 12% 25%;            /* 55 61 70 */
+    --input: 215 12% 25%;
+    --ring: 173 77% 49%;
   }
 }
 
