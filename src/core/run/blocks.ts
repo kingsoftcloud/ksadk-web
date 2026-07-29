@@ -92,6 +92,22 @@ export function finalizeTextBlock(
   text: string,
 ): ProcessingBlock[] {
   const base = finalizeOpenThinkingBlocks(blocks ?? []);
+  const streamedText = base
+    .filter((block): block is TextBlock => block.type === 'text')
+    .map((block) => block.content)
+    .join('');
+
+  // Responses 的 output_text.done 是整轮输出的终态快照。若它正好等于已经
+  // 收到的 text delta 聚合，不能把它回填到最后一个块：这会把
+  // [思考1][文本1][思考2][文本2] 错误折叠成最后一个混合文本块。
+  if (streamedText === text) {
+    return base.map((block) =>
+      block.type === 'text' && block.status === 'streaming'
+        ? { ...block, status: 'done' as const }
+        : block,
+    );
+  }
+
   const next = [...base];
   const lastIndex = next.map((b) => b.type).lastIndexOf('text');
   if (lastIndex >= 0 && next[lastIndex].type === 'text') {
