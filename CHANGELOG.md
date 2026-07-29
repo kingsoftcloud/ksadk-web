@@ -1,10 +1,6 @@
 # Changelog
 
-## 0.3.0 - 2026-07-24
-
-> **Review candidate, not a published npm release.** `0.3.0` is the web
-> counterpart of the KsADK `0.8.0` review branch. No npm tag or package is
-> created by this changelog entry.
+## 0.3.0 - 2026-07-29
 
 ### Hosted runtime transport
 
