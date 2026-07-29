@@ -97,7 +97,7 @@ function ThinkingRow({ block }: { block: ThinkingBlock }) {
         </span>
       }
     >
-      <div className="custom-scrollbar max-h-[min(46vh,28rem)] overflow-y-auto py-1 text-[14px] leading-7 text-slate-600 dark:text-slate-300 [&_p]:my-2 [&_pre]:my-2">
+      <div className="custom-scrollbar max-h-[min(46vh,28rem)] overflow-y-auto py-1 text-sm leading-6 text-slate-600 dark:text-slate-300 [&_p]:my-1.5 [&_pre]:my-1.5">
         <MessageMarkdown content={block.content} />
       </div>
     </Collapsible>
