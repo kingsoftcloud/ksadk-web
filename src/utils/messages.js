@@ -84,10 +84,46 @@ function mapAttachments(attachments) {
   }));
 }
 
+function stringifyBlockValue(value) {
+  if (value === undefined || value === null) return '';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** Map KsADK's persisted, ordered stream timeline to the chat block model. */
+function mapPersistedBlocks(blocks) {
+  if (!Array.isArray(blocks) || !blocks.length) return undefined;
+  return blocks.flatMap((block, index) => {
+    const type = String(block?.Type || '').toLowerCase();
+    const seqId = block?.SeqId ?? index;
+    if (type === 'thinking' || type === 'text') {
+      const content = String(block?.Content || '');
+      if (!content) return [];
+      return [{
+        id: `history-${type}-${seqId}`,
+        type,
+        content,
+        status: 'done',
+      }];
+    }
+    if (type !== 'tool') return [];
+    const status = TOOL_STATUS_MAP[String(block?.Status || 'completed').toLowerCase()] ?? 'completed';
+    return [{
+      id: `history-tool-${seqId}`,
+      type: 'tool',
+      toolName: String(block?.Name || 'tool'),
+      args: stringifyBlockValue(block?.Args),
+      ...(block?.Result !== undefined ? { output: stringifyBlockValue(block.Result) } : {}),
+      status,
+      ...(block?.ToolCallId ? { extra: { previousResponseId: String(block.ToolCallId) } } : {}),
+    }];
+  });
+}
+
 export function mapBackendMessage(msg) {
   const role = msg.Role === 'assistant' ? 'model' : (msg.Role || 'user');
   const tools = msg.ToolEvents?.length ? mapToolEvents(msg.ToolEvents) : undefined;
   const attachments = mapAttachments(msg.Attachments);
+  const persistedBlocks = mapPersistedBlocks(msg.Blocks);
   const reasoning = msg.Reasoning?.length
     ? msg.Reasoning.map((r) => r.text).join('')
     : undefined;
@@ -104,7 +140,7 @@ export function mapBackendMessage(msg) {
   // 历史消息重建交错 blocks(思考→工具→正文),刷新后也走 ProcessingBlocksView,
   // 不回退到旧 reasoning+tools+content 散装渲染。
   if (role === 'model') {
-    result.blocks = buildBlocksFromHistory({ reasoning, tools, content: result.content });
+    result.blocks = persistedBlocks ?? buildBlocksFromHistory({ reasoning, tools, content: result.content });
   }
   // 反馈控件需要 responseId/eventId/traceId/rootSpanId(后端从 event Metadata 投出)
   if (msg.MessageId) result.eventId = msg.MessageId;

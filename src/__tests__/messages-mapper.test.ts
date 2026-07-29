@@ -48,6 +48,28 @@ describe('mapBackendMessage', () => {
     expect(result.tools.search.status).toBe('completed');
   });
 
+  it('uses persisted ordered blocks when replay can preserve interleaving', () => {
+    const result = mapBackendMessage({
+      MessageId: 'msg-interleaved',
+      Role: 'assistant',
+      Content: { text: '【阶段 1/2】进度。【阶段 2/2】最终答案。' },
+      Reasoning: [{ text: '合并的兼容字段', SeqId: 1 }],
+      Blocks: [
+        { Type: 'thinking', Content: '第一段思考', SeqId: 2 },
+        { Type: 'text', Content: '【阶段 1/2】进度。', SeqId: 3 },
+        { Type: 'thinking', Content: '第二段思考', SeqId: 4 },
+        { Type: 'text', Content: '【阶段 2/2】最终答案。', SeqId: 5 },
+      ],
+    } satisfies BackendMessage);
+
+    expect(result.blocks).toMatchObject([
+      { type: 'thinking', content: '第一段思考', status: 'done' },
+      { type: 'text', content: '【阶段 1/2】进度。', status: 'done' },
+      { type: 'thinking', content: '第二段思考', status: 'done' },
+      { type: 'text', content: '【阶段 2/2】最终答案。', status: 'done' },
+    ]);
+  });
+
   it('keeps same-name tool calls distinct by ToolCallId', () => {
     const result = mapBackendMessage({
       Role: 'assistant',

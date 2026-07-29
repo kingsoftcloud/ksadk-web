@@ -169,12 +169,12 @@ export function getProcessingBlocks(blocks: ProcessingBlock[] | undefined): Proc
 }
 
 /**
- * 从历史消息字段(reasoning/tools/content)重建交错 blocks。
- * 历史没有流式时间线,按约定顺序 [思考][工具...][正文] 重建,让刷新后
- * 历史消息也走 ProcessingBlocksView,不回退到旧 reasoning+tools+content 散装渲染。
+ * 从旧版历史字段(reasoning/tools/content)重建交错 blocks。
+ * 新版 KsADK 会提供有序 Blocks 时间线；只有旧服务或旧会话缺少该时间线时
+ * 才走这里的兼容回退，让历史消息仍走 ProcessingBlocksView。
  *
  * 顺序原因:ksadk 流式时思考在工具前、正文在工具后(appendTextBlock 先关 thinking)。
- * 历史还原无法还原多段思考被工具切断的真实交错,只能近似单段思考+工具+正文。
+ * 旧记录无法还原多段思考被工具切断的真实交错,只能近似单段思考+工具+正文。
  */
 export function buildBlocksFromHistory(input: {
   reasoning?: string;

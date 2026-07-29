@@ -5,6 +5,17 @@ export type BackendMessage = {
   Role: 'user' | 'assistant' | 'tool' | 'system';
   Content?: { text?: string } | unknown;
   Reasoning?: { text: string; SeqId: number }[];
+  /** Ordered persisted stream timeline for lossless history replay. */
+  Blocks?: {
+    Type: 'thinking' | 'text' | 'tool';
+    SeqId?: number;
+    Content?: string;
+    Name?: string;
+    Args?: unknown;
+    Result?: unknown;
+    Status?: 'running' | 'completed' | 'failed' | 'paused';
+    ToolCallId?: string;
+  }[];
   ToolEvents?: {
     SeqId?: number;
     Type?: string;
