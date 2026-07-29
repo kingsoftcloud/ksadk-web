@@ -1,12 +1,12 @@
 /**
  * 交错 "思考-行动-思考-输出" 渲染,照抄 Wegent/wework 的视觉节奏:
- * - 思考块:流式→单行"思考中 · 预览"(shimmer);完成→单行"已思考 · N字"+chevron 展开
+ * - 思考块:默认折叠；流式时只显示"思考中"动效，点击后才显示实时内容
  * - 工具块:单行活动行(图标+状态文案+duration),展开才出详情
  * - 正文块:平铺 markdown
  * 核心是"活动行优先、详情按需",不占大块视觉,保留时间线交错节奏。
  */
 
-import { ChevronDown, FileDiff, Globe2, LoaderCircle, Brain, Wrench } from 'lucide-react';
+import { ChevronDown, FileDiff, Globe2, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { MessageMarkdown } from '../MessageMarkdown';
@@ -59,48 +59,47 @@ function Collapsible({
   );
 }
 
-/** 去 markdown 标记取末句预览(粗略:取最后一段非空文本)。 */
-function plainPreview(text: string, max = 96): string {
-  const stripped = text.replace(/[#*`>-]/g, '').replace(/\s+/g, ' ').trim();
-  if (stripped.length <= max) return stripped;
-  return stripped.slice(-max);
-}
-
 function ThinkingRow({ block }: { block: ThinkingBlock }) {
+  const [open, setOpen] = useState(false);
   const generating = block.status === 'streaming';
-  if (generating) {
-    // 流式:单行"思考中 · 预览",不折叠,带 shimmer
-    const preview = plainPreview(block.content);
-    return (
-      <div className="mb-1.5 flex items-center gap-1.5 px-1 py-1 text-[13px] text-slate-400 dark:text-slate-500">
-        <Brain className="h-3.5 w-3.5 shrink-0" />
-        <span className="animate-pulse">思考中</span>
-        {preview && (
+  const len = block.content.length;
+  const detailId = `${block.id}-thinking-detail`;
+
+  // 思考正文会持续增量更新。默认折叠时不挂载正文，避免“思考中”
+  // 状态行变成不断闪动的预览；用户展开后才阅读实时详情。
+  return (
+    <div className="mb-1.5 min-w-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={detailId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] leading-5 text-slate-400 transition-colors hover:bg-slate-100/70 hover:text-slate-500 dark:text-slate-500 dark:hover:bg-slate-800/40 dark:hover:text-slate-400"
+      >
+        <Sparkles
+          className={cn(
+            'h-3.5 w-3.5 shrink-0',
+            generating && 'animate-pulse motion-reduce:animate-none',
+          )}
+        />
+        <span className="min-w-0 truncate">{generating ? '思考中' : '已思考'}</span>
+        {!generating && (
           <>
             <span className="text-slate-300 dark:text-slate-600">·</span>
-            <span className="min-w-0 flex-1 truncate">{preview}</span>
+            <span className="font-mono text-xs text-slate-400 dark:text-slate-500">{len} 字</span>
           </>
         )}
-      </div>
-    );
-  }
-  // 完成:单行"已思考 · N字"+chevron 展开
-  const len = block.content.length;
-  return (
-    <Collapsible
-      summary={
-        <span className="flex items-center gap-1.5">
-          <Brain className="h-3.5 w-3.5 text-slate-400" />
-          <span>已思考</span>
-          <span className="text-slate-300 dark:text-slate-600">·</span>
-          <span className="font-mono text-xs text-slate-400">{len} 字</span>
-        </span>
-      }
-    >
-      <div className="custom-scrollbar max-h-[min(46vh,28rem)] overflow-y-auto py-1 text-sm leading-6 text-slate-600 dark:text-slate-300 [&_p]:my-1.5 [&_pre]:my-1.5">
-        <MessageMarkdown content={block.content} />
-      </div>
-    </Collapsible>
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && block.content && (
+        <div
+          id={detailId}
+          className="custom-scrollbar mt-1.5 max-h-[min(46vh,28rem)] overflow-y-auto border-l border-slate-200/80 pl-3.5 text-[12px] leading-5 text-slate-500 dark:border-slate-700/60 dark:text-slate-400 [&_h1]:!mb-2 [&_h1]:!mt-3 [&_h1]:!text-[13px] [&_h2]:!mb-1.5 [&_h2]:!mt-3 [&_h2]:!text-[12px] [&_h3]:!mb-1 [&_h3]:!mt-2.5 [&_h3]:!text-[12px] [&_li]:!text-[12px] [&_li]:!leading-5 [&_p]:!my-1.5 [&_p]:!text-[12px] [&_p]:!leading-5 [&_p]:!text-slate-500 dark:[&_p]:!text-slate-400 [&_pre]:!my-1.5"
+        >
+          <MessageMarkdown content={block.content} />
+        </div>
+      )}
+    </div>
   );
 }
 
