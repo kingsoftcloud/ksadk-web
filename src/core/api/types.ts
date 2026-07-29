@@ -38,6 +38,7 @@ export interface ApiFacade {
     opts?: {
       agentId?: string;
       afterSeqId?: number;
+      beforeSeqId?: number;
       limit?: number;
       includeReasoning?: boolean;
       includeToolEvents?: boolean;
@@ -56,7 +57,7 @@ export interface ApiFacade {
   runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   resumeRun(params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string; invocationId?: string }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   subscribeRunEvents(params: { sessionId: string; invocationId: string; afterSeqId: number }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
-  cancelRun(agentId: string, invocationId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
+  cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
 
   // Feedback
   getResponseFeedback(payload: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<unknown>;

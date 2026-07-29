@@ -6,28 +6,39 @@ import { useCheckpointStore } from '../stores/checkpoint.js';
 import { useBootstrapStore } from '../stores/bootstrap.js';
 import { CancelledError } from '../api/client.js';
 import {
-  buildMessagesFromSessionEvents,
   eventHasTerminalRunStatus,
-  mergeSessionEventRecords,
+  sessionEventRunStatus,
 } from '../utils/session-events.js';
 import { mapBackendMessages } from '../utils/messages.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
-import {
-  loadCompleteSessionEventHistory,
-  resolveOlderSessionEventPage,
-} from '../utils/session-event-history.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
+import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
+import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 
-const RESTORE_SUBSCRIPTION_TIMEOUT_MS = 90_000;
+const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
-const SESSION_EVENTS_PAGE_SIZE = 50;
-const SESSION_EVENTS_RESTORE_PAGE_SIZE = 500;
+const SESSION_MESSAGES_PAGE_SIZE = 50;
+const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+
+function waitForRestoreRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = globalThis.setTimeout(resolve, RESTORE_RECONNECT_DELAY_MS);
+    signal.addEventListener('abort', () => {
+      globalThis.clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
 
 // 重连判据:ActiveRunStatus 属于这些态时认为有活跃 run(对齐后端 RUN_STATUS_ACTIVE)。
 const ACTIVE_RUN_STATUSES = new Set([
@@ -37,22 +48,22 @@ const ACTIVE_RUN_STATUSES = new Set([
   'starting',
 ]);
 
-function historyShouldReplaceMessages(history: Message[], currentMessages: Message[]) {
-  if (!currentMessages.length) {
-    return true;
-  }
-  if (!history.length) {
-    return false;
-  }
-  return history.length >= currentMessages.length;
+function isRecentlyUpdatedSession(session: { UpdatedAt?: string; ActiveRunUpdatedAt?: string }): boolean {
+  const rawTimestamp = session.ActiveRunUpdatedAt || session.UpdatedAt;
+  const timestamp = typeof rawTimestamp === 'number'
+    ? (rawTimestamp > 1e11 ? rawTimestamp : rawTimestamp * 1000)
+    : Date.parse(String(rawTimestamp || ''));
+  return Number.isFinite(timestamp)
+    && timestamp <= Date.now() + EMPTY_STATUS_RECOVERY_WINDOW_MS
+    && Date.now() - timestamp <= EMPTY_STATUS_RECOVERY_WINDOW_MS;
 }
 
 function terminalActivityForRunEvent(event: SessionEventRecord): {
   status: 'completed' | 'failed' | 'stopped';
   phase: string;
 } | null {
-  if (event.EventType !== 'run_status') return null;
-  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  const rawStatus = sessionEventRunStatus(event);
+  if (!rawStatus) return null;
   if (rawStatus === 'completed') {
     return { status: 'completed', phase: '后台长任务已完成' };
   }
@@ -93,6 +104,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const currentSessionIdRef = useRef<string | null>(ctx.currentSessionId);
   const agentIdRef = useRef(ctx.agentId);
   const runSubscriptionAbortRef = useRef<AbortController | null>(null);
+  const loadSessionGenerationRef = useRef(0);
+  const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
@@ -161,39 +174,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       sessionId: string;
       invocationId: string;
       afterSeqId: number;
-      initialEvents?: SessionEventRecord[];
     }) => {
       runSubscriptionAbortRef.current?.abort();
       const controller = new AbortController();
       runSubscriptionAbortRef.current = controller;
       let shouldReloadSession = false;
       let terminalStatusSeen = false;
-      const stopRestoreSubscription = () => {
-        if (runSubscriptionAbortRef.current !== controller || controller.signal.aborted) {
-          return;
-        }
-        controller.abort();
-      };
-      const timeoutTimer = globalThis.setTimeout(() => {
-        stopRestoreSubscription();
-      }, RESTORE_SUBSCRIPTION_TIMEOUT_MS);
+      let afterSeqId = options.afterSeqId;
+      const isCurrentSubscription = () => (
+        runSubscriptionAbortRef.current === controller
+        && currentSessionIdRef.current === options.sessionId
+      );
 
       try {
-        const stream = await api.subscribeRunEvents(
-          {
-            sessionId: options.sessionId,
-            invocationId: options.invocationId,
-            afterSeqId: options.afterSeqId,
-          },
-          { signal: controller.signal },
-        );
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let mergedEvents: SessionEventRecord[] = Array.isArray(options.initialEvents)
-          ? options.initialEvents
-          : [];
         useStreamingStore.getState().setCurrentRunId(options.invocationId);
+        useStreamingStore.getState().setActiveInvocationId(options.invocationId);
+        useStreamingStore.getState().setSessionStreaming(options.sessionId, true);
         useStreamingStore.getState().updateActivity({
           sessionId: options.sessionId,
           status: 'running',
@@ -202,56 +198,103 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           countEvent: false,
         });
 
-        while (!terminalStatusSeen) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const chunks = buffer.split('\n\n');
-          buffer = chunks.pop() || '';
+        while (!terminalStatusSeen && isCurrentSubscription()) {
+          try {
+            const stream = await api.subscribeRunEvents(
+              {
+                sessionId: options.sessionId,
+                invocationId: options.invocationId,
+                afterSeqId,
+              },
+              { signal: controller.signal },
+            );
+            if (!isCurrentSubscription()) {
+              controller.abort();
+              return;
+            }
+            const reader = stream.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-          for (const chunk of chunks) {
-            if (!chunk.trim()) continue;
-            const dataLines: string[] = [];
-            for (const line of chunk.split('\n')) {
-              if (line.startsWith('data:')) {
-                dataLines.push(line.substring(5).trim());
+            while (!terminalStatusSeen && isCurrentSubscription()) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const split = splitSseBuffer(buffer);
+              buffer = split.remainder;
+
+              for (const chunk of split.chunks) {
+                if (!chunk.trim()) continue;
+                for (const transportEvent of parseSseChunk(chunk)) {
+                  if (transportEvent.eventName === '__ping__') {
+                    // SubscribeRunEvents heartbeats mean the recovery stream is still
+                    // open even when the runtime has not produced a new durable event.
+                    useStreamingStore.getState().updateActivity({
+                      sessionId: options.sessionId,
+                      status: 'running',
+                      countEvent: false,
+                    });
+                    continue;
+                  }
+                  if (transportEvent.eventName === '__done__') {
+                    terminalStatusSeen = true;
+                    shouldReloadSession = true;
+                    break;
+                  }
+                  if (!transportEvent.data || typeof transportEvent.data !== 'object') continue;
+                  const event = transportEvent.data as SessionEventRecord;
+                  if (!isCurrentSubscription()) break;
+                  if (event.InvocationId && event.InvocationId !== options.invocationId) continue;
+
+                  const seqId = Number(event.SeqId || 0);
+                  if (Number.isFinite(seqId)) {
+                    afterSeqId = Math.max(afterSeqId, seqId);
+                  }
+                  dispatchRunEventToStores({
+                    type: 'stream_event',
+                    sessionId: options.sessionId,
+                    event,
+                  });
+                  terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
+                  shouldReloadSession = shouldReloadSession || terminalStatusSeen;
+                  const terminalActivity = terminalActivityForRunEvent(event);
+                  if (terminalActivity) {
+                    useStreamingStore.getState().updateActivity({
+                      sessionId: options.sessionId,
+                      status: terminalActivity.status,
+                      phase: terminalActivity.phase,
+                      detail: options.invocationId,
+                      countEvent: false,
+                    });
+                  }
+                  if (terminalStatusSeen) break;
+                }
+                if (terminalStatusSeen) break;
               }
             }
-            const dataString = dataLines.join('\n').trim();
-            if (!dataString || dataString === '[DONE]') {
-              terminalStatusSeen = dataString === '[DONE]';
-              shouldReloadSession = shouldReloadSession || terminalStatusSeen;
-              continue;
+            if (terminalStatusSeen) {
+              void reader.cancel().catch(() => {});
             }
-            try {
-              const event = JSON.parse(dataString) as SessionEventRecord;
-              mergedEvents = mergeSessionEventRecords(mergedEvents, [event]) as SessionEventRecord[];
-              terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
-              shouldReloadSession = shouldReloadSession || terminalStatusSeen;
-              if (event.EventType === 'run_checkpoint') {
-                useCheckpointStore.getState().upsertSessionCheckpoint(options.sessionId, event);
-              }
-              const terminalActivity = terminalActivityForRunEvent(event);
-              if (terminalActivity) {
-                useStreamingStore.getState().updateActivity({
-                  sessionId: options.sessionId,
-                  status: terminalActivity.status,
-                  phase: terminalActivity.phase,
-                  detail: options.invocationId,
-                  countEvent: false,
-                });
-              }
-              if (currentSessionIdRef.current !== options.sessionId) {
-                stopRestoreSubscription();
-                break;
-              }
-              // 重连期间不覆盖消息列表(保持 loadSession 的 ListSessionMessages 结果)。
-              // run 结束后 shouldReloadSession 会重新 loadSession 拿最终消息。
-              // 增量事件仅更新 streaming activity(上方 terminalActivity 已处理)。
-            } catch (error) {
-              console.warn('Failed to parse run event data', dataString, error);
-            }
+          } catch (error) {
+            const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+            if (isAbortError || !isCurrentSubscription()) break;
+            console.warn('Run event subscription disconnected; retrying:', error);
+            useStreamingStore.getState().updateActivity({
+              sessionId: options.sessionId,
+              status: 'waiting',
+              phase: '恢复连接中',
+              detail: options.invocationId,
+              countEvent: false,
+            });
           }
+
+          if (!terminalStatusSeen && isCurrentSubscription()) {
+            await waitForRestoreRetry(controller.signal);
+          }
+        }
+
+        if (terminalStatusSeen && isCurrentSubscription()) {
+          dispatchRunEventToStores({ type: 'stream_ended', sessionId: options.sessionId });
         }
       } catch (error) {
         const isAbortError = error instanceof DOMException && error.name === 'AbortError';
@@ -259,15 +302,18 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           console.error('Failed to subscribe run events:', error);
         }
       } finally {
-        globalThis.clearTimeout(timeoutTimer);
-        if (runSubscriptionAbortRef.current === controller) {
+        const ownedCurrentSubscription = runSubscriptionAbortRef.current === controller;
+        if (ownedCurrentSubscription) {
           runSubscriptionAbortRef.current = null;
         }
-        useStreamingStore.getState().setCurrentRunId('');
-        if (shouldReloadSession && currentSessionIdRef.current === options.sessionId) {
-          void loadSessionRef.current?.(options.sessionId);
+        if (ownedCurrentSubscription && currentSessionIdRef.current === options.sessionId) {
+          useStreamingStore.getState().setCurrentRunId('');
+          useStreamingStore.getState().setActiveInvocationId('');
+          if (shouldReloadSession) {
+            void loadSessionRef.current?.(options.sessionId);
+          }
+          void fetchSessionsRef.current?.(agentIdRef.current, options.sessionId);
         }
-        void fetchSessionsRef.current?.(agentIdRef.current, options.sessionId);
       }
     },
     [api],
@@ -275,9 +321,25 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const loadSession = useCallback(
     async (sessionId: string) => {
+      const previousSessionId = currentSessionIdRef.current;
+      const generation = ++loadSessionGenerationRef.current;
+      // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
+      // 切回时用历史快照和 afterSeqId 订阅追平遗漏内容。
+      if (previousSessionId && previousSessionId !== sessionId) {
+        useMessageStore.getState().setMessages([]);
+        useSessionStore.getState().clearSessionMessageHistory(sessionId);
+        useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
+        useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
+        useStreamingStore.getState().setCurrentRunId('');
+        useStreamingStore.getState().clearActivity();
+      }
       currentSessionIdRef.current = sessionId;
-      const isStillCurrentSession = () => currentSessionIdRef.current === sessionId;
+      const isStillCurrentSession = () => (
+        currentSessionIdRef.current === sessionId
+        && loadSessionGenerationRef.current === generation
+      );
       useSessionStore.getState().setCurrentSessionId(sessionId);
+      useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, true);
       resetCompaction();
       runSubscriptionAbortRef.current?.abort();
       if (isMobile) {
@@ -285,13 +347,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        // PR4:用 ListSessionMessages 替换 buildMessagesFromSessionEvents(服务端投影)。
-        // 同时仍拉 ListSessionEvents 填 eventCache(供 loadOlderSessionEvents 向上翻页,
-        // 后端 ListSessionMessages 的 BeforeSeqId 留作后续优化)。
-        // 注意:不传 agentId —— hosted-ui 会话历史存在 server DB,走 hosted path
-        // (ConversationService.get_events + 投影)。传 agentId 会触发 runtime path
-        // (从 runtime agent 拉事件),hosted 场景 runtime 不持有会话历史 → 消息消失。
         const messagesData = await api.listSessionMessages(sessionId, {
+          limit: SESSION_MESSAGES_PAGE_SIZE,
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
@@ -301,26 +358,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         const history = mapBackendMessages(messagesData.Messages);
         useMessageStore.getState().setMessages(history);
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          nextCursor: messagesData.NextCursor,
+          hasMore: messagesData.HasMore,
+        });
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
         const lastSeqId = messagesData.LatestSeqId || 0;
-
-        // 填 eventCache(供 loadOlderSessionEvents 翻更早历史;非阻塞)
-        // offset 表示"已加载多少条最新事件",首次拿 limit=500 条后 offset=已加载数量,
-        // 否则 loadOlder 会重复从 offset=0 拉最新页。
-        void api.listSessionEvents(sessionId, { limit: SESSION_EVENTS_RESTORE_PAGE_SIZE })
-          .then((eventData) => {
-            if (!isStillCurrentSession()) return;
-            const loadedEvents = (eventData.Events || []) as SessionEventRecord[];
-            useSessionStore.getState().setSessionEventCache(sessionId, {
-              events: loadedEvents,
-              total: eventData.Total ?? 0,
-              offset: (eventData.Offset ?? 0) + loadedEvents.length,
-              limit: eventData.Limit ?? 0,
-            });
-          })
-          .catch((error) => {
-            console.warn('[SessionLifecycle] event cache load failed:', error);
-          });
 
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
@@ -328,10 +371,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             agentId: agentIdRef.current,
             sessionId,
           }).then((checkpointData) => {
+            if (!isStillCurrentSession()) return;
             useCheckpointStore
               .getState()
               .setSessionCheckpoints(sessionId, checkpointData.Checkpoints || []);
           }).catch((error) => {
+            if (!isStillCurrentSession()) return;
             console.warn('[SessionLifecycle] checkpoint load failed:', error);
             useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
           });
@@ -339,10 +384,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             agentId: agentIdRef.current,
             sessionId,
           }).then((receiptData) => {
+            if (!isStillCurrentSession()) return;
             useCheckpointStore
               .getState()
               .setSessionToolReceipts(sessionId, receiptData.ToolReceipts || []);
           }).catch((error) => {
+            if (!isStillCurrentSession()) return;
             console.warn('[SessionLifecycle] tool receipt load failed:', error);
             useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
           });
@@ -350,7 +397,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
         }
 
-        // 重连判据:读 GetSession.ActiveRunStatus(不靠扫 events 反推)。
+        // 正式判据是后端的 ActiveRunStatus。旧本地 runtime 会漏投该字段，
+        // 此时仅对近期更新、仍带 invocation 的会话做一次兼容恢复。
         if (
           runtimeCapabilities.RunLifecycle.Enabled &&
           runtimeCapabilities.RunLifecycle.Resume
@@ -361,13 +409,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               return;
             }
             const status = String(session.ActiveRunStatus || '').toLowerCase();
-            const isActive = ACTIVE_RUN_STATUSES.has(status) && !!session.ActiveInvocationId;
+            const isActive = !!session.ActiveInvocationId && (
+              ACTIVE_RUN_STATUSES.has(status)
+              || (status === '' && isRecentlyUpdatedSession(session))
+            );
             if (isActive) {
               void subscribeRunEvents({
                 sessionId,
                 invocationId: session.ActiveInvocationId!,
                 afterSeqId: lastSeqId,
-                initialEvents: [],
               });
             }
           } catch (error) {
@@ -376,10 +426,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       } catch (error) {
         console.error('Failed to load session messages:', error);
+      } finally {
+        if (isStillCurrentSession()) {
+          useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, false);
+        }
       }
     },
     [
       api,
+      disconnectRun,
       isMobile,
       loadFeedbackForMessages,
       resetCompaction,
@@ -419,10 +474,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (restoredSessionId && restoredSessionId !== activeSessionId) {
           void loadSession(restoredSessionId);
         } else if (!restoredSessionId && activeSessionId) {
+          loadSessionGenerationRef.current += 1;
+          runSubscriptionAbortRef.current?.abort();
+          disconnectRun?.();
           currentSessionIdRef.current = null;
           useSessionStore.getState().setCurrentSessionId(null);
           useMessageStore.getState().setMessages([]);
+          useSessionStore.getState().clearSessionMessageHistory();
           useCheckpointStore.getState().clearSessionCheckpoints();
+          useStreamingStore.getState().setCurrentRunId('');
+          useStreamingStore.getState().clearActivity();
         }
       } catch (error) {
         if (error instanceof CancelledError) return;
@@ -431,7 +492,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         useSessionStore.getState().setLoadingSessions(false);
       }
     },
-    [api, loadSession],
+    [api, disconnectRun, loadSession],
   );
 
   const loadMoreSessions = useCallback(async () => {
@@ -479,7 +540,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const createNewSession = useCallback(async () => {
     try {
-      disconnectRun?.();
+      loadSessionGenerationRef.current += 1;
+      runSubscriptionAbortRef.current?.abort();
       const session = await api.createSession(agentId);
       const newId = session.SessionId;
       if (newId) {
@@ -489,8 +551,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         currentSessionIdRef.current = newId;
         useSessionStore.getState().setCurrentSessionId(newId);
         useMessageStore.getState().setMessages([]);
+        useSessionStore.getState().clearSessionMessageHistory(newId);
         useCheckpointStore.getState().setSessionCheckpoints(newId, []);
         useCheckpointStore.getState().setSessionToolReceipts(newId, []);
+        useStreamingStore.getState().setCurrentRunId('');
+        useStreamingStore.getState().clearActivity();
         if (isMobile) {
           useUIStore.getState().setMobileSidebarOpen(false);
           useUIStore.getState().setMobileActionsOpen(false);
@@ -501,19 +566,24 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       if (error instanceof CancelledError) return;
       console.error('Failed to create session:', error);
     }
-  }, [agentId, api, disconnectRun, fetchSessions, isMobile]);
+  }, [agentId, api, fetchSessions, isMobile]);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
       try {
         await api.deleteSession(sessionId);
         useSessionStore.getState().removeSession(sessionId);
-        useSessionStore.getState().clearSessionEventCache(sessionId);
+        useSessionStore.getState().clearSessionMessageHistory(sessionId);
         if (currentSessionIdRef.current === sessionId) {
+          loadSessionGenerationRef.current += 1;
+          runSubscriptionAbortRef.current?.abort();
+          disconnectRun?.();
           currentSessionIdRef.current = null;
           useMessageStore.getState().setMessages([]);
           useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
           useSessionStore.getState().setCurrentSessionId(null);
+          useStreamingStore.getState().setCurrentRunId('');
+          useStreamingStore.getState().clearActivity();
           void fetchSessions(agentId);
         }
       } catch (error) {
@@ -521,41 +591,59 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         console.error('Failed to delete session', error);
       }
     },
-    [agentId, api, fetchSessions],
+    [agentId, api, disconnectRun, fetchSessions],
   );
 
-  const loadOlderSessionEvents = useCallback(async (sessionId: string) => {
-    const cache = useSessionStore.getState().eventCache[sessionId];
-    if (!cache || cache.isLoadingOlder) {
+  const loadOlderSessionMessages = useCallback(async (sessionId: string) => {
+    const historyState = useSessionStore.getState().messageHistory[sessionId];
+    if (
+      !historyState
+      || !historyState.hasMore
+      || historyState.nextCursor === null
+      || historyState.isLoadingOlder
+    ) {
       return;
     }
-    const nextPage = resolveOlderSessionEventPage(cache, SESSION_EVENTS_PAGE_SIZE);
-    if (!nextPage) {
-      return;
-    }
+    const generation = loadSessionGenerationRef.current;
+    const requestToken = Symbol(sessionId);
+    olderMessageRequestRef.current.set(sessionId, requestToken);
     try {
-      useSessionStore.getState().setSessionEventLoadingOlder(sessionId, true);
-      const data = await api.listSessionEvents(sessionId, nextPage);
-      const incoming = (data.Events || []) as SessionEventRecord[];
-      const merged = mergeSessionEventRecords(incoming, cache.events) as SessionEventRecord[];
-      const loadedCount = cache.offset + incoming.length;
-      useSessionStore.getState().setSessionEventCache(sessionId, {
-        events: merged,
-        total: Number(data.Total ?? cache.total),
-        offset: loadedCount,
-        limit: merged.length,
+      useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
+      const data = await api.listSessionMessages(sessionId, {
+        beforeSeqId: historyState.nextCursor,
+        limit: SESSION_MESSAGES_PAGE_SIZE,
+        includeReasoning: true,
+        includeToolEvents: true,
+        includeAttachments: true,
       });
-      if (currentSessionIdRef.current === sessionId) {
-        const history = buildMessagesFromSessionEvents(merged);
-        useMessageStore.getState().setMessages(history);
-        void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
+      if (
+        currentSessionIdRef.current !== sessionId
+        || loadSessionGenerationRef.current !== generation
+        || olderMessageRequestRef.current.get(sessionId) !== requestToken
+      ) {
+        return;
       }
+      const olderMessages = mapBackendMessages(data.Messages);
+      const olderIds = new Set(olderMessages.map((message) => message.id));
+      const mergedHistory = [
+        ...olderMessages,
+        ...useMessageStore.getState().messages.filter((message) => !olderIds.has(message.id)),
+      ];
+      useMessageStore.getState().setMessages(mergedHistory);
+      useSessionStore.getState().setSessionMessageHistory(sessionId, {
+        nextCursor: data.NextCursor,
+        hasMore: data.HasMore,
+      });
+      void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {
       if (!(error instanceof CancelledError)) {
-        console.error('Failed to load older session events:', error);
+        console.error('Failed to load older session messages:', error);
       }
     } finally {
-      useSessionStore.getState().setSessionEventLoadingOlder(sessionId, false);
+      if (olderMessageRequestRef.current.get(sessionId) === requestToken) {
+        olderMessageRequestRef.current.delete(sessionId);
+        useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, false);
+      }
     }
   }, [api, loadFeedbackForMessages]);
 
@@ -563,7 +651,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     fetchSessions,
     loadMoreSessions,
     loadSession,
-    loadOlderSessionEvents,
+    loadOlderSessionMessages,
     createNewSession,
     deleteSession,
     currentSessionIdRef,

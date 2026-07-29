@@ -77,9 +77,18 @@ describe('chat message list contracts', () => {
     expect(source).toContain('group-open/details:rotate-180');
     expect(source).toContain('max-h-[min(46vh,28rem)]');
     expect(source).toContain('custom-scrollbar');
-    expect(source).toContain('border-emerald-200/70');
+    expect(source).toContain('border-slate-200/80');
     expect(source).toContain('生成中');
     expect(source).toContain('leading-7');
+  });
+
+  it('remeasures virtual rows when expandable content changes height', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('new ResizeObserver(measure)');
+    expect(source).toContain('observer.observe(node)');
+    expect(source).toContain('observer.disconnect()');
+    expect(source).toContain('scroller.scrollTop += height - previousHeight');
   });
 
   it('virtualizes long message transcripts instead of mapping the full list directly', () => {
@@ -130,13 +139,13 @@ describe('chat message list contracts', () => {
     expect(listSource).toContain('取消运行并保留最近 checkpoint');
   });
 
-  it('loads checkpoint metadata as best effort without blocking session history', () => {
+  it('uses projected message cursors without duplicating raw event history loads', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
-    expect(lifecycleSource).toContain('loadCompleteSessionEventHistory');
-    expect(lifecycleSource).toContain('SESSION_EVENTS_RESTORE_PAGE_SIZE');
-    expect(lifecycleSource).toContain('loadOlderSessionEvents');
-    expect(lifecycleSource).not.toContain('Promise.all([\\n          api.listSessionEvents(sessionId)');
+    expect(lifecycleSource).toContain('loadOlderSessionMessages');
+    expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
+    expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
+    expect(lifecycleSource).not.toContain('api.listSessionEvents(sessionId');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
   });
@@ -151,9 +160,11 @@ describe('chat message list contracts', () => {
 
   it('updates checkpoint panel while subscribing to a background run', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+    const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
 
-    expect(lifecycleSource).toContain("event.EventType === 'run_checkpoint'");
-    expect(lifecycleSource).toContain('upsertSessionCheckpoint(options.sessionId, event)');
+    expect(lifecycleSource).toContain('dispatchRunEventToStores({');
+    expect(dispatcherSource).toContain("event.event.EventType === 'run_checkpoint'");
+    expect(dispatcherSource).toContain('upsertSessionCheckpoint(streamSessionId, event.event)');
     expect(lifecycleSource).toContain('setCurrentRunId(options.invocationId)');
     expect(lifecycleSource).toContain('后台长任务运行中');
   });
@@ -168,17 +179,38 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('status: terminalActivity.status');
   });
 
+  it('does not let a stale detached subscription clear the active run', () => {
+    const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+
+    expect(lifecycleSource).toContain('const isCurrentSubscription = () =>');
+    expect(lifecycleSource).toContain('runSubscriptionAbortRef.current === controller');
+    expect(lifecycleSource).toContain('const ownedCurrentSubscription =');
+    expect(lifecycleSource).toContain('if (ownedCurrentSubscription && currentSessionIdRef.current === options.sessionId)');
+    expect(lifecycleSource).not.toContain('let mergedEvents: SessionEventRecord[]');
+  });
+
   it('does not let stale session history overwrite the active transcript', () => {
     const appSource = readFileSync(resolve(repoRoot, 'src/App.tsx'), 'utf8');
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+    const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
 
     expect(appSource).not.toContain('void loadSession(sessionId);');
-    expect(appSource).toContain('clearSessionEventCache(sessionId)');
-    expect(lifecycleSource).toContain('const isStillCurrentSession = () => currentSessionIdRef.current === sessionId;');
+    expect(appSource).toContain('clearSessionMessageHistory(sessionId)');
+    expect(lifecycleSource).toContain('const isStillCurrentSession = () => (');
+    expect(lifecycleSource).toContain('loadSessionGenerationRef.current === generation');
     expect(lifecycleSource).toContain('if (!isStillCurrentSession()) {');
     expect(lifecycleSource).toContain('currentSessionIdRef.current === options.sessionId');
-    // PR4:重连期间不覆盖消息列表(保持 loadSession 的 ListSessionMessages 结果),
-    // run 结束后 shouldReloadSession 重新 loadSession 拿最终消息。
-    expect(lifecycleSource).toContain('重连期间不覆盖消息列表');
+    expect(lifecycleSource).toContain('dispatchRunEventToStores({');
+    expect(dispatcherSource).toContain('mergeRecoveredRunMessages');
+  });
+
+  it('keeps an initial transcript load distinct from an actually empty session', () => {
+    const connectedSource = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
+    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(connectedSource).toContain('isLoadingSessions');
+    expect(connectedSource).toContain('isLoadingInitialHistory');
+    expect(listSource).toContain('InitialHistorySkeleton');
+    expect(listSource).toContain('messages.length === 0 && isLoadingInitialHistory');
   });
 });

@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react
 import { useUIStore } from './stores/ui.js';
 import { useBootstrapStore } from './stores/bootstrap.js';
 import { useModelStore } from './stores/model.js';
+import { usePermissionStore } from './stores/permission.js';
 import { useStreamingStore } from './stores/streaming.js';
 import { useSessionStore } from './stores/session.js';
 import { useArtifactStore } from './stores/artifact.js';
@@ -80,6 +81,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const modelSource = useModelStore((s: ModelStore) => s.modelSource);
   const modelCatalogLoaded = useModelStore((s: ModelStore) => s.modelCatalogLoaded);
   const thinkingMode = useModelStore((s: ModelStore) => s.thinkingMode);
+  const permissionMode = usePermissionStore((s) => s.permissionMode);
   const agentFramework = useBootstrapStore((s: BootstrapStore) => s.agentFramework);
   const workspaceFiles = useBootstrapStore((s: BootstrapStore) => s.workspaceFiles) as BootstrapWorkspaceFiles | null;
   const accessMode = useBootstrapStore((s: BootstrapStore) => s.accessMode);
@@ -99,7 +101,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     fetchSessions,
     loadMoreSessions,
     loadSession,
-    loadOlderSessionEvents,
+    loadOlderSessionMessages,
     createNewSession,
     deleteSession,
     currentSessionIdRef,
@@ -121,7 +123,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
         return;
       }
       const refresh = () => {
-        useSessionStore.getState().clearSessionEventCache(sessionId);
+        useSessionStore.getState().clearSessionMessageHistory(sessionId);
         void fetchSessions(agentIdRef.current, sessionId);
       };
       queueMicrotask(refresh);
@@ -134,7 +136,14 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const selectedModelMetadata =
     availableModels.find((model) => model.id === selectedModel) || null;
 
-  const { submitDraft, stopGeneration, disconnectRun, resumeCheckpoint } = useRunAgent({
+  const {
+    submitDraft,
+    stopGeneration,
+    disconnectRun,
+    resumeCheckpoint,
+    submitAguiAction,
+    respondToAguiApproval,
+  } = useRunAgent({
     agentId,
     currentSessionId,
     agentFramework,
@@ -142,6 +151,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     selectedModel,
     selectedModelMetadata,
     thinkingMode,
+    permissionMode,
     uiCapabilities,
     isMobile,
     api,
@@ -166,10 +176,10 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const handleCancelRemote = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     const streamingState = useStreamingStore.getState();
-    const invocationId = streamingState.currentRunId || streamingState.getSessionActivity(sessionId)?.runId || '';
-    if (invocationId) {
+    const invocationId = streamingState.getSessionActivity(sessionId)?.runId || streamingState.currentRunId || '';
+    if (sessionId && invocationId) {
       try {
-        await api.cancelRun(agentId, invocationId);
+        await api.cancelRun(agentId, sessionId, invocationId);
         useStreamingStore.getState().stopSessionActivity(
           sessionId,
           '取消请求已发送，后台运行会停在最近 checkpoint。',
@@ -358,6 +368,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
               onDeleteFeedback={deleteResponseFeedback}
               onSubmitFeedback={submitResponseFeedback}
               onRespondToApproval={respondToApproval}
+              onRespondToAguiApproval={respondToAguiApproval}
+              onSubmitAguiAction={submitAguiAction}
               onStopGeneration={handleStopGeneration}
               onCancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
               checkpointResumeEnabled={
@@ -366,7 +378,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
                 uiCapabilities.RunLifecycle.CheckpointResume
               }
               onResumeCheckpoint={resumeCheckpoint}
-              onLoadOlderSessionEvents={loadOlderSessionEvents}
+              onLoadOlderSessionMessages={loadOlderSessionMessages}
             />
         <ConnectedComposer
           composerMaxHeight={composerMaxHeight}
@@ -374,6 +386,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           stopGeneration={handleStopGeneration}
           cancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
           isMobile={isMobile}
+          approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
+          approvalPolicy={uiCapabilities.ApprovalPolicy}
         />
           </>
         )}

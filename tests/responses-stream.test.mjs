@@ -118,6 +118,36 @@ test('responses stream utils expose standard mcp approval request resume metadat
   );
 });
 
+test('responses stream utils project wrapped LangGraph HITL interrupts immediately', async () => {
+  const responsesStream = await loadResponsesStreamUtils();
+  assert.ok(responsesStream, 'expected Responses stream helpers to exist');
+  const state = responsesStream.createResponsesStreamState();
+
+  assert.deepEqual(
+    responsesStream.normalizeResponsesStreamEvent({
+      eventName: 'response.approval_request',
+      data: {
+        interrupt_info: [{
+          id: 'interrupt-1',
+          value: {
+            action_requests: [{ name: 'write_file', args: { path: '/tmp/x.txt' } }],
+            review_configs: [{ allowed_decisions: ['approve', 'reject'] }],
+          },
+        }],
+      },
+      state,
+    }),
+    [{
+      type: 'tool_upsert',
+      name: 'write_file',
+      args: '{"path":"/tmp/x.txt"}',
+      status: 'paused',
+      approvalRequestId: 'interrupt-1',
+      previousResponseId: '',
+    }],
+  );
+});
+
 test('responses stream utils normalize reasoning summary and completed text variants', async () => {
   const responsesStream = await loadResponsesStreamUtils();
 

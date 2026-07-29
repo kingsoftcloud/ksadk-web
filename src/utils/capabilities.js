@@ -60,6 +60,46 @@ function normalizeBuiltinTools(value) {
     });
 }
 
+function normalizeApprovalPolicy(value) {
+  const policy = asObject(value);
+  const supported = Array.isArray(policy.Modes)
+    ? policy.Modes.filter((mode) => ['ask', 'risk', 'full'].includes(mode))
+    : ['ask', 'risk', 'full'];
+  const modes = supported.length > 0 ? [...new Set(supported)] : ['ask', 'risk', 'full'];
+  const defaultMode = modes.includes(policy.DefaultMode) ? policy.DefaultMode : 'risk';
+  return {
+    Modes: modes,
+    DefaultMode: defaultMode,
+    RuntimeOverride: normalizeEnabled(policy.RuntimeOverride, true),
+  };
+}
+
+function normalizeHostedChatTransports(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    const transport = asObject(item);
+    const protocol = String(transport.Protocol || '').trim().toLowerCase();
+    const endpoint = String(transport.Endpoint || '').trim();
+    if (!['ag-ui', 'responses'].includes(protocol) || !endpoint.startsWith('/')) {
+      return [];
+    }
+    const capabilities = asObject(transport.Capabilities);
+    return [{
+      Protocol: protocol,
+      Runtime: String(transport.Runtime || '').trim(),
+      Endpoint: endpoint,
+      Version: String(transport.Version || '').trim(),
+      Capabilities: {
+        A2UI: Boolean(capabilities.A2UI),
+        Interrupt: Boolean(capabilities.Interrupt),
+        Cancel: Boolean(capabilities.Cancel),
+      },
+    }];
+  });
+}
+
 export function normalizeCapabilities(bootstrap) {
   const data = bootstrap?.Data || bootstrap || {};
   const rawCapabilities = asObject(data.Capabilities);
@@ -79,6 +119,16 @@ export function normalizeCapabilities(bootstrap) {
   const nativeDashboard = asObject(rawCapabilities.NativeDashboard);
   const nativeTerminal = asObject(rawCapabilities.NativeTerminal);
   const runLifecycle = asObject(rawCapabilities.RunLifecycle);
+  const topLevelHostedChat = asObject(data.HostedChat);
+  const transports = normalizeHostedChatTransports(
+    hostedChat.Transports || topLevelHostedChat.Transports,
+  );
+  const preferredCandidate = String(
+    hostedChat.PreferredTransport || topLevelHostedChat.PreferredTransport || 'responses',
+  ).trim().toLowerCase();
+  const preferredTransport = transports.some(
+    (transport) => transport.Protocol === preferredCandidate,
+  ) ? preferredCandidate : 'responses';
 
   const hostedChatEnabled = normalizeEnabled(hostedChat.Enabled, defaultHostedChat);
   const nativeDashboardEnabled = normalizeEnabled(
@@ -93,6 +143,8 @@ export function normalizeCapabilities(bootstrap) {
     HostedChat: {
       Enabled: hostedChatEnabled,
       ApiFormats: normalizeApiFormats(hostedChat.ApiFormats || apiFormats),
+      PreferredTransport: preferredTransport,
+      Transports: transports,
     },
     NativeDashboard: {
       Enabled: nativeDashboardEnabled,
@@ -134,6 +186,7 @@ export function normalizeCapabilities(bootstrap) {
       CheckpointResume: normalizeEnabled(runLifecycle.CheckpointResume, false),
       CheckpointResumePreview: normalizeEnabled(runLifecycle.CheckpointResumePreview, false),
     },
+    ApprovalPolicy: normalizeApprovalPolicy(rawCapabilities.ApprovalPolicy),
     BuiltinTools: normalizeBuiltinTools(rawCapabilities.BuiltinTools),
   };
 }
@@ -148,4 +201,27 @@ export function isNativeDashboardEnabled(capabilities) {
 
 export function isNativeTerminalEnabled(capabilities) {
   return normalizeCapabilities({ Data: { Capabilities: capabilities } }).NativeTerminal.Enabled;
+}
+
+export function resolveHostedChatTransport(capabilities, options = {}) {
+  const hostedChat = normalizeCapabilities({ Data: { Capabilities: capabilities } }).HostedChat;
+  const preferred = hostedChat.Transports.find(
+    (transport) => transport.Protocol === hostedChat.PreferredTransport,
+  );
+  const responses = hostedChat.Transports.find(
+    (transport) => transport.Protocol === 'responses',
+  );
+  // AG-UI's direct HTTP stream is tied to the browser request. A run that
+  // must survive F5/session navigation needs the detached Responses stream,
+  // which the server can replay through SubscribeRunEvents.
+  if (options.requireResumableRun && responses) {
+    return responses;
+  }
+  return preferred || responses || {
+    Protocol: 'responses',
+    Runtime: 'ksadk',
+    Endpoint: '/v1/responses',
+    Version: 'v1',
+    Capabilities: { A2UI: false, Interrupt: false, Cancel: false },
+  };
 }

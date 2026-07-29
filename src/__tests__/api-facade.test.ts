@@ -7,7 +7,7 @@ describe('ApiFacadeImpl', () => {
     const facade = new ApiFacadeImpl();
     const methods: (keyof ApiFacade)[] = [
       'listSessions', 'createSession', 'deleteSession', 'getSession',
-      'listSessionEvents', 'listSessionMessages', 'listSessionCheckpoints', 'listToolReceipts', 'previewCheckpointResume', 'runAgent', 'resumeRun', 'subscribeRunEvents',
+      'listSessionEvents', 'listSessionMessages', 'listSessionCheckpoints', 'listToolReceipts', 'previewCheckpointResume', 'runAgent', 'resumeRun', 'subscribeRunEvents', 'cancelRun',
       'getResponseFeedback', 'upsertResponseFeedback', 'deleteResponseFeedback',
       'listWorkspaceFiles', 'addWorkspaceFile', 'deleteWorkspaceFile', 'getWorkspaceFileContent',
       'listAgentModels', 'getAgentUiBootstrap', 'uploadFile',
@@ -144,6 +144,62 @@ describe('ApiFacadeImpl', () => {
           SessionId: 'sess-1',
           Offset: 2,
           Limit: 1,
+        },
+      },
+    ]);
+  });
+
+  it('uses message cursors for older history and scopes cancellation to the session', async () => {
+    const facade = new ApiFacadeImpl();
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (url, init) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body || '{}')) as Record<string, unknown>,
+      });
+      const data = String(url).endsWith('/ListSessionMessages')
+        ? { Messages: [{ MessageId: 'evt-2', Role: 'assistant', SeqId: 2 }], LatestSeqId: 2, HasMore: false, NextCursor: null }
+        : { Cancelled: true };
+      return new Response(JSON.stringify({ Code: 0, Data: data }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const messagePage = await facade.listSessionMessages('session-1', {
+        beforeSeqId: 6,
+        limit: 50,
+        includeReasoning: true,
+        includeToolEvents: true,
+        includeAttachments: true,
+      });
+      expect(messagePage.NextCursor).toBeNull();
+      await facade.cancelRun('agent-1', 'session-1', 'run-1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toEqual([
+      {
+        url: '/agentengine/api/v1/ListSessionMessages',
+        body: {
+          SessionId: 'session-1',
+          BeforeSeqId: 6,
+          Limit: 50,
+          IncludeReasoning: true,
+          IncludeToolEvents: true,
+          IncludeAttachments: true,
+        },
+      },
+      {
+        url: '/agentengine/api/v1/CancelRun',
+        body: {
+          AgentId: 'agent-1',
+          SessionId: 'session-1',
+          InvocationId: 'run-1',
         },
       },
     ]);

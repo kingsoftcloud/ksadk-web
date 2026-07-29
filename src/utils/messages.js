@@ -39,6 +39,11 @@ function extractContentText(content) {
 
 function mapToolEvents(toolEvents) {
   const tools = {};
+  const nameCounts = new Map();
+  for (const te of toolEvents ?? []) {
+    if (!te?.Name) continue;
+    nameCounts.set(te.Name, (nameCounts.get(te.Name) || 0) + 1);
+  }
   for (const te of toolEvents ?? []) {
     if (!te?.Name) continue;
     const status = TOOL_STATUS_MAP[String(te.Status ?? 'completed').toLowerCase()] ?? 'completed';
@@ -53,12 +58,18 @@ function mapToolEvents(toolEvents) {
     if (te.ApprovalRequestId) {
       entry.approvalRequestId = te.ApprovalRequestId;
       entry.approvalStatus = APPROVAL_STATUS_MAP[String(te.Status ?? 'paused').toLowerCase()] ?? 'pending';
+      entry.approvalProtocol = String(te.Protocol ?? '').toLowerCase() === 'ag-ui'
+        ? 'ag-ui'
+        : 'responses';
+      if (te.ApprovalMessage) entry.approvalMessage = String(te.ApprovalMessage);
+      if (te.ApprovalLevel) entry.approvalLevel = String(te.ApprovalLevel);
     }
     if (te.ToolCallId) {
       entry.previousResponseId = te.ToolCallId;
     }
-    // 同名 tool 后者覆盖前者(保留最后状态)
-    tools[te.Name] = entry;
+    // 仅同名多次时用 ToolCallId 分键；单工具和旧事件保持 name 键兼容。
+    const key = nameCounts.get(te.Name) > 1 && te.ToolCallId ? te.ToolCallId : te.Name;
+    tools[key] = entry;
   }
   return tools;
 }
@@ -73,10 +84,46 @@ function mapAttachments(attachments) {
   }));
 }
 
+function stringifyBlockValue(value) {
+  if (value === undefined || value === null) return '';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** Map KsADK's persisted, ordered stream timeline to the chat block model. */
+function mapPersistedBlocks(blocks) {
+  if (!Array.isArray(blocks) || !blocks.length) return undefined;
+  return blocks.flatMap((block, index) => {
+    const type = String(block?.Type || '').toLowerCase();
+    const seqId = block?.SeqId ?? index;
+    if (type === 'thinking' || type === 'text') {
+      const content = String(block?.Content || '');
+      if (!content) return [];
+      return [{
+        id: `history-${type}-${seqId}`,
+        type,
+        content,
+        status: 'done',
+      }];
+    }
+    if (type !== 'tool') return [];
+    const status = TOOL_STATUS_MAP[String(block?.Status || 'completed').toLowerCase()] ?? 'completed';
+    return [{
+      id: `history-tool-${seqId}`,
+      type: 'tool',
+      toolName: String(block?.Name || 'tool'),
+      args: stringifyBlockValue(block?.Args),
+      ...(block?.Result !== undefined ? { output: stringifyBlockValue(block.Result) } : {}),
+      status,
+      ...(block?.ToolCallId ? { extra: { previousResponseId: String(block.ToolCallId) } } : {}),
+    }];
+  });
+}
+
 export function mapBackendMessage(msg) {
   const role = msg.Role === 'assistant' ? 'model' : (msg.Role || 'user');
   const tools = msg.ToolEvents?.length ? mapToolEvents(msg.ToolEvents) : undefined;
   const attachments = mapAttachments(msg.Attachments);
+  const persistedBlocks = mapPersistedBlocks(msg.Blocks);
   const reasoning = msg.Reasoning?.length
     ? msg.Reasoning.map((r) => r.text).join('')
     : undefined;
@@ -90,14 +137,44 @@ export function mapBackendMessage(msg) {
     tools,
     attachments,
   };
+  // 历史消息重建交错 blocks(思考→工具→正文),刷新后也走 ProcessingBlocksView,
+  // 不回退到旧 reasoning+tools+content 散装渲染。
+  if (role === 'model') {
+    result.blocks = persistedBlocks ?? buildBlocksFromHistory({ reasoning, tools, content: result.content });
+  }
   // 反馈控件需要 responseId/eventId/traceId/rootSpanId(后端从 event Metadata 投出)
   if (msg.MessageId) result.eventId = msg.MessageId;
+  if (msg.InvocationId) result.invocationId = msg.InvocationId;
   if (msg.ResponseId) result.responseId = msg.ResponseId;
   if (msg.TraceId) result.traceId = msg.TraceId;
   if (msg.RootSpanId) result.rootSpanId = msg.RootSpanId;
   return result;
 }
 
-export function mapBackendMessages(messages) {
-  return messages.map(mapBackendMessage);
+function mapBackendActivities(msg) {
+  if (!Array.isArray(msg.Activities)) return [];
+  return msg.Activities.flatMap((activity, index) => {
+    const surfaceId = String(activity?.SurfaceId || '');
+    if (!surfaceId) return [];
+    const content = activity?.Content;
+    const messages = Array.isArray(content?.a2ui_operations)
+      ? content.a2ui_operations
+      : Array.isArray(content)
+        ? content
+        : [];
+    if (!messages.length) return [];
+    return [{
+      id: activity.MessageId || `a2ui-${msg.MessageId || msg.SeqId || 'message'}-${index}`,
+      role: 'a2ui',
+      content: '',
+      timestamp: parseTimestamp(msg.Timestamp),
+      aguiActivity: { surfaceId, messages: normalizeA2uiOperations(messages) },
+    }];
+  });
 }
+
+export function mapBackendMessages(messages) {
+  return messages.flatMap((message) => [mapBackendMessage(message), ...mapBackendActivities(message)]);
+}
+import { normalizeA2uiOperations } from '../core/run/a2ui.js';
+import { buildBlocksFromHistory } from '../core/run/blocks.js';

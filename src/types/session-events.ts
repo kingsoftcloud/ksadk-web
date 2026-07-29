@@ -9,6 +9,17 @@ export type SessionEventRecord = {
     role?: string;
     status?: string;
     detail?: string;
+    phase?: string | null;
+    payload?: Record<string, unknown> & {
+      status?: string;
+      detail?: string;
+      text?: string;
+      call_id?: string;
+      name?: string;
+      args?: unknown;
+      result?: unknown;
+      error?: unknown;
+    };
     parts?: Array<{
       type?: string;
       text?: string;

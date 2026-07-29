@@ -20,9 +20,29 @@ function parseTimestampMs(event) {
 }
 
 const ACTIVE_RUN_STATUSES = new Set(['in_progress', 'running', 'resuming', 'starting', 'queued', 'pending']);
+const RUNTIME_RUN_STATUS_BY_EVENT_TYPE = {
+  'run.started': 'in_progress',
+  'run.progress': 'in_progress',
+  'run.interrupted': 'interrupted',
+  'run.completed': 'completed',
+  'run.failed': 'failed',
+  'run.canceled': 'cancelled',
+};
 
 function eventType(event) {
   return String(event?.EventType || event?.event_type || '').trim();
+}
+
+function eventRunStatus(event) {
+  const type = eventType(event);
+  const content = event?.Content || event?.content || {};
+  const payload = content?.payload || event?.payload || {};
+  return String(
+    content?.status
+      || payload?.status
+      || RUNTIME_RUN_STATUS_BY_EVENT_TYPE[type]
+      || '',
+  ).trim().toLowerCase();
 }
 
 export function findActiveRunIds(events = [], options = {}) {
@@ -45,10 +65,11 @@ export function findActiveRunIds(events = [], options = {}) {
         Math.max(latestTimestampByInvocation.get(invocationId) || 0, timestamp),
       );
     }
-    if (eventType(event) !== 'run_status') {
+    const status = eventRunStatus(event);
+    if (!status) {
       continue;
     }
-    latestStatusByInvocation.set(invocationId, String(event?.Content?.status || event?.content?.status || '').trim());
+    latestStatusByInvocation.set(invocationId, status);
   }
   return Array.from(latestStatusByInvocation.entries())
     .filter(([invocationId, status]) => {

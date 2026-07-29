@@ -12,10 +12,11 @@ export type PreviewImageSize = {
 
 export type Message = {
   id: string;
-  role: 'user' | 'model' | 'tool' | 'system';
+  role: 'user' | 'model' | 'tool' | 'system' | 'a2ui';
   content: string;
   timestamp: number;
   responseId?: string;
+  invocationId?: string;
   eventId?: string;
   traceId?: string;
   rootSpanId?: string;
@@ -26,6 +27,29 @@ export type Message = {
   compactedUntilSeqId?: number;
   historical?: boolean;
   reasoning?: string;
+  /**
+   * 有序 "思考-行动-思考-输出" 交错 blocks(照抄 Wegent wework)。
+   * 存在时渲染层按数组顺序交错展示;为空则回退 reasoning/tools/content 旧渲染。
+   */
+  blocks?: import('../../core/run/blocks.js').ProcessingBlock[];
+  a2ui?: {
+    surfaceId: string;
+    surface: import('../../core/stream/types.js').A2UISurface;
+    pendingInteraction?: {
+      interactionId: string;
+      kind: string;
+      inputSchema: Record<string, unknown>;
+    };
+    ended?: boolean;
+  };
+  aguiActivity?: {
+    surfaceId: string;
+    messages: Array<Record<string, unknown>>;
+  };
+  aguiActivities?: Array<{
+    surfaceId: string;
+    messages: Array<Record<string, unknown>>;
+  }>;
   tools?: {
     [name: string]: {
       name: string;
@@ -36,6 +60,9 @@ export type Message = {
       previousResponseId?: string;
       serverLabel?: string;
       approvalStatus?: 'pending' | 'approved' | 'rejected';
+      approvalProtocol?: 'responses' | 'ag-ui';
+      approvalMessage?: string;
+      approvalLevel?: string;
     };
   };
   attachments?: MessageAttachment[];

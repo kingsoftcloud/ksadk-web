@@ -46,8 +46,8 @@ function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData
     async subscribeRunEvents() {
       return new ReadableStream<Uint8Array>();
     },
-    async cancelRun(agentId, invocationId) {
-      calls.push({ cancel: { agentId, invocationId } });
+    async cancelRun(agentId, sessionId, invocationId) {
+      calls.push({ cancel: { agentId, sessionId, invocationId } });
       return { Cancelled: true, Found: true, Status: 'cancelling' };
     },
     async getResponseFeedback() { return null; },
@@ -97,6 +97,274 @@ describe('RunEngineImpl', () => {
     useSessionStore.getState().setCurrentSessionId(null);
     useCheckpointStore.getState().clearSessionCheckpoints();
     resetDispatcherState();
+    vi.unstubAllGlobals();
+  });
+
+  it('projects AG-UI approval resolution without reviving the pending card', () => {
+    useSessionStore.getState().setCurrentSessionId('session-1');
+
+    dispatchRunEventToStores({
+      type: 'approval_requested',
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      approvalRequestId: 'approval-1',
+      protocol: 'ag-ui',
+      name: 'write_file',
+      args: '{"path":"/tmp/x.txt"}',
+      message: 'Approve?',
+    });
+    dispatchRunEventToStores({
+      type: 'approval_resolved',
+      sessionId: 'session-1',
+      approvalRequestId: 'approval-1',
+      decision: 'approved',
+    });
+    dispatchRunEventToStores({
+      type: 'approval_requested',
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      approvalRequestId: 'approval-1',
+      protocol: 'ag-ui',
+      name: 'write_file',
+      args: '{"path":"/tmp/x.txt"}',
+      message: 'Approve?',
+    });
+
+    expect(useMessageStore.getState().messages[0].tools?.['approval-1']).toMatchObject({
+      approvalRequestId: 'approval-1',
+      approvalProtocol: 'ag-ui',
+      approvalStatus: 'approved',
+      status: 'running',
+    });
+  });
+
+  it('keeps an approval audit after the approved tool later reports an execution failure', () => {
+    useSessionStore.getState().setCurrentSessionId('session-approval-error');
+
+    dispatchRunEventToStores({
+      type: 'tool_upsert',
+      sessionId: 'session-approval-error',
+      messageId: 'message-approval-error',
+      name: 'web_search',
+      args: '{"query":"latest AI news"}',
+      status: 'paused',
+      extra: {
+        approvalRequestId: 'approval-web-search',
+        approvalProtocol: 'responses',
+      },
+    });
+    dispatchRunEventToStores({
+      type: 'tool_result',
+      sessionId: 'session-approval-error',
+      messageId: 'message-approval-error',
+      name: 'web_search',
+      output: '{"ok":false,"error":"request rejected"}',
+    });
+    // AG-UI sends this audit event after its resumed turn has already emitted
+    // tool output. The acknowledgement must not erase that real outcome.
+    dispatchRunEventToStores({
+      type: 'approval_resolved',
+      sessionId: 'session-approval-error',
+      approvalRequestId: 'approval-web-search',
+      decision: 'approved',
+    });
+
+    const message = useMessageStore.getState().messages[0];
+    expect(message.tools?.web_search).toMatchObject({
+      approvalStatus: 'approved',
+      status: 'error',
+    });
+    expect(message.blocks?.find((block) => block.type === 'tool')).toMatchObject({
+      toolName: 'web_search',
+      status: 'error',
+      extra: expect.objectContaining({ approvalStatus: 'approved' }),
+    });
+  });
+
+  it('keeps a Responses approval inside its tool row instead of appending an interruption notice', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine({
+      ...createApiFacade(calls),
+      async runAgent() {
+        calls.push({ stream: 'approval' });
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(
+              'event: response.output_item.done\n'
+              + 'data: {"item":{"id":"approval-1","type":"mcp_approval_request","name":"web_search","arguments":"{\\"query\\":\\"AI news\\"}"}}\n\n'
+              + 'event: response.incomplete\n'
+              + 'data: {}\n\n',
+            ));
+            controller.close();
+          },
+        });
+      },
+    });
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: '',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-inline-approval');
+
+    expect(engine.start({ text: 'search the web', attachments: [], sessionId: 'session-inline-approval' })).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+
+    expect(useMessageStore.getState().messages.some((message) => message.role === 'system')).toBe(false);
+    expect(useMessageStore.getState().messages.at(-1)?.tools?.web_search).toMatchObject({
+      approvalStatus: 'pending',
+      status: 'paused',
+    });
+  });
+
+  it('projects a live AG-UI approval into a fresh assistant row after a session switch', () => {
+    useSessionStore.getState().setCurrentSessionId('session-before');
+    dispatchRunEventToStores({
+      type: 'assistant_message_created',
+      sessionId: 'session-before',
+      messageId: 'assistant-before',
+    });
+
+    // Loading a different session clears the visible transcript but must not
+    // leave a module-level assistant marker that drops its first live event.
+    useMessageStore.getState().setMessages([]);
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    dispatchRunEventToStores({
+      type: 'approval_requested',
+      sessionId: 'session-live',
+      messageId: 'assistant-live',
+      approvalRequestId: 'approval-live',
+      protocol: 'ag-ui',
+      name: 'run_command',
+      args: '{"command":"pwd"}',
+      message: 'Approval required',
+    });
+
+    expect(useMessageStore.getState().messages).toEqual([
+      expect.objectContaining({
+        id: 'assistant-live',
+        tools: {
+          'approval-live': expect.objectContaining({
+            approvalStatus: 'pending',
+            approvalProtocol: 'ag-ui',
+          }),
+        },
+      }),
+    ]);
+  });
+
+  it('settles session streaming when AG-UI finishes with an approval interrupt', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'data: {"type":"RUN_STARTED","threadId":"session-approval","runId":"run-approval"}',
+        '',
+        'data: {"type":"RUN_FINISHED","threadId":"session-approval","runId":"run-approval","outcome":{"type":"interrupt","interrupts":[{"id":"approval-1","reason":"tool","message":"Approval required","toolCallId":"approval-1"}]}}',
+        '',
+      ].join('\n'),
+      { headers: { 'content-type': 'text/event-stream' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    useSessionStore.getState().setCurrentSessionId('session-approval');
+    const engine = createRunEngine(createApiFacade([]));
+    engine.subscribe(dispatchRunEventToStores);
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      hostedChatTransport: {
+        Protocol: 'ag-ui',
+        Runtime: 'copilotkit',
+        Endpoint: '/agentengine/agui',
+        Version: '0.1.19',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      },
+    });
+
+    expect(engine.start({ text: 'run command', attachments: [], sessionId: 'session-approval' })).toBe(true);
+    for (let attempt = 0; attempt < 20 && fetchMock.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await waitForEngineIdle(engine);
+
+    expect(useStreamingStore.getState().getSessionActivity('session-approval')).toMatchObject({
+      status: 'waiting',
+      phase: '等待人工确认',
+    });
+    expect(useStreamingStore.getState().isSessionStreaming('session-approval')).toBe(false);
+    expect(useMessageStore.getState().messages[0].tools?.['approval-1']).toMatchObject({
+      approvalStatus: 'pending',
+      approvalProtocol: 'ag-ui',
+    });
+  });
+
+  it('resumes a rehydrated AG-UI approval through its durable session', async () => {
+    const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      fetchCalls.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response(
+        [
+          'data: {"type":"RUN_STARTED","threadId":"session-history","runId":"run-resume"}',
+          '',
+          'data: {"type":"RUN_FINISHED","threadId":"session-history","runId":"run-resume","outcome":{"type":"success"}}',
+          '',
+        ].join('\n'),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }));
+    const engine = createRunEngine(createApiFacade([]));
+    const resolved: string[] = [];
+    engine.subscribe((event) => {
+      if (event.type === 'approval_resolved') resolved.push(event.approvalRequestId);
+    });
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      hostedChatTransport: {
+        Protocol: 'ag-ui',
+        Runtime: 'copilotkit',
+        Endpoint: '/agentengine/agui',
+        Version: '0.1.19',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      },
+    });
+
+    const accepted = engine.resumeAguiInterrupt({
+      sessionId: 'session-history',
+      interruptId: 'approval-history-1',
+      status: 'resolved',
+      payload: { decision: 'approve' },
+    });
+
+    expect(accepted).toBe(true);
+    for (let attempt = 0; attempt < 20 && fetchCalls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await waitForEngineIdle(engine);
+
+    expect(fetchCalls).toEqual([
+      expect.objectContaining({
+        url: '/agentengine/agui',
+        body: expect.objectContaining({
+          threadId: 'session-history',
+          resume: [{
+            interruptId: 'approval-history-1',
+            status: 'resolved',
+            payload: { decision: 'approve' },
+          }],
+        }),
+      }),
+    ]);
+    expect(resolved).toEqual(['approval-history-1']);
   });
 
   it('uses the latest runtime config when starting a run', async () => {
@@ -186,6 +454,27 @@ describe('RunEngineImpl', () => {
       ApiFormat: 'responses',
       ResponsesInput: [{ role: 'user', content: expectedContent }],
       Messages: [{ role: 'user', content: expectedContent }],
+    });
+  });
+
+  it('sends the selected conversation permission mode as runtime metadata', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'langgraph',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      permissionMode: 'full',
+    });
+
+    engine.start({ text: 'continue without default confirmations', attachments: [], sessionId: 'session-live' });
+    await waitForCalls(calls);
+
+    expect(calls[0]).toMatchObject({
+      Metadata: { agentengine: { tool_approval_mode: 'full' } },
     });
   });
 
@@ -369,7 +658,7 @@ describe('RunEngineImpl', () => {
 
     await engine.cancelRemote(invocationId);
     expect(calls.at(-1)).toEqual({
-      cancel: { agentId: 'agent-live', invocationId },
+      cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
   });
 
@@ -432,6 +721,28 @@ describe('RunEngineImpl', () => {
       phase: '等待首个输出',
       status: 'waiting',
       detail: '正在接收流式事件',
+    });
+  });
+
+  it('settles an offscreen session when its Responses stream ends after a session switch', () => {
+    useSessionStore.getState().setCurrentSessionId('session-visible');
+    useStreamingStore.getState().setSessionStreaming('session-background', true);
+    useStreamingStore.getState().updateActivity({
+      sessionId: 'session-background',
+      status: 'completed',
+      phase: '运行完成',
+      countEvent: false,
+    });
+
+    dispatchRunEventToStores({
+      type: 'stream_ended',
+      sessionId: 'session-background',
+    });
+
+    expect(useStreamingStore.getState().isSessionStreaming('session-background')).toBe(false);
+    expect(useStreamingStore.getState().getSessionActivity('session-background')).toMatchObject({
+      status: 'completed',
+      phase: '运行完成',
     });
   });
 
@@ -626,7 +937,7 @@ describe('RunEngineImpl', () => {
     await waitForCalls(calls, 2);
 
     expect(calls.at(-1)).toEqual({
-      cancel: { agentId: 'agent-live', invocationId },
+      cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
   });
 
@@ -841,7 +1152,7 @@ describe('RunEngineImpl', () => {
     await engine.cancelRemote(invocationId);
 
     expect(calls.at(-1)).toEqual({
-      cancel: { agentId: 'agent-live', invocationId },
+      cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
   });
 });

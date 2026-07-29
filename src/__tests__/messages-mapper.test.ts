@@ -48,6 +48,43 @@ describe('mapBackendMessage', () => {
     expect(result.tools.search.status).toBe('completed');
   });
 
+  it('uses persisted ordered blocks when replay can preserve interleaving', () => {
+    const result = mapBackendMessage({
+      MessageId: 'msg-interleaved',
+      Role: 'assistant',
+      Content: { text: '【阶段 1/2】进度。【阶段 2/2】最终答案。' },
+      Reasoning: [{ text: '合并的兼容字段', SeqId: 1 }],
+      Blocks: [
+        { Type: 'thinking', Content: '第一段思考', SeqId: 2 },
+        { Type: 'text', Content: '【阶段 1/2】进度。', SeqId: 3 },
+        { Type: 'thinking', Content: '第二段思考', SeqId: 4 },
+        { Type: 'text', Content: '【阶段 2/2】最终答案。', SeqId: 5 },
+      ],
+    } satisfies BackendMessage);
+
+    expect(result.blocks).toMatchObject([
+      { type: 'thinking', content: '第一段思考', status: 'done' },
+      { type: 'text', content: '【阶段 1/2】进度。', status: 'done' },
+      { type: 'thinking', content: '第二段思考', status: 'done' },
+      { type: 'text', content: '【阶段 2/2】最终答案。', status: 'done' },
+    ]);
+  });
+
+  it('keeps same-name tool calls distinct by ToolCallId', () => {
+    const result = mapBackendMessage({
+      Role: 'assistant',
+      Content: { text: 'done' },
+      ToolEvents: [
+        { Name: 'search', ToolCallId: 'call-1', Args: { q: 'one' }, Result: 'first' },
+        { Name: 'search', ToolCallId: 'call-2', Args: { q: 'two' }, Result: 'second' },
+      ],
+    } satisfies BackendMessage);
+
+    expect(Object.keys(result.tools)).toEqual(['call-1', 'call-2']);
+    expect(result.tools['call-1'].args).toBe('{"q":"one"}');
+    expect(result.tools['call-2'].output).toBe('second');
+  });
+
   it('maps paused approval tool event', () => {
     const msg: BackendMessage = {
       Role: 'assistant',
@@ -60,6 +97,31 @@ describe('mapBackendMessage', () => {
     expect(result.tools.send_email.status).toBe('paused');
     expect(result.tools.send_email.approvalRequestId).toBe('apr-1');
     expect(result.tools.send_email.approvalStatus).toBe('pending');
+    expect(result.tools.send_email.approvalProtocol).toBe('responses');
+  });
+
+  it('preserves AG-UI protocol for replayed approval events', () => {
+    const msg = {
+      Role: 'assistant',
+      Content: { text: '' },
+      ToolEvents: [
+        {
+          Name: 'run_command',
+          Status: 'approved',
+          ApprovalRequestId: 'interrupt-1',
+          Protocol: 'ag-ui',
+          ApprovalLevel: 'elevated',
+          ApprovalMessage: '运行此高风险命令前需要确认。',
+        },
+      ],
+    } as BackendMessage;
+
+    const result = mapBackendMessage(msg);
+
+    expect(result.tools.run_command.approvalStatus).toBe('approved');
+    expect(result.tools.run_command.approvalProtocol).toBe('ag-ui');
+    expect(result.tools.run_command.approvalLevel).toBe('elevated');
+    expect(result.tools.run_command.approvalMessage).toBe('运行此高风险命令前需要确认。');
   });
 
   it('maps denied approval to rejected', () => {
@@ -81,5 +143,50 @@ describe('mapBackendMessage', () => {
     expect(result).toHaveLength(2);
     expect(result[0].role).toBe('user');
     expect(result[1].role).toBe('model');
+  });
+
+  it('rehydrates persisted A2UI operations as an activity message', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'assistant-1',
+      Role: 'assistant',
+      Content: { text: '状态如下' },
+      Activities: [{
+        MessageId: 'run-1:a2ui:status',
+        SurfaceId: 'status',
+        Content: {
+          a2ui_operations: [{ createSurface: { surfaceId: 'status' } }],
+        },
+      }],
+    }]);
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toMatchObject({
+      role: 'a2ui',
+      aguiActivity: {
+        surfaceId: 'status',
+        messages: [{ createSurface: { surfaceId: 'status' } }],
+      },
+    });
+  });
+
+  it('repairs only the legacy A2UI root id during history rehydration', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'assistant-legacy',
+      Role: 'assistant',
+      Content: { text: '状态如下' },
+      Activities: [{
+        SurfaceId: 'status',
+        Content: {
+          a2ui_operations: [{
+            updateComponents: {
+              surfaceId: 'status',
+              components: [{ id: 'status-root', component: 'Column', children: [] }],
+            },
+          }],
+        },
+      }],
+    }]);
+
+    expect(result[1].aguiActivity.messages[0].updateComponents.components[0].id).toBe('root');
   });
 });

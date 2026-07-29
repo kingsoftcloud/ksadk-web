@@ -47,6 +47,32 @@ test('run state utils keep in-progress invocations active after persisted output
   );
 });
 
+test('run state utils identify RuntimeEvent lifecycle events', async () => {
+  const runStateUtils = await loadRunStateUtils();
+
+  assert.ok(runStateUtils, 'expected run state helpers to exist');
+  assert.deepEqual(
+    runStateUtils.findActiveRunIds([
+      {
+        EventType: 'run.started',
+        InvocationId: 'runtime-active',
+        Content: { payload: { status: 'in_progress' } },
+      },
+      {
+        EventType: 'run.started',
+        InvocationId: 'runtime-done',
+        Content: { payload: { status: 'in_progress' } },
+      },
+      {
+        EventType: 'run.completed',
+        InvocationId: 'runtime-done',
+        Content: { payload: { status: 'completed' } },
+      },
+    ]),
+    ['runtime-active'],
+  );
+});
+
 test('run state utils ignore stale in-progress invocations after refresh', async () => {
   const runStateUtils = await loadRunStateUtils();
 

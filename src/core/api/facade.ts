@@ -39,6 +39,7 @@ export class ApiFacadeImpl implements ApiFacade {
     opts?: {
       agentId?: string;
       afterSeqId?: number;
+      beforeSeqId?: number;
       limit?: number;
       includeReasoning?: boolean;
       includeToolEvents?: boolean;
@@ -75,7 +76,7 @@ export class ApiFacadeImpl implements ApiFacade {
   }
 
   async resumeRun(
-    params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string },
+    params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string; invocationId?: string },
     opts?: { signal?: AbortSignal },
   ) {
     return resumeRunApi(params, opts);
@@ -93,8 +94,12 @@ export class ApiFacadeImpl implements ApiFacade {
     return streamGetAction('SubscribeRunEvents', qs, opts);
   }
 
-  async cancelRun(agentId: string, invocationId: string, opts?: { signal?: AbortSignal }) {
-    return postJsonAction('CancelRun', { AgentId: agentId, InvocationId: invocationId }, opts);
+  async cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }) {
+    return postJsonAction(
+      'CancelRun',
+      { AgentId: agentId, SessionId: sessionId, InvocationId: invocationId },
+      opts,
+    );
   }
 
   // Feedback

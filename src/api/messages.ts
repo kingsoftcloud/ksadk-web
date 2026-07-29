@@ -5,6 +5,17 @@ export type BackendMessage = {
   Role: 'user' | 'assistant' | 'tool' | 'system';
   Content?: { text?: string } | unknown;
   Reasoning?: { text: string; SeqId: number }[];
+  /** Ordered persisted stream timeline for lossless history replay. */
+  Blocks?: {
+    Type: 'thinking' | 'text' | 'tool';
+    SeqId?: number;
+    Content?: string;
+    Name?: string;
+    Args?: unknown;
+    Result?: unknown;
+    Status?: 'running' | 'completed' | 'failed' | 'paused';
+    ToolCallId?: string;
+  }[];
   ToolEvents?: {
     SeqId?: number;
     Type?: string;
@@ -14,8 +25,18 @@ export type BackendMessage = {
     Status?: 'running' | 'completed' | 'failed' | 'paused' | 'approved' | 'denied';
     ToolCallId?: string;
     ApprovalRequestId?: string;
+    Protocol?: string;
+    ApprovalLevel?: string;
+    ApprovalMessage?: string;
     ResultSeqId?: number;
     Reason?: string;
+  }[];
+  Activities?: {
+    SeqId?: number;
+    Type?: string;
+    MessageId?: string;
+    SurfaceId?: string;
+    Content?: unknown;
   }[];
   Attachments?: {
     file_uri: string;
@@ -33,6 +54,7 @@ export type BackendMessage = {
 export type ListSessionMessagesOptions = {
   agentId?: string;
   afterSeqId?: number;
+  beforeSeqId?: number;
   limit?: number;
   includeReasoning?: boolean;
   includeToolEvents?: boolean;
@@ -57,6 +79,7 @@ export async function listSessionMessages(
       AgentId: opts?.agentId,
       SessionId: sessionId,
       AfterSeqId: opts?.afterSeqId,
+      BeforeSeqId: opts?.beforeSeqId,
       Limit: opts?.limit,
       IncludeReasoning: opts?.includeReasoning,
       IncludeToolEvents: opts?.includeToolEvents,
@@ -68,6 +91,10 @@ export async function listSessionMessages(
     Messages: data.Messages ?? [],
     LatestSeqId: Number.isFinite(Number(data.LatestSeqId)) ? Number(data.LatestSeqId) : 0,
     HasMore: Boolean(data.HasMore),
-    NextCursor: Number.isFinite(Number(data.NextCursor)) ? Number(data.NextCursor) : null,
+    NextCursor: data.NextCursor === null || data.NextCursor === undefined
+      ? null
+      : Number.isFinite(Number(data.NextCursor))
+        ? Number(data.NextCursor)
+        : null,
   };
 }

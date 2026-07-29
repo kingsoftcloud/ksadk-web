@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { preprocessMarkdown } from '../utils/markdown.js';
 
 const LazyCodeBlock = React.lazy(() =>
@@ -32,6 +33,33 @@ type MarkdownDataCellProps = React.TdHTMLAttributes<HTMLTableCellElement>;
 type MarkdownLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement>;
 
 const markdownComponents = {
+  h1({ children }: { children?: React.ReactNode }) {
+    return <h1 className="mb-3.5 mt-5 text-[17px] font-semibold text-foreground">{children}</h1>;
+  },
+  h2({ children }: { children?: React.ReactNode }) {
+    return <h2 className="mb-2.5 mt-4.5 text-[15px] font-semibold text-foreground">{children}</h2>;
+  },
+  h3({ children }: { children?: React.ReactNode }) {
+    return <h3 className="mb-2 mt-3.5 text-[14px] font-semibold text-foreground">{children}</h3>;
+  },
+  p({ children }: { children?: React.ReactNode }) {
+    return <p className="mb-2.5 min-w-0 break-words leading-[1.65] text-foreground">{children}</p>;
+  },
+  ul({ children }: { children?: React.ReactNode }) {
+    return <ul className="mb-3 list-disc space-y-1.5 pl-5 text-foreground">{children}</ul>;
+  },
+  ol({ children }: { children?: React.ReactNode }) {
+    return <ol className="mb-3 list-decimal space-y-1.5 pl-8 text-foreground">{children}</ol>;
+  },
+  li({ children }: { children?: React.ReactNode }) {
+    return <li className="min-w-0 break-words pl-1 leading-6 text-foreground">{children}</li>;
+  },
+  strong({ children }: { children?: React.ReactNode }) {
+    return <strong className="font-semibold text-foreground">{children}</strong>;
+  },
+  blockquote({ children }: { children?: React.ReactNode }) {
+    return <blockquote className="mb-3 border-l-2 border-border pl-4 text-text-secondary">{children}</blockquote>;
+  },
   code({ className, children, ...props }: MarkdownCodeProps) {
     const match = /language-(\w+)/.exec(className || '');
     const rawValue = String(children ?? '');
@@ -39,7 +67,7 @@ const markdownComponents = {
 
     if (isInline) {
       return (
-        <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-md text-[13.5px] font-mono text-slate-800 dark:text-slate-200 before:content-none after:content-none border border-slate-200 dark:border-slate-700" {...props}>
+        <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[13.5px] text-text-primary before:content-none after:content-none" {...props}>
           {children}
         </code>
       );
@@ -49,7 +77,7 @@ const markdownComponents = {
 
     if (lang === 'mermaid') {
       return (
-        <Suspense fallback={<div className="h-32 animate-pulse bg-slate-100 dark:bg-slate-800 rounded" />}>
+        <Suspense fallback={<div className="h-32 animate-pulse rounded bg-muted" />}>
           <LazyMermaidBlock chart={rawValue} />
         </Suspense>
       );
@@ -63,21 +91,21 @@ const markdownComponents = {
   },
   table({ children, ...props }: MarkdownTableProps) {
     return (
-      <div className="overflow-x-auto my-4 border border-slate-200 dark:border-slate-700 rounded-lg">
-        <table className="w-full text-sm text-left my-0" {...props}>
+      <div className="mb-3 max-w-full overflow-x-auto">
+        <table className="w-full min-w-max border-collapse text-sm text-foreground" {...props}>
           {children}
         </table>
       </div>
     );
   },
   th({ children, ...props }: MarkdownCellProps) {
-    return <th className="bg-slate-50 dark:bg-slate-800/50 px-4 py-2 font-semibold border-b border-slate-200 dark:border-slate-700" {...props}>{children}</th>;
+    return <th className="border-b border-border px-3 py-2 text-left font-semibold text-foreground" {...props}>{children}</th>;
   },
   td({ children, ...props }: MarkdownDataCellProps) {
-    return <td className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0" {...props}>{children}</td>;
+    return <td className="border-b border-border px-3 py-2 text-text-secondary" {...props}>{children}</td>;
   },
   a({ children, href, ...props }: MarkdownLinkProps) {
-     return <a href={href} className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+     return <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
   }
 };
 
@@ -85,9 +113,9 @@ const PlainMarkdown: React.FC<{ content: string }> = React.memo(({ content }) =>
   const processedContent = preprocessMarkdown(content);
 
   return (
-    <div className="prose prose-slate dark:prose-invert max-w-none break-words text-[15px] leading-7 prose-headings:mb-3 prose-headings:mt-6 prose-headings:font-semibold prose-headings:text-slate-900 dark:prose-headings:text-slate-50 prose-h1:text-[1.95rem] prose-h1:leading-tight prose-h1:tracking-[-0.02em] prose-h2:text-[1.55rem] prose-h2:leading-tight prose-h2:tracking-[-0.015em] prose-h3:text-[1.2rem] prose-h3:leading-snug prose-p:my-3 prose-p:leading-7 prose-strong:text-slate-900 dark:prose-strong:text-slate-100 prose-ol:my-3 prose-ul:my-3 prose-li:my-1.5 prose-li:leading-7 prose-hr:my-5 prose-hr:border-slate-200 dark:prose-hr:border-slate-700 prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    <div className="max-w-none break-words text-[14px] leading-[1.65] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         components={markdownComponents}
       >
         {processedContent}

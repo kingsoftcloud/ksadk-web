@@ -15,6 +15,15 @@ test('sidebar does not block session navigation while a run is streaming', () =>
   assert.doesNotMatch(source, /if \(!isStreaming\) \{\s*onSelectSession/);
 });
 
+test('sidebar exposes the currently selected session with a quiet visual state', () => {
+  const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
+
+  assert.match(source, /const selected = currentSessionId === session\.SessionId/);
+  assert.match(source, /aria-current=\{selected \? 'page' : undefined\}/);
+  assert.match(source, /border-l-2 border-primary/);
+  assert.doesNotMatch(source, /当前/);
+});
+
 test('session switching does not disconnect the active run engine', () => {
   const source = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
@@ -38,7 +47,18 @@ test('restore subscription stays connected while active run has no new events ye
 
   assert.doesNotMatch(lifecycleSource, /RESTORE_EMPTY_SUBSCRIPTION_TIMEOUT_MS/);
   assert.doesNotMatch(lifecycleSource, /emptySubscriptionTimer/);
-  assert.match(lifecycleSource, /RESTORE_SUBSCRIPTION_TIMEOUT_MS/);
+  assert.doesNotMatch(lifecycleSource, /RESTORE_SUBSCRIPTION_TIMEOUT_MS/);
+  assert.match(lifecycleSource, /waitForRestoreRetry/);
+  assert.match(lifecycleSource, /while \(!terminalStatusSeen && isCurrentSubscription\(\)\)/);
+});
+
+test('restore subscription treats SSE heartbeats as session-scoped liveness', () => {
+  const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+
+  assert.match(
+    lifecycleSource,
+    /eventName === '__ping__'[\s\S]{0,280}updateActivity\(\{[\s\S]{0,180}sessionId: options\.sessionId[\s\S]{0,180}countEvent: false/,
+  );
 });
 
 test('run dispatcher ignores streamed tokens for inactive sessions', () => {

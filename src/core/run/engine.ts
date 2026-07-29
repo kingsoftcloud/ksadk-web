@@ -6,11 +6,13 @@ import { shouldStopReadingRunStream } from '../../utils/stream-control.js';
 import { parseSseChunk, splitSseBuffer } from '../transport/sse-parser.js';
 import type { SessionEventRecord } from '../../types/session-events.js';
 import { getErrorMessage } from '../../utils/error.js';
+import { ApiError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
+import { AguiRunClient } from './agui.js';
 
 type StreamConsumeResult = {
   receivedData: boolean;
@@ -94,6 +96,8 @@ export class RunEngineImpl implements RunEngine {
   private abortController: AbortController | null = null;
   private activeCompactionId: string | null = null;
   private activeSessionId: string | null = null;
+  private aguiClient: AguiRunClient | null = null;
+  private aguiThreadSessionId: string | null = null;
   private api: ApiFacade;
   private config: RunEngineConfig = {
     agentId: 'default-agent',
@@ -123,6 +127,21 @@ export class RunEngineImpl implements RunEngine {
     for (const listener of this.listeners) {
       listener(scopedEvent as RunEvent);
     }
+  }
+
+  private getAguiClient(sessionId: string): AguiRunClient | null {
+    const transport = this.config.hostedChatTransport;
+    if (transport?.Protocol !== 'ag-ui' || !transport.Endpoint) return null;
+    if (!this.aguiClient || this.aguiThreadSessionId !== sessionId) {
+      this.aguiClient = new AguiRunClient({
+        url: transport.Endpoint,
+        agentId: this.config.agentId,
+        threadId: sessionId,
+        onEvent: (event) => this.emit(event),
+      });
+      this.aguiThreadSessionId = sessionId;
+    }
+    return this.aguiClient;
   }
 
   private setStage(stage: RunStage) {
@@ -181,6 +200,37 @@ export class RunEngineImpl implements RunEngine {
 
         const invocationId = createInvocationId();
         useStreamingStore.getState().setCurrentRunId(invocationId);
+        useStreamingStore.getState().setActiveInvocationId(invocationId);
+        useStreamingStore.getState().setLastSeqId(0);
+
+        const hostedTransport = this.config.hostedChatTransport;
+        const useAgui = !isResponsesResume
+          && draft.attachments.length === 0
+          && hostedTransport?.Protocol === 'ag-ui';
+        const aguiClient = useAgui ? this.getAguiClient(sessionId) : null;
+        if (aguiClient && hostedTransport) {
+          this.setStage('streaming');
+          this.emit({ type: 'activity', phase: '等待 AG-UI 输出', status: 'waiting', countEvent: false });
+          const aguiResult = await aguiClient.run(
+            draft.text,
+            invocationId,
+            this.abortController?.signal,
+          );
+          if (aguiResult.status === 'interrupted') {
+            this.setStage('completing');
+            this.emit({ type: 'stream_ended' });
+            return;
+          }
+          if (aguiResult.status !== 'completed') {
+            this.setStage('error');
+            this.emit({ type: 'activity', phase: 'AG-UI 运行失败', status: 'failed', countEvent: false });
+            return;
+          }
+          this.setStage('completing');
+          this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
 
         const body = this.buildRequestBody(
           sessionId,
@@ -197,7 +247,7 @@ export class RunEngineImpl implements RunEngine {
 
         const assistantMessageId = `msg-${Date.now()}`;
 
-        const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId);
+        const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId, invocationId);
 
         if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
           retriedWithNewSession = true;
@@ -211,7 +261,7 @@ export class RunEngineImpl implements RunEngine {
             this.setStage('streaming');
             this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
             const retryMsgId = `msg-${Date.now()}`;
-            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId);
+            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
             streamResult.terminalStatus = retryResult.terminalStatus;
           }
         }
@@ -252,13 +302,37 @@ export class RunEngineImpl implements RunEngine {
           if (isNetwork) {
             this.setStage('recovering');
             this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
+            // 断线续订:有 lastSeqId + invocationId 时用 subscribeRunEvents(afterSeqId) 续订,
+            // 避免从头 runAgent 导致已流式内容重复。续订失败再回退普通 error。
+            const lastSeq = useStreamingStore.getState().lastSeqId;
+            const resumeInvocationId = useStreamingStore.getState().activeInvocationId;
+            if (lastSeq > 0 && resumeInvocationId && this.activeSessionId) {
+              try {
+                this.resumeRun({
+                  sessionId: this.activeSessionId,
+                  invocationId: resumeInvocationId,
+                  afterSeqId: lastSeq,
+                });
+                return;
+              } catch (resumeErr) {
+                console.warn('[RunEngine] afterSeqId resume failed, fall back to error:', resumeErr);
+              }
+            }
+          } else if (error instanceof ApiError && error.code === 429) {
+            // 限流:单独事件,前端显示友好提示而非"运行失败"白屏。
+            this.setStage('error');
+            this.emit({
+              type: 'rate_limited',
+              message: error.message || '请求过于频繁，请稍后重试',
+              sessionId,
+            });
           } else {
             this.setStage('error');
             this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
           }
         }
       } finally {
-        useStreamingStore.getState().setStreaming(false);
+        useStreamingStore.getState().setSessionStreaming(sessionId, false);
         this.setStage('idle');
         this.activeCompactionId = null;
         this.activeSessionId = null;
@@ -272,12 +346,13 @@ export class RunEngineImpl implements RunEngine {
     if (this._stage === 'idle') return;
     this.setStage('stopping');
     const invocationId = useStreamingStore.getState().currentRunId;
-    if (invocationId) {
-      void this.api.cancelRun(this.config.agentId, invocationId).catch((err) => {
+    if (invocationId && this.activeSessionId) {
+      void this.api.cancelRun(this.config.agentId, this.activeSessionId, invocationId).catch((err) => {
         console.warn('[RunEngine] cancelRun on stop failed:', err);
       });
     }
     this.abortController?.abort();
+    this.aguiClient?.abort();
     useStreamingStore.getState().stopActivity(
       invocationId
         ? '已向运行时发送取消请求；如果当前框架只支持协作式取消，后台可能会在下一个安全点停止。'
@@ -296,7 +371,8 @@ export class RunEngineImpl implements RunEngine {
   disconnect(): void {
     if (this._stage === 'idle') return;
     this.abortController?.abort();
-    useStreamingStore.getState().setStreaming(false);
+    this.aguiClient?.abort();
+    useStreamingStore.getState().setSessionStreaming(this.activeSessionId, false);
     useStreamingStore.getState().clearActivity();
     this._stage = 'idle';
     this.activeCompactionId = null;
@@ -305,7 +381,9 @@ export class RunEngineImpl implements RunEngine {
 
   async cancelRemote(invocationId: string): Promise<void> {
     try {
-      await this.api.cancelRun(this.config.agentId, invocationId);
+      if (this.activeSessionId) {
+        await this.api.cancelRun(this.config.agentId, this.activeSessionId, invocationId);
+      }
     } catch (err) {
       console.warn('[RunEngine] cancelRemote failed:', err);
     }
@@ -355,7 +433,7 @@ export class RunEngineImpl implements RunEngine {
             if (!chunk.trim()) continue;
             const events = parseSseChunk(chunk);
             for (const event of events) {
-              if (event.eventName === '__done__') continue;
+              if (event.eventName === '__done__' || event.eventName === '__ping__') continue;
               this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
               this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
               terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
@@ -383,7 +461,7 @@ export class RunEngineImpl implements RunEngine {
           console.error('Failed to subscribe to run events:', error);
         }
       } finally {
-        useStreamingStore.getState().setStreaming(false);
+        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
         useStreamingStore.getState().setCurrentRunId('');
         this.setStage('idle');
         this.activeSessionId = null;
@@ -465,6 +543,7 @@ export class RunEngineImpl implements RunEngine {
           protocol,
           protocolState,
           assistantMessageId,
+          invocationId,
         );
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
           if (streamResult.terminalStatus === 'cancelled') {
@@ -501,7 +580,7 @@ export class RunEngineImpl implements RunEngine {
           this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
         }
       } finally {
-        useStreamingStore.getState().setStreaming(false);
+        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
         useStreamingStore.getState().setCurrentRunId('');
         this.setStage('idle');
         this.activeSessionId = null;
@@ -509,6 +588,70 @@ export class RunEngineImpl implements RunEngine {
       }
     })();
 
+    return true;
+  }
+
+  resumeAguiInterrupt(params: {
+    sessionId?: string | null;
+    interruptId: string;
+    status: 'resolved' | 'cancelled';
+    payload?: unknown;
+    onSettled?: (sessionId: string | null) => void;
+  }): boolean {
+    if (this._stage !== 'idle') return false;
+
+    const sessionId = params.sessionId || this.aguiThreadSessionId;
+    if (!sessionId) return false;
+    const aguiClient = this.getAguiClient(sessionId);
+    if (!aguiClient) return false;
+    this.activeSessionId = sessionId;
+    const invocationId = createInvocationId();
+    useStreamingStore.getState().setCurrentRunId(invocationId);
+    this.setStage('connecting');
+    this.emit({ type: 'activity', phase: '提交人工确认', status: 'connecting', countEvent: false });
+
+    void (async () => {
+      try {
+        this.setStage('streaming');
+        const result = await aguiClient.resume(invocationId, {
+          interruptId: params.interruptId,
+          status: params.status,
+          payload: params.payload,
+        });
+        const payload = params.payload && typeof params.payload === 'object'
+          ? params.payload as Record<string, unknown>
+          : {};
+        const rawDecision = String(payload.decision || payload.type || '').toLowerCase();
+        this.emit({
+          type: 'approval_resolved',
+          approvalRequestId: params.interruptId,
+          decision: params.status === 'cancelled' || rawDecision === 'reject' || rawDecision === 'rejected'
+            ? 'rejected'
+            : 'approved',
+        });
+        if (result.status === 'interrupted') {
+          this.setStage('completing');
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
+        if (result.status !== 'completed') {
+          this.setStage('error');
+          this.emit({ type: 'activity', phase: '人工确认恢复失败', status: 'failed', countEvent: false });
+          return;
+        }
+        this.setStage('completing');
+        this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
+        this.emit({ type: 'stream_ended' });
+      } catch (error) {
+        this.setStage('error');
+        this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
+      } finally {
+        useStreamingStore.getState().setCurrentRunId('');
+        this.setStage('idle');
+        this.activeSessionId = null;
+        params.onSettled?.(sessionId);
+      }
+    })();
     return true;
   }
 
@@ -600,6 +743,13 @@ export class RunEngineImpl implements RunEngine {
       Model: this.config.selectedModel || undefined,
       ModelMetadata: this.config.selectedModelMetadata || undefined,
       ModelOptions: buildModelOptionsFromThinkingMode(normalizeThinkingMode(this.config.thinkingMode)),
+      // Keep client-selected permission semantics namespaced as runtime controls;
+      // the server can validate them and still apply a stricter deployment policy.
+      Metadata: {
+        agentengine: {
+          tool_approval_mode: this.config.permissionMode || 'risk',
+        },
+      },
     };
 
     if (!isResponsesResume) {
@@ -621,6 +771,7 @@ export class RunEngineImpl implements RunEngine {
     protocol: StreamProtocol,
     protocolState: Record<string, unknown>,
     messageId: string,
+    invocationId?: string,
   ): Promise<StreamConsumeResult> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -636,7 +787,7 @@ export class RunEngineImpl implements RunEngine {
 
         if (!messageCreated) {
           messageCreated = true;
-          this.emit({ type: 'assistant_message_created', messageId });
+          this.emit({ type: 'assistant_message_created', messageId, invocationId });
         }
 
         buffer += decoder.decode(value, { stream: true });
@@ -722,10 +873,19 @@ export class RunEngineImpl implements RunEngine {
         this.emit({ type: 'tool_result', messageId, name: action.name, output: action.output });
         break;
       case 'approval_request':
-        this.emit({ type: 'system_message', content: '本次运行需要人工审批后才能继续。' });
+        this.emit({
+          type: 'approval_requested',
+          messageId,
+          approvalRequestId: action.approvalRequestId,
+          protocol: 'responses',
+          name: '人工确认',
+          args: '',
+          message: '本次运行需要人工审批后才能继续。',
+        });
         break;
       case 'incomplete':
-        this.emit({ type: 'system_message', content: '本次运行已中断，需要人工确认后继续。' });
+        // 审批暂停已由对应的 tool_upsert(status=paused) 呈现在工具行中。
+        // 这里不再额外追加系统消息，以免把同一次审批拆成突兀的全宽提示卡。
         break;
       case 'failed':
         this.emit({ type: 'text_final', messageId, text: `生成失败：${action.message}` });
@@ -735,6 +895,18 @@ export class RunEngineImpl implements RunEngine {
         break;
       case 'compaction':
         this.emit({ type: 'compaction', phase: action.phase, trigger: action.trigger, compactedUntilSeqId: action.compactedUntilSeqId });
+        break;
+      case 'a2ui_surface_begin':
+        this.emit({ type: 'a2ui_surface_begin', surfaceId: action.surfaceId, surface: action.surface });
+        break;
+      case 'a2ui_surface_update':
+        this.emit({ type: 'a2ui_surface_update', surfaceId: action.surfaceId, surface: action.surface });
+        break;
+      case 'a2ui_surface_end':
+        this.emit({ type: 'a2ui_surface_end', surfaceId: action.surfaceId });
+        break;
+      case 'a2ui_interaction':
+        this.emit({ type: 'a2ui_interaction', surfaceId: action.surfaceId, interactionId: action.interactionId, kind: action.kind, inputSchema: action.inputSchema });
         break;
     }
   }
