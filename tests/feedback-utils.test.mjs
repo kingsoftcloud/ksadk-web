@@ -30,6 +30,14 @@ test('feedback utils expose assistant response feedback state', async () => {
     ),
     true,
   );
+  assert.equal(
+    feedback.shouldRenderFeedbackControls(
+      { role: 'model', responseId: 'resp_123' },
+      false,
+      true,
+    ),
+    true,
+  );
 
   assert.deepEqual(
     feedback.normalizeFeedback({
@@ -81,7 +89,6 @@ test('feedback utils build action payloads for up and down feedback', async () =
       AgentId: 'agent-1',
       SessionId: 'sess-1',
       ResponseId: 'resp_123',
-      EventId: 'ev_1',
       Rating: 'up',
       Comment: '',
       TraceId: 'trace-1',
@@ -101,7 +108,6 @@ test('feedback utils build action payloads for up and down feedback', async () =
       AgentId: 'agent-1',
       SessionId: 'sess-1',
       ResponseId: 'resp_123',
-      EventId: 'ev_1',
       Rating: 'down',
       Comment: '不准确',
       TraceId: 'trace-1',
