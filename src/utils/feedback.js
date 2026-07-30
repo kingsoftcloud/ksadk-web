@@ -46,7 +46,6 @@ export function shouldRenderFeedbackControls(message, isStreaming, isLastMessage
   return Boolean(
     message?.role === 'model' &&
       textValue(message.responseId) &&
-      textValue(message.eventId) &&
       !(isStreaming && isLastMessage),
   );
 }
@@ -88,15 +87,11 @@ export function buildUpsertFeedbackPayload({
   }
   const payload = {
     ...buildGetFeedbackPayload({ agentId, sessionId, message }),
-    EventId: textValue(message?.eventId),
     Rating: normalized,
     Comment: String(comment || ''),
     TraceId: textValue(message?.traceId),
     RootSpanId: textValue(message?.rootSpanId),
   };
-  if (!payload.EventId) {
-    throw new Error('Message missing event id');
-  }
   return payload;
 }
 
