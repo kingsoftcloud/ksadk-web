@@ -5,6 +5,66 @@ async function loadResponsesStreamUtils() {
   return import('../src/utils/responses-stream.js').catch(() => null);
 }
 
+test('responses stream reducer keys message items by Responses output item id', async () => {
+  const responsesStream = await loadResponsesStreamUtils();
+  assert.ok(responsesStream, 'expected Responses stream helpers to exist');
+  assert.equal(typeof responsesStream.responsesEventToItemOperations, 'function');
+  assert.equal(typeof responsesStream.RuntimeItemReducer, 'function');
+
+  const reducer = new responsesStream.RuntimeItemReducer();
+  const runId = 'run-1';
+  const scopeId = 'scope-1';
+  reducer.applyAll(
+    responsesStream.responsesEventToItemOperations(
+      'response.output_item.added',
+      { item: { id: 'msg_1', type: 'message' } },
+      runId,
+      scopeId,
+    ),
+  );
+  reducer.applyAll(
+    responsesStream.responsesEventToItemOperations(
+      'response.output_text.delta',
+      { item_id: 'msg_1', delta: 'hel' },
+      runId,
+      scopeId,
+    ),
+  );
+  reducer.applyAll(
+    responsesStream.responsesEventToItemOperations(
+      'response.output_item.done',
+      { item: { id: 'msg_1', type: 'message', content: [{ type: 'output_text', text: 'hello' }] } },
+      runId,
+      scopeId,
+    ),
+  );
+
+  const snapshot = reducer.snapshot();
+  assert.equal(snapshot.items.length, 1);
+  assert.equal(snapshot.items[0].itemId, 'msg_1');
+  assert.equal(snapshot.items[0].parts[0].text, 'hello');
+  assert.equal(snapshot.items[0].status, 'completed');
+});
+
+test('responses stream reducer keeps identical text from distinct output item ids', async () => {
+  const responsesStream = await loadResponsesStreamUtils();
+  assert.ok(responsesStream, 'expected Responses stream helpers to exist');
+
+  const reducer = new responsesStream.RuntimeItemReducer();
+  for (const itemId of ['msg_1', 'msg_2']) {
+    reducer.applyAll(
+      responsesStream.responsesEventToItemOperations(
+        'response.output_item.done',
+        { item: { id: itemId, type: 'message', content: [{ type: 'output_text', text: 'same' }] } },
+        'run-1',
+        'scope-1',
+      ),
+    );
+  }
+  const texts = responsesStream.projectRuntimeItems(reducer.snapshot()).map((item) => item.text);
+  assert.deepEqual(texts, ['same', 'same']);
+});
+
 test('responses stream utils normalize native tool done and tool output items', async () => {
   const responsesStream = await loadResponsesStreamUtils();
 

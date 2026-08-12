@@ -21,6 +21,14 @@ export type Message = {
   traceId?: string;
   rootSpanId?: string;
   eventType?: string;
+  /**
+   * schema v2 runtime item identity. 存在时渲染/反馈按 runId/scopeId/itemId/partId
+   * 归并,替代 v1 的文本启发式去重。
+   */
+  runId?: string;
+  scopeId?: string;
+  itemId?: string;
+  partId?: string;
   status?: 'running' | 'completed' | 'failed' | 'cancelled';
   summary?: string;
   trigger?: string;

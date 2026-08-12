@@ -11,3 +11,16 @@ export function createProtocol(apiFormat: string): StreamProtocol {
 }
 
 export type { StreamProtocol, StreamAction } from './types.js';
+export {
+  RuntimeItemReducer,
+  legacyAssistantIdentity,
+  projectRuntimeItems,
+  responsesEventToItemOperations,
+  sessionEventToItemOperation,
+} from './runtime-items.js';
+export type {
+  RuntimeItem,
+  RuntimeItemOperation,
+  RuntimeItemProjection,
+  RuntimeItemSnapshot,
+} from './runtime-items.js';

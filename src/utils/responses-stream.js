@@ -1,3 +1,11 @@
+// Identity-aware (schema v2) item operations live in the canonical core reducer.
+// Re-exported here so the Responses ingress and its tests share one source of truth.
+export {
+  RuntimeItemReducer,
+  responsesEventToItemOperations,
+  projectRuntimeItems,
+} from '../core/stream/runtime-items.ts';
+
 export function createResponsesStreamState() {
   return {
     toolNames: new Map(),
