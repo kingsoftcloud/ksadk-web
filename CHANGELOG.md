@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.1 - 2026-08-12
+
+> Identity-aware runtime item reducer. Counterpart of the KsADK `0.8.1`
+> canonical RuntimeEvent(schema_version=2) release. Hosted UI and Studio must
+> ship this version (or later) to keep stream/replay output consistent with the
+> Python canonical pipeline.
+
+### Stream / session reducer
+
+- Introduce `RuntimeItemReducer` (`src/core/stream/runtime-items.ts`) as the
+  single canonical store for streaming output. It reduces identity-addressed
+  item operations into a per-run projection keyed by
+  `runId / scopeId / itemId / partId`, replacing the legacy v1 heuristic dedup
+  (`lastText` / per-agent accumulator / `startswith` / suffix overlap /
+  text hash).
+- Ingress adapters normalize three sources into the same item operations:
+  Responses SSE output item ids, session events `Metadata.RuntimeItem`, and
+  legacy server events (no identity) via synthesized
+  `${invocationId}:legacy-assistant`. `assistant_stream_snapshot` maps to
+  replace, `assistant_message` maps to complete. Nothing inspects body text
+  to decide identity.
+
+### Compatibility
+
+- Consumers tracking the KsADK `0.8.1` canonical RuntimeEvent must use this
+  identity-aware version. `0.3.0` used the v1 heuristic reducer and will
+  duplicate or drop output when paired with canonical v2 producers.
+
 ## 0.3.0 - 2026-07-24
 
 > **Review candidate, not a published npm release.** `0.3.0` is the web
