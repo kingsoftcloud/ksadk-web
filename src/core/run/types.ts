@@ -1,4 +1,5 @@
 import type { RuntimeApiFormat } from '../../types/api.js';
+import type { AgentControlError, AgentControlReceipt } from '../../types/agent-control.js';
 import type { HostedChatTransport } from '../../types/api.js';
 import type { ModelCatalogItem } from '../../components/chat/types.js';
 
@@ -113,5 +114,31 @@ export interface RunEngine {
     onSettled?: (sessionId: string | null) => void;
   }): boolean;
   readonly stage: RunStage;
+  readonly controlState: RunControlState;
+  submitControl(command: SubmitControlCommand): Promise<RunControlState>;
+  retryControl(): Promise<RunControlState>;
   subscribe(listener: (event: RunEvent) => void): () => void;
 }
+
+/**
+ * agent-kernel/v1 control surface state. `accepted`/`duplicate` receipts move
+ * the run to queued — they never imply completion.
+ */
+export type RunControlPhase =
+  | 'idle' | 'queued' | 'retryable' | 'unsupported' | 'confirming'
+  | 'contract_mismatch' | 'rejected';
+
+export type RunControlState = {
+  phase: RunControlPhase;
+  /** Idempotency key to reuse when retrying (queue_full/confirming). */
+  retryKey?: string;
+  /** Populated for unsupported/rejected receipts. */
+  error?: AgentControlError | null;
+  receipt?: AgentControlReceipt | null;
+};
+
+export type SubmitControlCommand = {
+  command_type: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
+  idempotency_key: string;
+  payload: Record<string, unknown>;
+};

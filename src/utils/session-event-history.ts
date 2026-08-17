@@ -95,3 +95,89 @@ export async function loadCompleteSessionEventHistory(
     limit: merged.length,
   };
 }
+
+// ---------------------------------------------------------------------------
+// agent-kernel/v1 unified session cursor
+// ---------------------------------------------------------------------------
+
+import {
+  decodeSessionEventEnvelope,
+  type SessionEventEnvelope,
+} from '../types/agent-control.js';
+
+/** Two events sharing a seq but differing in content are a protocol error. */
+export class SessionEventConflictError extends Error {
+  seq: number;
+
+  constructor(seq: number) {
+    super(`Session event seq ${seq} was received twice with conflicting content`);
+    this.name = 'SessionEventConflictError';
+    this.seq = seq;
+  }
+}
+
+function stableHash(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableHash).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableHash(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+const DISPLAYABLE_FAMILIES = new Set(['runtime']);
+
+/**
+ * Deduplication/ordering state keyed strictly by the Session seq.
+ *
+ * Internal event ids from Responses/AG-UI/A2A projections are never used as a
+ * reconnect cursor. Refresh replays are folded in before live events: an
+ * exact duplicate seq is ignored, a conflicting one raises
+ * {@link SessionEventConflictError}.
+ */
+export class SessionEventCursor {
+  private eventsBySeq = new Map<number, SessionEventEnvelope>();
+  private lastSeqValue = 0;
+
+  /** Fold one raw kernel envelope into the cursor. */
+  accept(raw: unknown): void {
+    const decoded = decodeSessionEventEnvelope(raw);
+    if (!decoded.ok) {
+      throw decoded.error;
+    }
+    const incoming = decoded.value;
+    const existing = this.eventsBySeq.get(incoming.seq);
+    if (existing) {
+      if (stableHash(existing) !== stableHash(incoming)) {
+        throw new SessionEventConflictError(incoming.seq);
+      }
+      return;
+    }
+    this.eventsBySeq.set(incoming.seq, incoming);
+    this.lastSeqValue = Math.max(this.lastSeqValue, incoming.seq);
+  }
+
+  get lastSeq(): number {
+    return this.lastSeqValue;
+  }
+
+  /** Cursor value for SubscribeSessionEvents(after_seq) reconnects. */
+  reconnectAfterSeq(): number {
+    return this.lastSeqValue;
+  }
+
+  /** Events safe to project into the transcript, ordered by seq. */
+  displayableEvents(): SessionEventEnvelope[] {
+    return [...this.eventsBySeq.values()]
+      .filter((event) => DISPLAYABLE_FAMILIES.has(event.family))
+      .sort((a, b) => a.seq - b.seq);
+  }
+}
+
+export function createSessionEventCursor(): SessionEventCursor {
+  return new SessionEventCursor();
+}

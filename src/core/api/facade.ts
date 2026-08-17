@@ -3,7 +3,8 @@ import { postJsonAction, streamGetAction } from '../../api/client.js';
 import { listSessions as listSessionsApi, createSession as createSessionApi, deleteSession as deleteSessionApi, getSession as getSessionApi } from '../../api/session.js';
 import { listSessionEvents as listSessionEventsApi } from '../../api/events.js';
 import { listSessionMessages as listSessionMessagesApi } from '../../api/messages.js';
-import { runAgent as runAgentApi } from '../../api/run.js';
+import { runAgent as runAgentApi, submitAgentControl as submitAgentControlApi } from '../../api/run.js';
+import { subscribeSessionEvents as subscribeSessionEventsApi } from '../../api/events.js';
 import { listSessionCheckpoints as listSessionCheckpointsApi, listToolReceipts as listToolReceiptsApi, previewCheckpointResume as previewCheckpointResumeApi, resumeRun as resumeRunApi } from '../../api/checkpoints.js';
 import { listWorkspaceFiles as listWorkspaceFilesApi, addWorkspaceFile as addWorkspaceFileApi, deleteWorkspaceFile as deleteWorkspaceFileApi, getWorkspaceFileContent as getFileContentApi } from '../../api/workspace.js';
 import { listAgentModels as listAgentModelsApi } from '../../api/model.js';
@@ -92,6 +93,33 @@ export class ApiFacadeImpl implements ApiFacade {
       AfterSeqId: String(params.afterSeqId),
     };
     return streamGetAction('SubscribeRunEvents', qs, opts);
+  }
+
+  async submitControl(
+    command: {
+      command_type: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
+      idempotency_key: string;
+      payload: Record<string, unknown>;
+    },
+    opts?: { signal?: AbortSignal },
+  ) {
+    return submitAgentControlApi({
+      commandType: command.command_type,
+      idempotencyKey: command.idempotency_key,
+      payload: command.payload,
+    }, opts);
+  }
+
+  async getAgentStatus(opts?: { signal?: AbortSignal }) {
+    return postJsonAction('GetAgentStatus', {}, opts);
+  }
+
+  async subscribeSessionEvents(
+    sessionId: string,
+    afterSeq: number,
+    opts?: { signal?: AbortSignal },
+  ) {
+    return subscribeSessionEventsApi(sessionId, afterSeq, opts);
   }
 
   async cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }) {

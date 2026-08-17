@@ -8,3 +8,24 @@ export { createProtocol } from '../core/stream/index.js';
 export type { StreamAction, StreamProtocol } from '../core/stream/types.js';
 export { SseGetTransport, SsePostTransport } from '../core/transport/sse-transport.js';
 export type { RuntimeTransport, TransportCallbacks, TransportEvent } from '../core/transport/types.js';
+export {
+  ContractMismatchError,
+  decodeAgentStatusSnapshot,
+  decodeCapabilityMatrix,
+  decodeReceipt,
+  decodeSessionEventEnvelope,
+} from '../types/agent-control.js';
+export type {
+  AgentControlError,
+  AgentControlReceipt,
+  AgentControlReceiptStatus,
+  AgentStatusSnapshot,
+  RuntimeCapability,
+  RuntimeCapabilityMatrix,
+  SessionEventEnvelope,
+} from '../types/agent-control.js';
+export {
+  SessionEventConflictError,
+  SessionEventCursor,
+  createSessionEventCursor,
+} from '../utils/session-event-history.js';

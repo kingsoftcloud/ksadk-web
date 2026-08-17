@@ -1,4 +1,12 @@
-import type { RunEngine, RunStage, RunEvent, RunEngineConfig } from './types.js';
+import type {
+  RunControlState,
+  RunEngine,
+  RunStage,
+  RunEvent,
+  RunEngineConfig,
+  SubmitControlCommand,
+} from './types.js';
+import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
 import type { ApiFacade } from '../api/types.js';
 import type { StreamAction } from '../stream/types.js';
 import { createProtocol } from '../stream/index.js';
@@ -99,6 +107,8 @@ export class RunEngineImpl implements RunEngine {
   private aguiClient: AguiRunClient | null = null;
   private aguiThreadSessionId: string | null = null;
   private api: ApiFacade;
+  private controlStateValue: RunControlState = { phase: 'idle' };
+  private lastControlCommand: SubmitControlCommand | null = null;
   private config: RunEngineConfig = {
     agentId: 'default-agent',
     apiFormats: ['responses'],
@@ -112,6 +122,79 @@ export class RunEngineImpl implements RunEngine {
   }
 
   get stage() { return this._stage; }
+
+  get controlState(): RunControlState { return this.controlStateValue; }
+
+  /**
+   * Submit an agent-kernel/v1 control command. Receipt semantics:
+   * accepted/duplicate -> queued (never treated as completion), queue_full ->
+   * retryable with the same idempotency key, unsupported -> surfaces the
+   * capability reason, persistence_uncertain -> confirm status before retry.
+   */
+  async submitControl(command: SubmitControlCommand): Promise<RunControlState> {
+    this.lastControlCommand = command;
+    let receipt;
+    try {
+      receipt = decodeReceipt(await this.api.submitControl(command));
+    } catch (error) {
+      if (error instanceof ContractMismatchError) {
+        this.controlStateValue = { phase: 'contract_mismatch', error: null, receipt: null };
+        this.emit({ type: 'system_message', content: '【系统提示】控制指令响应不符合 agent-kernel/v1 合同，已停止变更本地状态。' });
+        return this.controlStateValue;
+      }
+      throw error;
+    }
+    this.controlStateValue = this.controlStateFor(receipt, command);
+    if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
+      this.emit({ type: 'activity', phase: '指令已入队，等待运行时处理', status: 'waiting', countEvent: false });
+    } else if (receipt.status === 'queue_full') {
+      this.emit({ type: 'system_message', content: '【系统提示】指令队列已满，可点击重试；重试将复用同一幂等键。' });
+    } else if (receipt.status === 'unsupported') {
+      this.emit({ type: 'system_message', content: `【系统提示】运行时不支持该操作：${receipt.error?.message || ''}` });
+    } else if (receipt.status === 'persistence_uncertain') {
+      this.emit({ type: 'system_message', content: '【系统提示】指令提交结果待确认，正在查询状态…' });
+    } else if (receipt.status === 'rejected') {
+      this.emit({ type: 'system_message', content: `【系统提示】指令被拒绝：${receipt.error?.message || ''}` });
+    }
+    return this.controlStateValue;
+  }
+
+  private controlStateFor(
+    receipt: ReturnType<typeof decodeReceipt>,
+    command: SubmitControlCommand,
+  ): RunControlState {
+    switch (receipt.status) {
+      case 'accepted':
+      case 'duplicate':
+        return { phase: 'queued', receipt, error: null };
+      case 'queue_full':
+        return { phase: 'retryable', retryKey: command.idempotency_key, receipt, error: receipt.error };
+      case 'unsupported':
+        return { phase: 'unsupported', receipt, error: receipt.error };
+      case 'persistence_uncertain':
+        return { phase: 'confirming', retryKey: command.idempotency_key, receipt, error: receipt.error };
+      case 'rejected':
+      default:
+        return { phase: 'rejected', receipt, error: receipt.error };
+    }
+  }
+
+  /** Retry the last control command, reusing its idempotency key. */
+  async retryControl(): Promise<RunControlState> {
+    const previous = this.lastControlCommand;
+    if (!previous || (this.controlStateValue.phase !== 'retryable' && this.controlStateValue.phase !== 'confirming')) {
+      return this.controlStateValue;
+    }
+    if (this.controlStateValue.phase === 'confirming') {
+      // persistence_uncertain: confirm via status query before deciding to retry.
+      try {
+        await this.api.getAgentStatus();
+      } catch (error) {
+        console.warn('[RunEngine] status query after persistence_uncertain failed:', error);
+      }
+    }
+    return this.submitControl(previous);
+  }
 
   updateConfig(config: RunEngineConfig): void {
     this.config = {

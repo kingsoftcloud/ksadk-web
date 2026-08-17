@@ -294,3 +294,62 @@ describe('ApiFacadeImpl', () => {
     ]);
   });
 });
+
+describe('ApiFacadeImpl agent-kernel/v1 control surface', () => {
+  function stubFetch(calls: Array<{ url: string; body: Record<string, unknown> }>) {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url, init) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body || '{}')) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({
+        Code: 0,
+        Data: {
+          schema_version: 1,
+          command_id: '4bf84e1b-f4cd-4c55-907f-2dc5e676b119',
+          status: 'accepted',
+          message_id: '11111111-2222-3333-4444-555555555555',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    return () => { globalThis.fetch = originalFetch; };
+  }
+
+  it('submits agent control commands and returns a decoded receipt', async () => {
+    const facade = new ApiFacadeImpl();
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const restore = stubFetch(calls);
+    try {
+      const receipt = await facade.submitControl({
+        command_type: 'enqueue',
+        idempotency_key: 'idem-1',
+        payload: { content: 'hello' },
+      });
+      expect(receipt.status).toBe('accepted');
+      expect(calls[0].url).toBe('/agentengine/api/v1/SubmitAgentControl');
+      expect(calls[0].body.CommandType).toBe('enqueue');
+      expect(calls[0].body.IdempotencyKey).toBe('idem-1');
+    } finally {
+      restore();
+    }
+  });
+
+  it('subscribes session events with the after_seq cursor', async () => {
+    const facade = new ApiFacadeImpl();
+    const urls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url) => {
+      urls.push(String(url));
+      return new Response('');
+    }) as typeof fetch;
+    try {
+      await facade.subscribeSessionEvents('s1', 42);
+    } catch {
+      // transport errors are not the concern of this assertion
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(urls[0]).toBe('/agentengine/api/v1/SubscribeSessionEvents?SessionId=s1&AfterSeq=42');
+  });
+});

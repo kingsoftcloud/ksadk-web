@@ -59,3 +59,12 @@ export type UiCapabilities = {
   WorkspaceFiles?: boolean;
   BuiltinTools: BuiltinToolCapability[];
 };
+
+// agent-kernel/v1 runtime capability matrix, exposed alongside the legacy
+// UI capability projection so consumers gate on canonical contracts.
+export type {
+  RuntimeCapability,
+  RuntimeCapabilityMatrix,
+  RuntimeCapabilityMode,
+} from './agent-control.js';
+export { decodeCapabilityMatrix } from './agent-control.js';

@@ -58,6 +58,14 @@ export interface ApiFacade {
   resumeRun(params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string; invocationId?: string }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   subscribeRunEvents(params: { sessionId: string; invocationId: string; afterSeqId: number }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
+  // agent-kernel/v1 control surface
+  submitControl(command: {
+    command_type: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
+    idempotency_key: string;
+    payload: Record<string, unknown>;
+  }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
+  getAgentStatus(opts?: { signal?: AbortSignal }): Promise<unknown>;
+  subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
 
   // Feedback
   getResponseFeedback(payload: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<unknown>;

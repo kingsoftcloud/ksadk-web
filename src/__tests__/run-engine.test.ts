@@ -1156,3 +1156,108 @@ describe('RunEngineImpl', () => {
     });
   });
 });
+
+describe('RunEngineImpl agent control receipts', () => {
+  function createControlFacade(receipt: unknown) {
+    const api = createApiFacade([]) as ApiFacade & {
+      submitControl?: (command: unknown) => Promise<unknown>;
+      subscribeSessionEvents?: (sessionId: string, afterSeq: number) => Promise<ReadableStream<Uint8Array>>;
+      getAgentStatus?: () => Promise<unknown>;
+    };
+    api.submitControl = vi.fn().mockResolvedValue(receipt);
+    api.subscribeSessionEvents = vi.fn().mockResolvedValue(new ReadableStream<Uint8Array>());
+    api.getAgentStatus = vi.fn().mockResolvedValue(null);
+    return api;
+  }
+
+  function enqueueCommand(engine: RunEngineImpl, idempotencyKey = 'idem-1') {
+    return engine.submitControl({
+      command_type: 'enqueue',
+      idempotency_key: idempotencyKey,
+      payload: { content: 'hello' },
+    });
+  }
+
+  it('does not show accepted as completed', async () => {
+    const api = createControlFacade({
+      schema_version: 1,
+      command_id: '4bf84e1b-f4cd-4c55-907f-2dc5e676b119',
+      status: 'accepted',
+      message_id: '11111111-2222-3333-4444-555555555555',
+    });
+    const engine = createRunEngine(api);
+    await enqueueCommand(engine);
+    expect(engine.controlState.phase).toBe('queued');
+    expect(engine.stage).not.toBe('idle-idle');
+  });
+
+  it('treats duplicate receipts as queued', async () => {
+    const api = createControlFacade({
+      schema_version: 1,
+      command_id: '4bf84e1b-f4cd-4c55-907f-2dc5e676b119',
+      status: 'duplicate',
+      message_id: '11111111-2222-3333-4444-555555555555',
+    });
+    const engine = createRunEngine(api);
+    await enqueueCommand(engine);
+    expect(engine.controlState.phase).toBe('queued');
+  });
+
+  it('marks queue_full retryable and reuses the same idempotency key', async () => {
+    const api = createControlFacade({
+      schema_version: 1,
+      command_id: '4bf84e1b-f4cd-4c55-907f-2dc5e676b119',
+      status: 'queue_full',
+      error: { code: 'queue_full', message: 'inbox depth reached limit', retryable: true, details: { limit: 128 } },
+    });
+    const engine = createRunEngine(api);
+    await enqueueCommand(engine, 'idem-retry');
+    expect(engine.controlState.phase).toBe('retryable');
+    expect(engine.controlState.retryKey).toBe('idem-retry');
+    await engine.retryControl();
+    expect(api.submitControl).toHaveBeenCalledTimes(2);
+    const first = (api.submitControl as ReturnType<typeof vi.fn>).mock.calls[0][0] as { idempotency_key: string };
+    const second = (api.submitControl as ReturnType<typeof vi.fn>).mock.calls[1][0] as { idempotency_key: string };
+    expect(second.idempotency_key).toBe(first.idempotency_key);
+  });
+
+  it('disables unsupported commands and surfaces the capability reason', async () => {
+    const api = createControlFacade({
+      schema_version: 1,
+      command_id: '4bf84e1b-f4cd-4c55-907f-2dc5e676b119',
+      status: 'unsupported',
+      error: { code: 'unsupported', message: 'steer not supported by runtime', retryable: false, details: {} },
+    });
+    const engine = createRunEngine(api);
+    await engine.submitControl({
+      command_type: 'steer',
+      idempotency_key: 'idem-steer',
+      payload: { content: 'turn left' },
+    });
+    expect(engine.controlState.phase).toBe('unsupported');
+    expect(engine.controlState.error?.message).toBe('steer not supported by runtime');
+  });
+
+  it('queries status before retrying after persistence_uncertain', async () => {
+    const api = createControlFacade({
+      schema_version: 1,
+      command_id: '4bf84e1b-f4cd-4c55-907f-2dc5e676b119',
+      status: 'persistence_uncertain',
+      error: { code: 'persistence_uncertain', message: 'commit result unknown', retryable: true, details: {} },
+    });
+    const engine = createRunEngine(api);
+    await enqueueCommand(engine, 'idem-uncertain');
+    expect(engine.controlState.phase).toBe('confirming');
+    await engine.retryControl();
+    expect(api.getAgentStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops mutations on a contract mismatch receipt', async () => {
+    const api = createControlFacade({ schema_version: 2, command_id: 'x', status: 'accepted' });
+    const engine = createRunEngine(api);
+    const state = await enqueueCommand(engine);
+    expect(state.phase).toBe('contract_mismatch');
+    // A malformed receipt must not mutate run state further.
+    expect(state.receipt).toBeNull();
+  });
+});
