@@ -43,7 +43,7 @@ export async function subscribeSessionEvents(
 ): Promise<ReadableStream<Uint8Array>> {
   return streamGetAction(
     'SubscribeSessionEvents',
-    { SessionId: sessionId, AfterSeq: String(afterSeq) },
+    { SessionId: sessionId, after_seq: String(afterSeq) },
     options,
   );
 }

@@ -350,6 +350,7 @@ describe('ApiFacadeImpl agent-kernel/v1 control surface', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-    expect(urls[0]).toBe('/agentengine/api/v1/SubscribeSessionEvents?SessionId=s1&AfterSeq=42');
+    // gateway 统一读取 after_seq（app/lifecycle.py resolve_after_seq），web 侧必须对齐。
+    expect(urls[0]).toBe('/agentengine/api/v1/SubscribeSessionEvents?SessionId=s1&after_seq=42');
   });
 });
