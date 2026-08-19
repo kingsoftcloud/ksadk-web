@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2-beta.2 - 2026-08-20
+
+Rebuilt the immutable beta artifact from the complete Interaction/v1 source.
+This supersedes `0.3.2-beta.1`, whose vendored Hosted UI tarball predated the
+two fixes below.
+
+- Treat a successful `SubmitInteraction` receipt as durable acceptance, not as
+  proof that the framework execution has already completed its resolution.
+- Add the queue tray and read-only historical interaction anchors to the
+  published artifact, rather than leaving them only on the Web source branch.
+
 ## 0.3.2-beta.1 - 2026-08-19
 
 > Unifies durable human-in-the-loop decisions behind one `Interaction/v1`
