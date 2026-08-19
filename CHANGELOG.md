@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2-beta.3 - 2026-08-20
+
+Adds package-internal release provenance. Hosted UI and the preproduction gate
+can verify the resolved tarball's source basis and Interaction/v1 contract
+digest instead of trusting an external evidence label.
+
 ## 0.3.2-beta.2 - 2026-08-20
 
 Rebuilt the immutable beta artifact from the complete Interaction/v1 source.

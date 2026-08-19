@@ -1,6 +1,6 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.3.2-beta.2",
+  "version": "0.3.2-beta.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -44,6 +44,7 @@
     "dist-ksadk",
     "README.md",
     "CHANGELOG.md",
+    "RELEASE_PROVENANCE.json",
     "LICENSE",
     "package.json"
   ],
