@@ -127,6 +127,22 @@ describe('refresh and replay', () => {
       response: { approved: true },
       idempotencyKey: interactionIdempotencyKey('int-1', 1),
     });
+    // Still resolving: a receipt is not a terminal fact.
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+
+    // Replay of the authoritative terminal fact converges the record.
+    client.ingestHistory([
+      interactionFromSessionEvent({
+        ...REQUESTED_EVENT,
+        event_type: 'interaction.resolved',
+        payload: {
+          interaction_id: 'int-1',
+          outcome: 'approved',
+          actor: 'user-1',
+          resolved_at: '2026-08-19T00:01:00Z',
+        },
+      })!,
+    ]);
 
     const second = await client.respond({
       interactionId: 'int-1',
@@ -141,6 +157,42 @@ describe('refresh and replay', () => {
     // First-wins outcome is preserved.
     const record = client.listPending('session-1');
     expect(record).toHaveLength(0);
+  });
+
+  it('a resolving record converges to resolved when replay contains the terminal event', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(okReceipt());
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(REQUESTED_EVENT)!);
+    await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+
+    // Disconnect/replay: the event stream already carries the terminal
+    // fact — the resolving record must converge immediately.
+    client.ingestHistory([
+      interactionFromSessionEvent(REQUESTED_EVENT)!,
+      interactionFromSessionEvent({
+        ...REQUESTED_EVENT,
+        event_type: 'interaction.resolved',
+        payload: {
+          interaction_id: 'int-1',
+          outcome: 'approved',
+          actor: 'user-1',
+          resolved_at: '2026-08-19T00:01:00Z',
+        },
+      })!,
+    ]);
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolved');
+    expect(client.listPending('session-1')).toHaveLength(0);
+    expect(submitInteraction).toHaveBeenCalledTimes(1);
   });
 
   it('expires pending interactions on replay of expiry events', () => {

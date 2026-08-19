@@ -141,9 +141,17 @@ export class InteractionClientImpl implements InteractionClient {
       return syntheticReceipt('rejected', input.interactionId);
     }
 
-    // Terminal (resolved by event or a prior first-wins submit): no
-    // second request leaves the client.
+    // Terminal (resolved by an authoritative SessionEvent): no second
+    // request leaves the client. `resolving` and `failed` stay
+    // submittable — a receipt is never a terminal fact.
     if (record.status === 'resolved' || record.status === 'cancelled' || record.status === 'expired') {
+      return syntheticReceipt('duplicate', input.interactionId);
+    }
+
+    // A previous submit's receipt was accepted but its terminal
+    // SessionEvent has not arrived yet: treat as duplicate rather than
+    // issuing a competing second decision.
+    if (record.status === 'resolving') {
       return syntheticReceipt('duplicate', input.interactionId);
     }
 
@@ -203,12 +211,29 @@ export class InteractionClientImpl implements InteractionClient {
       const receipt = decodeReceipt(raw);
 
       if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
-        this.resolveLocal(record, input, idempotencyKey);
-      } else {
-        // Rejected (e.g. interaction_already_resolved from a first-wins
-        // other tab), unsupported, or uncertain: revert to pending and
-        // let the SessionEvent stream deliver the authoritative state.
+        // The receipt only proves the command entered the durable Inbox —
+        // it is NOT a terminal fact. Keep `resolving` until the
+        // authoritative interaction.resolved/cancelled/expired
+        // SessionEvent arrives via the dispatcher or replay. Record the
+        // idempotency key for replay correlation.
+        this.store.recordIdempotencyKey(
+          record.sessionId,
+          input.interactionId,
+          idempotencyKey,
+        );
+      } else if (receipt.status === 'queue_full') {
+        // Transient: back to pending so the user can retry.
         this.store.revertToPending(record.sessionId, input.interactionId);
+      } else {
+        // Definitive rejection (e.g. interaction_already_resolved from a
+        // first-wins other tab), unsupported, or uncertain: surface the
+        // failure. The SessionEvent stream remains the only source of a
+        // terminal state.
+        this.store.markFailed(record.sessionId, input.interactionId, {
+          code: receipt.error?.code ?? String(receipt.status),
+          message: receipt.error?.message ?? `提交未通过（${receipt.status}）`,
+          retryable: receipt.error?.retryable ?? false,
+        });
       }
       return receipt;
     } finally {

@@ -65,7 +65,10 @@ export function useInteractions(ctx: UseInteractionsContext) {
       ? sharedInteractionStore
           .listAll(ctx.currentSessionId)
           .filter(
-            (interaction) => interaction.status === 'pending' || interaction.status === 'resolving',
+            (interaction) =>
+              interaction.status === 'pending'
+              || interaction.status === 'resolving'
+              || interaction.status === 'failed',
           )
       : [];
   }, [version, ctx.currentSessionId]);

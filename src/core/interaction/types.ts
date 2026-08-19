@@ -13,6 +13,7 @@ import type { AgentControlReceipt } from '../../types/agent-control.js';
 export type InteractionStatus =
   | 'pending'
   | 'resolving'
+  | 'failed'
   | 'resolved'
   | 'cancelled'
   | 'expired';
@@ -100,6 +101,7 @@ export interface InteractionClient {
   respond(input: InteractionSubmitInput): Promise<InteractionReceipt>;
 }
 
+/** Statuses that may only be set by an authoritative terminal SessionEvent. */
 export const TERMINAL_INTERACTION_STATUSES: ReadonlySet<InteractionStatus> =
   new Set(['resolved', 'cancelled', 'expired']);
 

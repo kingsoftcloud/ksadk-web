@@ -234,10 +234,16 @@ test('approve sends exactly one SubmitInteraction and replay never resubmits', a
     IdempotencyKey: 'interaction:int-1:revision-1',
   });
   expect(state.submits[0].Response).toMatchObject({ approved: true });
-  await expect(tray).toHaveCount(0);
 
-  // Replay after resolution: history shows a read-only anchor, no second
-  // request ever leaves the client.
+  // The accepted receipt only proves the command entered the durable
+  // Inbox — the UI stays "resolving" until the authoritative
+  // interaction.resolved SessionEvent arrives.
+  await expect(tray).toHaveAttribute('data-interaction-status', 'resolving');
+  await expect(page.getByText('正在提交，请稍候…')).toBeVisible();
+
+  // Replay after resolution (terminal fact carried by the SessionEvent
+  // stream): history shows a read-only anchor, no second request ever
+  // leaves the client.
   state.events = () => [requestedEvent(), resolvedEvent('int-1', 'approved')];
   state.history = historyWithApproval('approved');
   await page.reload();
@@ -250,17 +256,20 @@ test('approve sends exactly one SubmitInteraction and replay never resubmits', a
   expect(state.submits).toHaveLength(1);
 });
 
-test('reject routes through the same single submit path', async ({ page }) => {
+test('reject stays resolving after the receipt and resolves on the terminal event', async ({ page }) => {
   const state = {
     submits: [],
     resolvedIds: new Set(),
     sessionCreated: false,
     events: () => [requestedEvent()],
   };
+  state.history = historyWithApproval();
   await installFixture(page, state);
   await createSession(page);
 
   await page.reload();
+  const tray = page.getByTestId('interaction-tray');
+  await expect(tray).toBeVisible();
   await page.getByTestId('interaction-reject').click();
 
   await expect.poll(() => state.submits.length).toBe(1);
@@ -270,6 +279,19 @@ test('reject routes through the same single submit path', async ({ page }) => {
     ExpectedRevision: 1,
   });
   expect(state.submits[0].Response).toMatchObject({ approved: false });
+  // Receipt accepted, terminal state not yet authoritative.
+  await expect(tray).toHaveAttribute('data-interaction-status', 'resolving');
+
+  // Terminal fact arrives via the replayed event stream.
+  state.events = () => [requestedEvent(), resolvedEvent('int-1', 'rejected')];
+  state.history = historyWithApproval('rejected');
+  await page.reload();
+  await expect(page.getByTestId('interaction-history-anchor')).toHaveAttribute(
+    'data-interaction-status',
+    'resolved',
+  );
+  await expect(tray).toHaveCount(0);
+  expect(state.submits).toHaveLength(1);
 });
 
 test('structured form submits the full response payload', async ({ page }) => {
@@ -340,12 +362,23 @@ test('two tabs: first-wins receipt, second tab never duplicates the decision', a
   await tabA.getByTestId('interaction-approve').click();
   await expect.poll(() => state.submits.length).toBe(1);
   expect(state.submits[0].Action).toBe('approve');
+  // First tab: accepted receipt keeps the tray resolving.
+  await expect(tabA.getByTestId('interaction-tray')).toHaveAttribute(
+    'data-interaction-status',
+    'resolving',
+  );
 
   // Second tab submits the same revision: the server is the authority and
   // returns the first-wins rejection receipt.
   await tabB.getByTestId('interaction-reject').click();
   await expect.poll(() => state.submits.length).toBe(2);
   expect(state.resolvedIds.has('int-1')).toBe(true);
+  // The rejected receipt is a failed submit — the second tab must show
+  // the failure, never a resolved/cancelled state.
+  const trayB = tabB.getByTestId('interaction-tray');
+  await expect(trayB).toHaveAttribute('data-interaction-status', 'failed');
+  await expect(tabB.getByTestId('interaction-tray-error')).toBeVisible();
+  await expect(tabB.getByText(/interaction_already_resolved/)).toBeVisible();
 
   // After replaying the authoritative terminal fact, no third request can
   // be produced even by clicking again.

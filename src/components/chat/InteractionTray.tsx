@@ -50,6 +50,31 @@ function isExpired(interaction: Interaction): boolean {
   return Number.isFinite(expiry) && expiry <= Date.now();
 }
 
+/**
+ * A definitive submit rejection (e.g. first-wins interaction_already_resolved
+ * from another tab). The receipt never carries a terminal Interaction fact —
+ * only the SessionEvent does — so this is shown as a failed submit, never
+ * as resolved/cancelled.
+ */
+function readSubmitError(
+  interaction: Interaction,
+): { code: string; message: string; retryable: boolean } | null {
+  const error = interaction.extensions.submit_error;
+  if (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && 'message' in error
+  ) {
+    return {
+      code: String(error.code),
+      message: String(error.message),
+      retryable: Boolean(error.retryable),
+    };
+  }
+  return null;
+}
+
 const OUTCOME_LABEL: Record<string, string> = {
   approved: '已同意',
   rejected: '已拒绝',
@@ -72,6 +97,7 @@ export function InteractionTray({
   if (!active) return null;
 
   const expired = isExpired(active);
+  const submitError = readSubmitError(active);
   const disabled = expired || active.status === 'resolving';
   const presentationMode = validateA2uiPresentation(
     active.presentation?.a2ui,
@@ -111,6 +137,7 @@ export function InteractionTray({
   return (
     <div
       data-testid="interaction-tray"
+      data-interaction-status={active.status}
       data-interaction-count={interactions.length}
       className="mx-auto mb-2 w-full max-w-3xl px-6"
     >
@@ -160,6 +187,13 @@ export function InteractionTray({
         {expired ? (
           <p className="mt-2 text-xs font-medium text-rose-600 dark:text-rose-400" data-testid="interaction-tray-expired">
             该确认已过期（{OUTCOME_LABEL.expired}），等待运行时继续处理。
+          </p>
+        ) : null}
+
+        {submitError ? (
+          <p className="mt-2 text-xs font-medium text-rose-600 dark:text-rose-400" data-testid="interaction-tray-error">
+            提交失败（{submitError.code}）：{submitError.message}
+            {submitError.retryable ? '，可重试。' : ''}
           </p>
         ) : null}
 

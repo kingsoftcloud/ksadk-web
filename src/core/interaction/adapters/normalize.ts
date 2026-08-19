@@ -43,6 +43,7 @@ const VALID_KINDS: ReadonlySet<string> = new Set([
 const VALID_STATUSES: ReadonlySet<string> = new Set([
   'pending',
   'resolving',
+  'failed',
   'resolved',
   'cancelled',
   'expired',

@@ -203,7 +203,7 @@ describe('single submit path', () => {
     expect(second.status).toBe('duplicate');
   });
 
-  it('treats a first-wins rejection from another tab as authoritative', async () => {
+  it('treats a first-wins rejection from another tab as a failed submit with the server error', async () => {
     const submitInteraction = vi.fn().mockResolvedValue(
       okReceipt({
         status: 'rejected',
@@ -229,7 +229,129 @@ describe('single submit path', () => {
     });
 
     expect(receipt.status).toBe('rejected');
-    expect(client.listPending('session-1')).toHaveLength(1);
+    const record = client.store.get('session-1', 'int-1')!;
+    expect(record.status).toBe('failed');
+    const error = record.extensions.submit_error as { code: string; message: string };
+    expect(error.code).toBe('interaction_already_resolved');
+    expect(error.message).toBe('first-wins');
+  });
+});
+
+describe('receipts are not terminal facts', () => {
+  it('keeps the record resolving after an accepted receipt; only the SessionEvent resolves it', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(okReceipt());
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+
+    const receipt = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+
+    expect(receipt.status).toBe('accepted');
+    // Receipt proves the command entered the durable Inbox — not a
+    // terminal state. The UI keeps showing "resolving".
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+
+    // The authoritative terminal fact is the SessionEvent.
+    client.ingest(
+      interactionFromSessionEvent({
+        ...FIXTURES.interactionV1,
+        event_type: 'interaction.resolved',
+        payload: {
+          interaction_id: 'int-1',
+          outcome: 'approved',
+          actor: 'user',
+          resolved_at: '2026-08-19T00:01:00Z',
+        },
+      })!,
+    );
+    const resolved = client.store.get('session-1', 'int-1')!;
+    expect(resolved.status).toBe('resolved');
+    expect(resolved.outcome).toBe('approved');
+  });
+
+  it('never resolves to cancelled off a duplicate receipt either', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(
+      okReceipt({ status: 'duplicate' }),
+    );
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+
+    await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'cancel',
+      response: {},
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+  });
+
+  it('a second respond while the record is resolving is a local duplicate', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(okReceipt());
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+    await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    expect(submitInteraction).toHaveBeenCalledTimes(1);
+
+    const second = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    expect(second.status).toBe('duplicate');
+    expect(submitInteraction).toHaveBeenCalledTimes(1);
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+  });
+
+  it('reverts a retryable queue_full receipt to pending', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(
+      okReceipt({
+        status: 'queue_full',
+        error: {
+          code: 'queue_full',
+          message: 'inbox queue is full',
+          retryable: true,
+        },
+      }),
+    );
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+
+    const receipt = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    expect(receipt.status).toBe('queue_full');
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('pending');
   });
 });
 
