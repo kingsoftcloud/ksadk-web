@@ -1,4 +1,5 @@
-import { streamAction } from './client.js';
+import { streamAction, postJsonAction } from './client.js';
+import { decodeReceipt, type AgentControlReceipt } from '../types/agent-control.js';
 
 export async function runAgent(
   body: Record<string, unknown>,
@@ -6,8 +7,6 @@ export async function runAgent(
 ): Promise<ReadableStream<Uint8Array>> {
   return streamAction('RunAgent', body, options);
 }
-import { postJsonAction } from './client.js';
-import { decodeReceipt, type AgentControlReceipt } from '../types/agent-control.js';
 
 export type SubmitAgentControlParams = {
   commandType: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
@@ -29,5 +28,29 @@ export async function submitAgentControl(
     IdempotencyKey: params.idempotencyKey,
     Payload: params.payload,
   }, options);
+  return decodeReceipt(data);
+}
+
+export type SubmitInteractionParams = {
+  AgentId: string;
+  SessionId: string;
+  RunId: string;
+  InteractionId: string;
+  ExpectedRevision: number;
+  Action: 'approve' | 'reject' | 'submit' | 'cancel';
+  Response: Record<string, unknown>;
+  IdempotencyKey: string;
+};
+
+/**
+ * AgentEngine Interaction/v1 submission. One public action, revision CAS,
+ * idempotency-scoped; the receipt is decoded with the canonical strict
+ * decoder.
+ */
+export async function submitInteraction(
+  params: SubmitInteractionParams,
+  options?: { signal?: AbortSignal },
+): Promise<AgentControlReceipt> {
+  const data = await postJsonAction<unknown>('SubmitInteraction', { ...params }, options);
   return decodeReceipt(data);
 }

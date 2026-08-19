@@ -58,6 +58,8 @@ export type UiCapabilities = {
   };
   WorkspaceFiles?: boolean;
   BuiltinTools: BuiltinToolCapability[];
+  /** agent-kernel/v1 Interaction capability (bootstrap `interaction_v1`). */
+  InteractionV1?: boolean;
 };
 
 // agent-kernel/v1 runtime capability matrix, exposed alongside the legacy

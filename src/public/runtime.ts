@@ -29,3 +29,23 @@ export {
   SessionEventCursor,
   createSessionEventCursor,
 } from '../utils/session-event-history.js';
+export { InteractionClientImpl, InteractionStore } from '../core/interaction/index.js';
+export type {
+  Interaction,
+  InteractionAction,
+  InteractionClient,
+  InteractionEvent,
+  InteractionReceipt,
+  InteractionStatus,
+  InteractionSubmitInput,
+} from '../core/interaction/index.js';
+export {
+  interactionFromSessionEvent,
+  interactionFromResponsesApproval,
+  interactionFromAguiInterrupt,
+  interactionIdempotencyKey,
+} from '../core/interaction/index.js';
+export {
+  A2UI_WIRE_VERSION,
+  validateA2uiPresentation,
+} from '../core/interaction/index.js';

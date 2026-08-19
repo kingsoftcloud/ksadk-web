@@ -29,6 +29,7 @@ type ConnectedMessageListProps = {
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
+  interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
 };
 
 export function ConnectedMessageList({
@@ -44,6 +45,7 @@ export function ConnectedMessageList({
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
+  interactionRecords,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -271,6 +273,7 @@ export function ConnectedMessageList({
         onOpenAttachmentPreview={openAttachmentPreview}
         onRespondToApproval={onRespondToApproval}
         onRespondToAguiApproval={onRespondToAguiApproval}
+        interactionRecords={interactionRecords}
         onSubmitFeedback={onSubmitFeedback}
         onSubmitAguiAction={onSubmitAguiAction}
         onStopGeneration={onStopGeneration}

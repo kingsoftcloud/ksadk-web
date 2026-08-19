@@ -26,6 +26,7 @@ import { useResponsiveViewport } from './hooks/useResponsiveViewport';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useRunAgent } from './hooks/useRunAgent';
 import { useFeedback } from './hooks/useFeedback';
+import { useInteractions } from './hooks/useInteractions.js';
 import { useSessionLifecycle } from './hooks/useSessionLifecycle';
 import { ConnectedSidebar } from './components/chat/ConnectedSidebar';
 import { ConnectedMessageList } from './components/chat/ConnectedMessageList';
@@ -206,6 +207,31 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     submitDraft,
   });
 
+  const {
+    pending: pendingInteractions,
+    records: interactionRecords,
+    respond: respondInteraction,
+    localCatalog,
+  } = useInteractions({
+    agentId,
+    getAgentId: () => agentIdRef.current,
+    currentSessionId,
+    api,
+    interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
+    legacyResponsesApproval: (approvalRequestId, approve) => {
+      respondToApproval({ approvalRequestId, approve });
+    },
+    legacyAguiResume: (interruptId, status, payload) => {
+      const engineAccepted = respondToAguiApproval({
+        interruptId,
+        approve: status === 'resolved',
+      });
+      void engineAccepted;
+      void payload;
+      return engineAccepted;
+    },
+  });
+
   useBootstrap({ fetchSessions });
 
   useEffect(() => {
@@ -379,6 +405,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
               }
               onResumeCheckpoint={resumeCheckpoint}
               onLoadOlderSessionMessages={loadOlderSessionMessages}
+              interactionRecords={interactionRecords}
             />
         <ConnectedComposer
           composerMaxHeight={composerMaxHeight}
@@ -388,6 +415,11 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           isMobile={isMobile}
           approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
           approvalPolicy={uiCapabilities.ApprovalPolicy}
+          pendingInteractions={pendingInteractions}
+          onRespondInteraction={(input) => {
+            void respondInteraction(input);
+          }}
+          localCatalog={localCatalog}
         />
           </>
         )}

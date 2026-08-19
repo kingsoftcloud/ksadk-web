@@ -182,7 +182,7 @@ test('projects AG-UI activity, resumes approval, and replays terminal state', as
   await page.goto('/');
 
   await expect(page.getByText('AG-UI Fixture')).toBeVisible();
-  const composer = page.getByPlaceholder('发送消息...');
+  const composer = page.getByPlaceholder('发送消息…');
   await composer.fill('请写入 demo.txt');
   await composer.press('Enter');
 

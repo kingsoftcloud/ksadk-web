@@ -13,6 +13,8 @@ import { MessageMarkdown } from '../MessageMarkdown';
 import { parseUnifiedDiff, summarizeDiffSection, isUnifiedDiff } from '../../utils/parse-unified-diff';
 import type { Message } from './types';
 import type { ProcessingBlock, ThinkingBlock, ToolBlock, TextBlock } from '../../core/run/blocks';
+import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
+import type { Interaction } from '../../core/interaction/types';
 
 type ToolData = NonNullable<Message['tools']>[string];
 
@@ -21,6 +23,8 @@ interface Props {
   isStreaming: boolean;
   onRespondToApproval?: (p: { approvalRequestId: string; approve: boolean; previousResponseId?: string }) => void;
   onRespondToAguiApproval?: (p: { interruptId: string; approve: boolean }) => void;
+  /** Interaction/v1 records; when present the read-only anchor replaces inline approval buttons. */
+  interactionRecords?: readonly Interaction[];
 }
 
 /** 折叠容器:单行 summary + 可展开详情,260ms 高度动画。 */
@@ -361,6 +365,7 @@ export function ProcessingBlocksView({
   isStreaming,
   onRespondToApproval,
   onRespondToAguiApproval,
+  interactionRecords,
 }: Props) {
   const blocks: ProcessingBlock[] = message.blocks ?? [];
   return (
@@ -370,15 +375,26 @@ export function ProcessingBlocksView({
           return <ThinkingRow key={block.id} block={block} />;
         }
         if (block.type === 'tool') {
+          const blockExtra = (block.extra || {}) as Record<string, unknown>;
+          const approvalId = String(
+            blockExtra.approvalRequestId
+            || message.tools?.[block.toolName]?.approvalRequestId
+            || '',
+          );
+          const record = approvalId
+            ? interactionRecords?.find((entry) => entry.interactionId === approvalId)
+            : undefined;
           return (
-            <ToolRow
-              key={block.id}
-              block={block}
-              tool={message.tools?.[block.toolName]}
-              isStreaming={isStreaming}
-              onRespondToApproval={onRespondToApproval}
-              onRespondToAguiApproval={onRespondToAguiApproval}
-            />
+            <div key={block.id}>
+              <ToolRow
+                block={block}
+                tool={message.tools?.[block.toolName]}
+                isStreaming={isStreaming}
+                onRespondToApproval={onRespondToApproval}
+                onRespondToAguiApproval={onRespondToAguiApproval}
+              />
+              {record ? <InteractionHistoryAnchor interaction={record} /> : null}
+            </div>
           );
         }
         return <TextRow key={block.id} block={block} />;

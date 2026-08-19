@@ -3,7 +3,7 @@ import { postJsonAction, streamGetAction } from '../../api/client.js';
 import { listSessions as listSessionsApi, createSession as createSessionApi, deleteSession as deleteSessionApi, getSession as getSessionApi } from '../../api/session.js';
 import { listSessionEvents as listSessionEventsApi } from '../../api/events.js';
 import { listSessionMessages as listSessionMessagesApi } from '../../api/messages.js';
-import { runAgent as runAgentApi, submitAgentControl as submitAgentControlApi } from '../../api/run.js';
+import { runAgent as runAgentApi, submitAgentControl as submitAgentControlApi, submitInteraction as submitInteractionApi } from '../../api/run.js';
 import { subscribeSessionEvents as subscribeSessionEventsApi } from '../../api/events.js';
 import { listSessionCheckpoints as listSessionCheckpointsApi, listToolReceipts as listToolReceiptsApi, previewCheckpointResume as previewCheckpointResumeApi, resumeRun as resumeRunApi } from '../../api/checkpoints.js';
 import { listWorkspaceFiles as listWorkspaceFilesApi, addWorkspaceFile as addWorkspaceFileApi, deleteWorkspaceFile as deleteWorkspaceFileApi, getWorkspaceFileContent as getFileContentApi } from '../../api/workspace.js';
@@ -108,6 +108,22 @@ export class ApiFacadeImpl implements ApiFacade {
       idempotencyKey: command.idempotency_key,
       payload: command.payload,
     }, opts);
+  }
+
+  async submitInteraction(
+    params: {
+      AgentId: string;
+      SessionId: string;
+      RunId: string;
+      InteractionId: string;
+      ExpectedRevision: number;
+      Action: 'approve' | 'reject' | 'submit' | 'cancel';
+      Response: Record<string, unknown>;
+      IdempotencyKey: string;
+    },
+    opts?: { signal?: AbortSignal },
+  ) {
+    return submitInteractionApi(params, opts);
   }
 
   async getAgentStatus(opts?: { signal?: AbortSignal }) {

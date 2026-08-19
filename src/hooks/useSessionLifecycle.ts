@@ -21,6 +21,7 @@ import type { ApiFacade } from '../core/api/types.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import { createSessionEventCursor } from '../utils/session-event-history.js';
+import { ingestSessionEventRecord } from '../core/interaction/index.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
@@ -397,6 +398,19 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         });
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
         const lastSeqId = messagesData.LatestSeqId || 0;
+
+        // Replay recent durable SessionEvents to restore pending
+        // Interaction/v1 records (refresh / replay never re-submits).
+        try {
+          const eventsData = await api.listSessionEvents(sessionId, { limit: 50 });
+          if (isStillCurrentSession()) {
+            for (const record of (eventsData.Events || []) as unknown[]) {
+              ingestSessionEventRecord(record, sessionId);
+            }
+          }
+        } catch (error) {
+          console.warn('[SessionLifecycle] interaction history replay failed:', error);
+        }
 
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {

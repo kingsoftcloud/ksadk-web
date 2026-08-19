@@ -41,6 +41,8 @@ import type { SessionCheckpoint } from '../../stores/checkpoint.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 import { A2UIActivityMessage } from './A2UIActivityMessage';
+import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
+import type { Interaction } from '../../core/interaction/types.js';
 
 type ChatMessageListProps = {
   agentName: string;
@@ -68,6 +70,8 @@ type ChatMessageListProps = {
   onCancelRemote?: () => void;
   checkpoints?: SessionCheckpoint[];
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
+  /** Interaction/v1 records for the current session; anchors replace inline buttons. */
+  interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
 };
 
@@ -754,12 +758,14 @@ function ChatMessage({
   onRespondToAguiApproval,
   onSubmitFeedback,
   onSubmitAguiAction,
+  interactionRecords,
 }: {
   agentName: string;
   isMobile: boolean;
   isStreaming: boolean;
   isLastMessage: boolean;
   message: Message;
+  interactionRecords?: readonly Interaction[];
   onDeleteFeedback: (message: Message) => void;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
   onRespondToApproval: ChatMessageListProps['onRespondToApproval'];
@@ -814,6 +820,7 @@ function ChatMessage({
           message={message}
           isStreaming={isStreaming}
           onRespondToApproval={onRespondToApproval}
+          interactionRecords={interactionRecords}
           onRespondToAguiApproval={onRespondToAguiApproval}
         />
       ) : (
@@ -916,7 +923,7 @@ function ChatMessage({
                         MCP Server: {tool.serverLabel}
                       </div>
                     ) : null}
-                    {tool.approvalStatus === 'pending' ? (
+                {tool.approvalStatus === 'pending' ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -986,6 +993,23 @@ function ChatMessage({
           ))
         : null}
 
+      {message.tools
+        ? Object.values(message.tools)
+            .filter((tool) =>
+              interactionRecords?.some(
+                (record) => record.interactionId === tool.approvalRequestId,
+              ),
+            )
+            .map((tool) => (
+              <InteractionHistoryAnchor
+                key={`anchor-${tool.approvalRequestId}`}
+                interaction={interactionRecords!.find(
+                  (record) => record.interactionId === tool.approvalRequestId,
+                )!}
+              />
+            ))
+        : null}
+
       <div className="w-full break-words">
         {message.content ? (
           <MessageMarkdown content={message.content} />
@@ -1034,6 +1058,7 @@ export function ChatMessageList({
   onCancelRemote,
   checkpoints = [],
   onResumeCheckpoint,
+  interactionRecords,
   scrollRef,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
@@ -1135,6 +1160,7 @@ export function ChatMessageList({
                     onDeleteFeedback={onDeleteFeedback}
                     onOpenAttachmentPreview={onOpenAttachmentPreview}
                     onRespondToApproval={onRespondToApproval}
+          interactionRecords={interactionRecords}
                     onRespondToAguiApproval={onRespondToAguiApproval}
                     onSubmitFeedback={onSubmitFeedback}
                     onSubmitAguiAction={onSubmitAguiAction}

@@ -64,6 +64,16 @@ export interface ApiFacade {
     idempotency_key: string;
     payload: Record<string, unknown>;
   }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
+  submitInteraction(params: {
+    AgentId: string;
+    SessionId: string;
+    RunId: string;
+    InteractionId: string;
+    ExpectedRevision: number;
+    Action: 'approve' | 'reject' | 'submit' | 'cancel';
+    Response: Record<string, unknown>;
+    IdempotencyKey: string;
+  }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
   getAgentStatus(opts?: { signal?: AbortSignal }): Promise<unknown>;
   subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
 

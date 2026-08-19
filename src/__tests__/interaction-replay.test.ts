@@ -1,0 +1,162 @@
+import { describe, expect, it, vi } from 'vitest';
+import { InteractionClientImpl } from '../core/interaction/client.js';
+import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
+import { interactionFromResponsesApproval } from '../core/interaction/adapters/responses.js';
+import { interactionFromAguiInterrupt } from '../core/interaction/adapters/agui.js';
+import { interactionIdempotencyKey } from '../core/interaction/types.js';
+
+const REQUESTED_EVENT = {
+  schema_version: 1,
+  event_id: 'evt-1',
+  session_id: 'session-1',
+  seq: 1,
+  timestamp: '2026-08-19T00:00:00Z',
+  family: 'control',
+  family_version: 1,
+  event_type: 'interaction.requested',
+  run_id: 'run-1',
+  payload: {
+    interaction: {
+      interaction_id: 'int-1',
+      session_id: 'session-1',
+      run_id: 'run-1',
+      kind: 'approval',
+      revision: 1,
+      created_at: '2026-08-19T00:00:00Z',
+    },
+  },
+};
+
+function okReceipt() {
+  return { schema_version: 1, command_id: 'cmd-1', status: 'accepted' };
+}
+
+describe('refresh and replay', () => {
+  it('restores a pending interaction from replayed history without a second request', async () => {
+    const submitInteraction = vi.fn();
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+
+    client.ingestHistory([
+      interactionFromSessionEvent(REQUESTED_EVENT)!,
+    ]);
+
+    expect(client.listPending('session-1')).toHaveLength(1);
+    expect(client.listPending('session-1')[0].interactionId).toBe('int-1');
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it('restores pending interactions from all three transports on refresh', () => {
+    const submitInteraction = vi.fn();
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+
+    client.ingestHistory([
+      interactionFromSessionEvent(REQUESTED_EVENT)!,
+      interactionFromResponsesApproval({
+        approvalRequestId: 'int-2',
+        sessionId: 'session-1',
+        runId: 'run-1',
+      })!,
+      interactionFromAguiInterrupt({
+        interruptId: 'int-3',
+        sessionId: 'session-1',
+        runId: 'run-1',
+      })!,
+    ]);
+
+    expect(client.listPending('session-1').map((i) => i.interactionId)).toEqual([
+      'int-1',
+      'int-2',
+      'int-3',
+    ]);
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it('replay after a completed submit does not create a second request', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(okReceipt());
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(REQUESTED_EVENT)!);
+    await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    expect(submitInteraction).toHaveBeenCalledTimes(1);
+
+    // Refresh replays the full history including the requested event.
+    client.ingestHistory([interactionFromSessionEvent(REQUESTED_EVENT)!]);
+    // And the server-side resolved fact:
+    client.ingestHistory([
+      interactionFromSessionEvent({
+        ...REQUESTED_EVENT,
+        event_type: 'interaction.resolved',
+        payload: {
+          interaction_id: 'int-1',
+          outcome: 'approved',
+          actor: 'user-1',
+          resolved_at: '2026-08-19T00:01:00Z',
+        },
+      })!,
+    ]);
+
+    expect(client.listPending('session-1')).toHaveLength(0);
+    expect(submitInteraction).toHaveBeenCalledTimes(1);
+  });
+
+  it('a second respond after replay of the terminal fact is a local duplicate', async () => {
+    const submitInteraction = vi.fn().mockResolvedValue(okReceipt());
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingest(interactionFromSessionEvent(REQUESTED_EVENT)!);
+    await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+
+    const second = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'reject',
+      response: { approved: false },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+
+    expect(second.status).toBe('duplicate');
+    expect(submitInteraction).toHaveBeenCalledTimes(1);
+    // First-wins outcome is preserved.
+    const record = client.listPending('session-1');
+    expect(record).toHaveLength(0);
+  });
+
+  it('expires pending interactions on replay of expiry events', () => {
+    const submitInteraction = vi.fn();
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+    });
+    client.ingestHistory([interactionFromSessionEvent(REQUESTED_EVENT)!]);
+    client.ingestHistory([
+      interactionFromSessionEvent({
+        ...REQUESTED_EVENT,
+        event_type: 'interaction.expired',
+        payload: { interaction_id: 'int-1' },
+      })!,
+    ]);
+    expect(client.listPending('session-1')).toHaveLength(0);
+  });
+});

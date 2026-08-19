@@ -145,7 +145,18 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
     expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
-    expect(lifecycleSource).not.toContain('api.listSessionEvents(sessionId');
+    // Raw event history must not be loaded for the transcript. The only
+    // allowed listSessionEvents call is the Interaction/v1 pending
+    // replay (0.3.2), which ingests durable interaction facts only and
+    // never issues a submit.
+    const listSessionEventsCalls = lifecycleSource
+      .split('\n')
+      .filter((line) => line.includes('api.listSessionEvents(sessionId'));
+    expect(listSessionEventsCalls).toHaveLength(1);
+    expect(listSessionEventsCalls[0]).toContain('limit: 50');
+    expect(
+      lifecycleSource.indexOf('api.listSessionEvents(sessionId'),
+    ).toBeGreaterThan(lifecycleSource.indexOf('Interaction/v1'));
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
   });

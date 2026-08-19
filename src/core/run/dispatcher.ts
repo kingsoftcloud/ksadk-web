@@ -7,6 +7,10 @@ import {
   upsertToolBlock,
 } from './blocks.js';
 import { useMessageStore } from '../../stores/message.js';
+import {
+  ingestApprovalRequestedEvent,
+  ingestSessionEventRecord,
+} from '../interaction/index.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useCheckpointStore } from '../../stores/checkpoint.js';
@@ -233,6 +237,15 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'approval_requested': {
       ensureAssistantMessage(event.messageId);
+      ingestApprovalRequestedEvent({
+        approvalRequestId: event.approvalRequestId,
+        protocol: event.protocol,
+        name: event.name,
+        message: event.message,
+        args: event.args,
+        approvalLevel: event.approvalLevel,
+        sessionId: event.sessionId,
+      });
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
@@ -442,6 +455,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
 
     case 'stream_event': {
       const streamSessionId = event.sessionId || event.event.SessionId;
+      ingestSessionEventRecord(event.event, streamSessionId || undefined);
       // 记录最后事件 seq,供网络断线后 afterSeqId 续订重连。
       const evtSeq = (event.event as { SeqId?: number }).SeqId;
       if (typeof evtSeq === 'number' && evtSeq > 0) {

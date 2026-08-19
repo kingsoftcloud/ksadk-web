@@ -1,6 +1,59 @@
 # Changelog
 
-## 0.3.1 - 2026-08-12
+## 0.3.2-beta.1 - 2026-08-19
+
+> Unifies durable human-in-the-loop decisions behind one `Interaction/v1`
+> client. Counterpart of the agent-kernel Interaction/v1 contract: pending
+> approvals, structured inputs, and AG-UI interrupts normalize to a single
+> Interaction shape with one submit path (`SubmitInteraction`) with
+> revision CAS, idempotency keys, and first-wins terminal semantics.
+
+### Interaction/v1 (headless core)
+
+- New `src/core/interaction/` module: `InteractionClientImpl` + shared
+  `InteractionStore` with strict first-wins semantics (a terminal record
+  never regresses to pending), revision-based optimistic concurrency, and
+  an idempotency-key double-submit guard.
+- Transport adapters normalize three sources into the same Interaction:
+  Interaction/v1 SessionEvents (`interaction.requested` / `.resolved`,
+  rejection is `resolved.outcome="rejected"`, not a fifth event type),
+  Responses `mcp_approval_request`, and AG-UI interrupts. Components never
+  branch on the approval protocol.
+- New public API: `POST /agentengine/api/v1/SubmitInteraction`
+  (`submitInteraction` on `ApiFacade`), receipt decoded with the canonical
+  agent-kernel/v1 strict decoder. Pure `/v1/responses` clients keep the
+  official `mcp_approval_response` path.
+- Refresh/replay: session load replays recent durable SessionEvents into
+  the store so a pending Interaction is restored without creating a second
+  request; a double click, a stale tab, or a replayed history can never
+  duplicate a decision.
+
+### UI
+
+- `InteractionTray` renders above the composer with the current pending
+  item, pending count, and queue navigation; the composer input is
+  visually subordinated while a decision is pending.
+- `InteractionHistoryAnchor` replaces interactive historical approval
+  buttons with a read-only status retaining actor, decision time,
+  outcome, and a redacted response summary.
+- A2UI production wire locked to `0.9.1` with catalog digest validation
+  (`validateA2uiPresentation`). Unknown wire versions or catalog
+  mismatches fall back to the canonical JSON schema form, then to plain
+  approve/reject controls. A validation failure is never mapped to an
+  approval.
+- Expiry: interactions with a past `expires_at` disable submission
+  client-side and surface an expired notice.
+
+### Compatibility
+
+- Old servers without the `interaction_v1` capability keep the 0.3.1
+  Responses (`mcp_approval_response`) and AG-UI (`resumeAguiInterrupt`)
+  callbacks; the fallback is isolated in the adapters and the shared UI is
+  unchanged.
+- Public runtime bundle exports `InteractionClientImpl`, `Interaction`,
+  adapters, and `interactionIdempotencyKey`.
+
+## 0.3.1 - 2026-08-12 - 2026-08-12
 
 > Identity-aware runtime item reducer. Counterpart of the KsADK `0.8.1`
 > canonical RuntimeEvent(schema_version=2) release. Hosted UI and Studio must

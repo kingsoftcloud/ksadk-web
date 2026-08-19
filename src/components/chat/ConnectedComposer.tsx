@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useMessageStore } from '../../stores/message.js';
 import { useModelStore } from '../../stores/model.js';
 import { useSessionStore } from '../../stores/session.js';
 import { ChatComposer } from './ChatComposer';
+import { InteractionTray } from './InteractionTray';
+import type { InteractionTrayRespondInput } from './InteractionTray';
+import type { Interaction } from '../../core/interaction/types.js';
 import { mergeAttachmentFiles, extractClipboardFiles } from '../../utils/attachment.js';
 import { buildComposerContextIndicator } from '../../utils/context.js';
 import type { ModelStore } from '../../stores/model.js';
@@ -22,6 +25,10 @@ type ConnectedComposerProps = {
   isMobile: boolean;
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
+  /** Pending interactions rendered in the tray above the composer. */
+  pendingInteractions?: readonly Interaction[];
+  onRespondInteraction?: (input: InteractionTrayRespondInput) => void;
+  localCatalog?: unknown;
 };
 
 export function ConnectedComposer({
@@ -32,7 +39,11 @@ export function ConnectedComposer({
   isMobile,
   approvalEnabled = false,
   approvalPolicy,
+  pendingInteractions,
+  onRespondInteraction,
+  localCatalog,
 }: ConnectedComposerProps) {
+  const [activeInteractionIndex, setActiveInteractionIndex] = useState(0);
   const input = useUIStore((s: UIStore) => s.input);
   const attachments = useUIStore((s: UIStore) => s.attachments);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -89,8 +100,21 @@ export function ConnectedComposer({
     appendAttachments(pastedFiles);
   };
 
+  const trayInteractions = pendingInteractions || [];
+  const trayIndex = Math.min(activeInteractionIndex, Math.max(trayInteractions.length - 1, 0));
+
   return (
-    <ChatComposer
+    <div className="flex w-full flex-col justify-center">
+      {trayInteractions.length > 0 && onRespondInteraction ? (
+        <InteractionTray
+          interactions={trayInteractions}
+          activeIndex={trayIndex}
+          onSelectIndex={setActiveInteractionIndex}
+          onRespond={onRespondInteraction}
+          localCatalog={localCatalog}
+        />
+      ) : null}
+      <ChatComposer
       attachments={attachments}
       composerContextIndicator={composerContextIndicator}
       composerMaxHeight={composerMaxHeight}
@@ -113,6 +137,7 @@ export function ConnectedComposer({
       onCancelRemote={cancelRemote}
       onSubmit={handleSubmit}
       textareaRef={textareaRef}
-    />
+      />
+    </div>
   );
 }

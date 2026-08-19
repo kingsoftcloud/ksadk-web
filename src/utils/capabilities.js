@@ -137,9 +137,16 @@ export function normalizeCapabilities(bootstrap) {
   );
   const nativeTerminalEnabled = normalizeEnabled(nativeTerminal.Enabled, defaultNativeTerminal);
   const runLifecycleEnabled = normalizeEnabled(runLifecycle.Enabled, hostedChatEnabled);
+  const interactionV1 = Boolean(
+    rawCapabilities.interaction_v1?.enabled
+    ?? rawCapabilities.Interaction?.V1
+    ?? rawCapabilities.InteractionV1
+    ?? false,
+  );
 
   return {
     ...rawCapabilities,
+    InteractionV1: interactionV1,
     HostedChat: {
       Enabled: hostedChatEnabled,
       ApiFormats: normalizeApiFormats(hostedChat.ApiFormats || apiFormats),
