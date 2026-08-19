@@ -195,6 +195,57 @@ describe('refresh and replay', () => {
     expect(submitInteraction).toHaveBeenCalledTimes(1);
   });
 
+  it('a resolved record keeps the requested snapshot fields (title, kind, request_schema)', () => {
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction: vi.fn(),
+    });
+    client.ingestHistory([
+      interactionFromSessionEvent({
+        ...REQUESTED_EVENT,
+        payload: {
+          interaction: {
+            ...REQUESTED_EVENT.payload.interaction,
+            title: '部署确认',
+            message: '请选择部署目标',
+            request_schema: {
+              type: 'object',
+              properties: { deploy_target: { type: 'string' } },
+            },
+          },
+        },
+      })!,
+    ]);
+    const resolved = interactionFromSessionEvent({
+      ...REQUESTED_EVENT,
+      event_type: 'interaction.resolved',
+      event_id: 'evt-2',
+      payload: {
+        interaction_id: 'int-1',
+        outcome: 'submitted',
+        actor: 'user',
+        resolved_at: '2026-08-19T00:01:00Z',
+      },
+    });
+
+    const seen: unknown[] = [];
+    client.subscribe((event) => {
+      if (event.type === 'interaction_resolved') seen.push(event.interaction);
+    });
+    client.ingestHistory([resolved!]);
+    const record = seen[0] as (typeof seen)[0] & {
+      title: string;
+      requestSchema: Record<string, unknown> | null;
+    };
+    expect(record).toBeDefined();
+    expect(record.status).toBe('resolved');
+    expect(record.title).toBe('部署确认');
+    expect(record.requestSchema).toEqual({
+      type: 'object',
+      properties: { deploy_target: { type: 'string' } },
+    });
+  });
+
   it('expires pending interactions on replay of expiry events', () => {
     const submitInteraction = vi.fn();
     const client = new InteractionClientImpl({

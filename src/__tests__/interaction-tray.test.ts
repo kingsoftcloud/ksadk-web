@@ -46,6 +46,18 @@ describe('InteractionTray contract', () => {
     expect(source).toContain('data-testid="interaction-tray-next"');
   });
 
+  it('resolved anchors expand into a read-only snapshot with schema summary', () => {
+    const source = readSource('components/chat/InteractionHistoryAnchor.tsx');
+    expect(source).toContain("interaction.actor");
+    expect(source).toContain('interaction-history-detail');
+    expect(source).toContain('requestSchemaKeys');
+    // The snapshot is never editable: no inputs, no form, no buttons.
+    expect(source).not.toContain('<input');
+    expect(source).not.toContain('<form');
+    expect(source).not.toContain('<textarea');
+    expect(source).not.toContain('<button');
+  });
+
   it('history anchors are read-only: no buttons, retain actor/time/outcome/summary', () => {
     const source = readSource('components/chat/InteractionHistoryAnchor.tsx');
     expect(source).not.toContain('<button');

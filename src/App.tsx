@@ -162,6 +162,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     onRunSettled: refreshSettledRun,
   });
 
+
   useEffect(() => {
     disconnectRunRef.current = disconnectRun;
   }, [disconnectRun]);
@@ -206,6 +207,16 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     api,
     submitDraft,
   });
+  // The 0.3.1 fallback callbacks are captured once inside useInteractions'
+  // useState initializer; route them through refs so they always invoke the
+  // latest engine/approval closures instead of the first render's.
+  const respondToApprovalRef = useRef(respondToApproval);
+  const respondToAguiApprovalRef = useRef(respondToAguiApproval);
+  useEffect(() => {
+    respondToApprovalRef.current = respondToApproval;
+    respondToAguiApprovalRef.current = respondToAguiApproval;
+  }, [respondToApproval, respondToAguiApproval]);
+
 
   const {
     pending: pendingInteractions,
@@ -219,10 +230,10 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     api,
     interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
     legacyResponsesApproval: (approvalRequestId, approve) => {
-      respondToApproval({ approvalRequestId, approve });
+      respondToApprovalRef.current({ approvalRequestId, approve });
     },
     legacyAguiResume: (interruptId, status, payload) => {
-      const engineAccepted = respondToAguiApproval({
+      const engineAccepted = respondToAguiApprovalRef.current({
         interruptId,
         approve: status === 'resolved',
       });

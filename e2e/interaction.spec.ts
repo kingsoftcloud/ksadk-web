@@ -463,3 +463,137 @@ test('servers without interaction_v1 keep the 0.3.1 Responses approval behavior'
   await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
   expect(state.submits).toHaveLength(0);
 });
+
+test('multiple pending interactions queue in one tray with count badge and switching', async ({ page }) => {
+  const state = {
+    submits: [],
+    resolvedIds: new Set(),
+    sessionCreated: false,
+    events: () => [
+      requestedEvent({ interactionId: 'int-q1', title: '删除文件', message: '确认删除 demo.txt？' }),
+      requestedEvent({ interactionId: 'int-q2', title: '执行命令', message: '确认执行 rm -rf /tmp/cache？' }),
+    ],
+  };
+  await installFixture(page, state);
+  await createSession(page);
+  await page.reload();
+
+  // One tray, one expanded form at a time — never stacked large forms.
+  const trays = page.getByTestId('interaction-tray');
+  await expect(trays).toHaveCount(1);
+  await expect(trays).toHaveAttribute('data-interaction-count', '2');
+  await expect(page.getByTestId('interaction-tray-count')).toHaveText('1/2');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('删除文件');
+  // Only the current item's action buttons are rendered.
+  await expect(page.getByTestId('interaction-approve')).toHaveCount(1);
+
+  // Switch to the second item.
+  await page.getByTestId('interaction-tray-next').click();
+  await expect(page.getByTestId('interaction-tray-count')).toHaveText('2/2');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('执行命令');
+  await expect(page.getByTestId('interaction-tray-prev')).toBeEnabled();
+  await expect(page.getByTestId('interaction-tray-next')).toBeDisabled();
+});
+
+test('the confirmation tray never obscures the composer', async ({ page }) => {
+  const state = {
+    submits: [],
+    resolvedIds: new Set(),
+    sessionCreated: false,
+    events: () => [
+      requestedEvent({
+        interactionId: 'int-q1',
+        title: '删除文件',
+        message: '确认删除 demo.txt？',
+        requestSchema: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+        },
+      }),
+      requestedEvent({
+        interactionId: 'int-q2',
+        title: '执行命令',
+        message: '确认执行 deploy.sh？',
+        requestSchema: {
+          type: 'object',
+          properties: { env: { type: 'string' } },
+        },
+      }),
+    ],
+  };
+  await installFixture(page, state);
+  await createSession(page);
+  await page.reload();
+
+  const tray = page.getByTestId('interaction-tray');
+  await expect(tray).toBeVisible();
+  const composer = page.getByPlaceholder('发送消息…');
+  await expect(composer).toBeVisible();
+
+  const trayBox = await tray.boundingBox();
+  const composerBox = await composer.boundingBox();
+  expect(trayBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  // Layout invariant: the tray sits strictly above the composer — no
+  // overlap, and the composer stays fully visible and clickable.
+  expect(trayBox.y + trayBox.height).toBeLessThanOrEqual(composerBox.y + 1);
+});
+
+test('resolved anchor expands a read-only snapshot with actor, time, and schema keys', async ({ page }) => {
+  const state = {
+    submits: [],
+    resolvedIds: new Set(),
+    sessionCreated: false,
+    history: [
+      {
+        MessageId: 'assistant-snap',
+        Role: 'assistant',
+        Content: { text: '需要部署确认。' },
+        ToolEvents: [
+          {
+            Name: 'deploy',
+            Args: { env: 'pre-online' },
+            Status: 'approved',
+            ApprovalRequestId: 'int-snap',
+            Protocol: 'responses',
+          },
+        ],
+      },
+    ],
+    events: () => [
+      requestedEvent({
+        interactionId: 'int-snap',
+        kind: 'structured_input',
+        title: '部署确认',
+        requestSchema: {
+          type: 'object',
+          properties: {
+            deploy_target: { type: 'string' },
+            note: { type: 'string' },
+          },
+          required: ['deploy_target'],
+        },
+      }),
+      resolvedEvent('int-snap', 'submitted'),
+    ],
+  };
+  await installFixture(page, state);
+  await createSession(page);
+  await page.reload();
+
+  const anchor = page.getByTestId('interaction-history-anchor');
+  await expect(anchor).toBeVisible();
+  await expect(anchor).toHaveAttribute('data-interaction-status', 'resolved');
+
+  // Expand the snapshot.
+  await page.getByTestId('interaction-history-detail').locator('summary').click();
+  const snapshot = page.getByTestId('interaction-history-snapshot');
+  await expect(snapshot).toBeVisible();
+  await expect(page.getByTestId('interaction-history-actor-ref')).toHaveText('user');
+  await expect(page.getByTestId('interaction-history-schema-keys')).toHaveText('deploy_target、note');
+
+  // Read-only: no editable controls inside the anchor.
+  const editable = await anchor.locator('input, textarea, select, form, button').count();
+  expect(editable).toBe(0);
+});
