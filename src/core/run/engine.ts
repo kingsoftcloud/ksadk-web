@@ -325,7 +325,7 @@ export class RunEngineImpl implements RunEngine {
           invocationId,
         );
 
-        let stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
+        const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
         this.setStage('streaming');
         this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
 
