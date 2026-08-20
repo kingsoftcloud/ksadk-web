@@ -953,7 +953,12 @@ export class RunEngineImpl implements RunEngine {
                 const status = String(
                   (record.Content as { status?: unknown } | undefined)?.status || '',
                 ).toLowerCase();
-                if (TERMINAL_RUN_STATUSES.has(status)) terminalStatus = status;
+                // Kernel runs pause as `interrupted` while an interaction is
+                // pending (approval); that is not terminal — keep streaming
+                // until completed/failed/cancelled.
+                if (status !== 'interrupted' && TERMINAL_RUN_STATUSES.has(status)) {
+                  terminalStatus = status;
+                }
               }
             }
           }
