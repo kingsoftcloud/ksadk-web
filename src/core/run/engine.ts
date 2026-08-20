@@ -967,7 +967,7 @@ export class RunEngineImpl implements RunEngine {
           // Kernel subscriptions replay the backlog and close; poll until the
           // run reaches a terminal state (it may wait on an interaction).
           // eslint-disable-next-line no-await-in-loop
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 3000));
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
