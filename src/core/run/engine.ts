@@ -18,6 +18,7 @@ import { ApiError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
 import { useStreamingStore } from '../../stores/streaming.js';
+import { KernelRunEventTranslator, peekKernelReceipt } from '../stream/kernel-events.js';
 import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
@@ -324,13 +325,26 @@ export class RunEngineImpl implements RunEngine {
           invocationId,
         );
 
-        const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
+        let stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
         this.setStage('streaming');
         this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
 
         const assistantMessageId = `msg-${Date.now()}`;
 
-        const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId, invocationId);
+        // AgentKernel path: RunAgent answers with a control receipt (JSON);
+        // run output arrives on SubscribeSessionEvents as raw kernel frames.
+        const peeked = await peekKernelReceipt(stream);
+        let streamResult: StreamConsumeResult;
+        if (peeked.receipt) {
+          streamResult = await this.consumeKernelRunEvents(
+            sessionId,
+            invocationId,
+            peeked.receipt,
+            assistantMessageId,
+          );
+        } else {
+          streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
+        }
 
         if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
           retriedWithNewSession = true;
@@ -344,8 +358,19 @@ export class RunEngineImpl implements RunEngine {
             this.setStage('streaming');
             this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
             const retryMsgId = `msg-${Date.now()}`;
-            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
-            streamResult.terminalStatus = retryResult.terminalStatus;
+            const retryPeeked = await peekKernelReceipt(retryStream);
+            if (retryPeeked.receipt) {
+              const retryResult = await this.consumeKernelRunEvents(
+                sessionId,
+                invocationId,
+                retryPeeked.receipt,
+                retryMsgId,
+              );
+              streamResult.terminalStatus = retryResult.terminalStatus;
+            } else {
+              const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
+              streamResult.terminalStatus = retryResult.terminalStatus;
+            }
           }
         }
 
@@ -847,6 +872,108 @@ export class RunEngineImpl implements RunEngine {
       body.PreviousResponseId = draft.previousResponseId;
     }
     return body;
+  }
+
+  /**
+   * Consume an AgentKernel run: the receipt proved the durable enqueue; the
+   * run output arrives on SubscribeSessionEvents as raw kernel frames which
+   * are translated to legacy SessionEventRecords (dispatcher handles the
+   * message merge + interaction ingestion). Reconnects resume from the last
+   * observed kernel seq.
+   */
+  private async consumeKernelRunEvents(
+    sessionId: string,
+    invocationId: string,
+    receipt: import('../stream/kernel-events.js').KernelRunReceipt,
+    assistantMessageId: string,
+  ): Promise<StreamConsumeResult> {
+    if (receipt.status === 'rejected' || receipt.status === 'unsupported') {
+      this.setStage('error');
+      this.emit({
+        type: 'error',
+        error: new Error(receipt.error?.message || `运行提交被拒绝（${receipt.status}）`),
+      });
+      return { receivedData: false, terminalStatus: 'failed' };
+    }
+    if (receipt.status === 'queue_full') {
+      this.setStage('error');
+      this.emit({ type: 'rate_limited', message: '运行队列已满，请稍后重试' });
+      return { receivedData: false, terminalStatus: 'failed' };
+    }
+    // accepted / duplicate / persistence_uncertain: the run is (very likely)
+    // durable on the kernel; watch the event stream for its outcome.
+    if (receipt.status === 'persistence_uncertain') {
+      this.emit({
+        type: 'system_message',
+        content: '提交结果未知，正在从事件流确认运行状态…',
+      });
+    }
+
+    this.emit({ type: 'assistant_message_created', messageId: assistantMessageId, invocationId });
+    this.emit({ type: 'activity', phase: '已提交运行，订阅事件流', status: 'running', countEvent: false });
+
+    const translator = new KernelRunEventTranslator(sessionId);
+    let terminalStatus: string | undefined;
+    let attempts = 0;
+    const maxAttempts = 6;
+
+    while (terminalStatus === undefined && attempts < maxAttempts) {
+      attempts += 1;
+      try {
+        const afterSeq = useStreamingStore.getState().lastSeqId || 0;
+        // eslint-disable-next-line no-await-in-loop
+        const stream = await this.api.subscribeSessionEvents(
+          sessionId,
+          afterSeq,
+          { signal: this.abortController?.signal },
+        );
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (terminalStatus === undefined) {
+          // eslint-disable-next-line no-await-in-loop
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const split = splitSseBuffer(buffer);
+          buffer = split.remainder;
+          for (const chunk of split.chunks) {
+            if (!chunk.trim()) continue;
+            for (const transportEvent of parseSseChunk(chunk)) {
+              const frame = transportEvent.data as Record<string, unknown> | undefined;
+              if (!frame || typeof frame !== 'object') continue;
+              const record = translator.translate(frame);
+              const seq = Number(frame.seq);
+              if (Number.isFinite(seq) && seq > 0) {
+                useStreamingStore.getState().setLastSeqId(seq);
+              }
+              if (!record) continue;
+              this.emit({ type: 'stream_event', event: record as SessionEventRecord, sessionId });
+              if (record.EventType === 'run_status') {
+                const status = String(
+                  (record.Content as { status?: unknown } | undefined)?.status || '',
+                ).toLowerCase();
+                if (TERMINAL_RUN_STATUSES.has(status)) terminalStatus = status;
+              }
+            }
+          }
+        }
+        if (terminalStatus === undefined && attempts < maxAttempts) {
+          // Stream ended without a terminal fact (gateway idle close); resubscribe.
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return { receivedData: true, terminalStatus: 'cancelled' };
+        }
+        if (attempts >= maxAttempts) break;
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempts));
+      }
+    }
+    if (terminalStatus === undefined) terminalStatus = 'interrupted';
+    return { receivedData: true, terminalStatus };
   }
 
   private async consumeStream(
