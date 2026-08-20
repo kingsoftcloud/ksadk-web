@@ -914,11 +914,10 @@ export class RunEngineImpl implements RunEngine {
 
     const translator = new KernelRunEventTranslator(sessionId);
     let terminalStatus: string | undefined;
-    let attempts = 0;
-    const maxAttempts = 6;
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 6;
 
-    while (terminalStatus === undefined && attempts < maxAttempts) {
-      attempts += 1;
+    while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
       try {
         const afterSeq = useStreamingStore.getState().lastSeqId || 0;
         // eslint-disable-next-line no-await-in-loop
@@ -927,6 +926,7 @@ export class RunEngineImpl implements RunEngine {
           afterSeq,
           { signal: this.abortController?.signal },
         );
+        consecutiveErrors = 0;
         const reader = stream.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -953,8 +953,8 @@ export class RunEngineImpl implements RunEngine {
                 const status = String(
                   (record.Content as { status?: unknown } | undefined)?.status || '',
                 ).toLowerCase();
-                // Kernel runs pause as `interrupted` while an interaction is
-                // pending (approval); that is not terminal — keep streaming
+                // Kernel runs pause as `interrupted` while an interaction
+                // (approval) is pending; that is not terminal — keep streaming
                 // until completed/failed/cancelled.
                 if (status !== 'interrupted' && TERMINAL_RUN_STATUSES.has(status)) {
                   terminalStatus = status;
@@ -963,21 +963,23 @@ export class RunEngineImpl implements RunEngine {
             }
           }
         }
-        if (terminalStatus === undefined && attempts < maxAttempts) {
-          // Stream ended without a terminal fact (gateway idle close); resubscribe.
+        if (terminalStatus === undefined) {
+          // Kernel subscriptions replay the backlog and close; poll until the
+          // run reaches a terminal state (it may wait on an interaction).
           // eslint-disable-next-line no-await-in-loop
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return { receivedData: true, terminalStatus: 'cancelled' };
         }
-        if (attempts >= maxAttempts) break;
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= maxConsecutiveErrors) break;
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, 800 * attempts));
+        await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveErrors));
       }
     }
-    if (terminalStatus === undefined) terminalStatus = 'interrupted';
+        if (terminalStatus === undefined) terminalStatus = 'interrupted';
     return { receivedData: true, terminalStatus };
   }
 
