@@ -79,8 +79,8 @@ describe('KernelRunEventTranslator', () => {
       kind: 'approval',
       run_id: 'run-1',
     });
-    expect(record?.event_type).toBe('interaction.requested');
-    expect(record?.interaction_id).toBe('item_abc');
+    expect(record?.EventType).toBe('interaction.requested');
+    expect((record?.payload as Record<string, unknown>)?.interaction_id).toBe('item_abc');
   });
 
   it('maps terminal control run transitions to run_status', () => {

@@ -119,9 +119,14 @@ export class KernelRunEventTranslator {
     });
 
     if (family === 'interaction') {
-      // Raw passthrough: interactionFromSessionEvent understands the kernel
-      // envelope (event_type / interaction_id / outcome) natively.
-      return { ...frame, SessionId: this.sessionId } as LegacySessionEventRecord;
+      // The interaction adapter reads interaction facts from
+      // envelope.payload; wrap the flattened kernel frame so the adapter's
+      // payload/body fallbacks find interaction_id / kind / outcome.
+      return {
+        ...base(),
+        EventType: eventType,
+        payload: frame,
+      } as LegacySessionEventRecord;
     }
 
     if (family === 'control') {
