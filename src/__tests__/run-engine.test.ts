@@ -6,6 +6,7 @@ import { useMessageStore } from '../stores/message.js';
 import { useSessionStore } from '../stores/session.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { dispatchRunEventToStores, resetDispatcherState } from '../core/run/dispatcher.js';
+import { sharedInteractionStore } from '../core/interaction/index.js';
 
 function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData[] = []): ApiFacade {
   return {
@@ -181,7 +182,7 @@ describe('RunEngineImpl', () => {
     });
   });
 
-  it('keeps a Responses approval inside its tool row instead of appending an interruption notice', async () => {
+  it('keeps a Responses approval in tool history and mirrors it into the composer interaction queue', async () => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine({
       ...createApiFacade(calls),
@@ -218,6 +219,13 @@ describe('RunEngineImpl', () => {
     expect(useMessageStore.getState().messages.at(-1)?.tools?.web_search).toMatchObject({
       approvalStatus: 'pending',
       status: 'paused',
+    });
+    expect(sharedInteractionStore.get('session-inline-approval', 'approval-1')).toMatchObject({
+      source: 'responses',
+      interactionId: 'approval-1',
+      sessionId: 'session-inline-approval',
+      status: 'pending',
+      title: '审批：web_search',
     });
   });
 

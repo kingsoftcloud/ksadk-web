@@ -961,9 +961,9 @@ export class RunEngineImpl implements RunEngine {
           messageId,
           approvalRequestId: action.approvalRequestId,
           protocol: 'responses',
-          name: '人工确认',
-          args: '',
-          message: '本次运行需要人工审批后才能继续。',
+          name: action.name || '人工确认',
+          args: action.args || '',
+          message: action.message || '本次运行需要人工审批后才能继续。',
         });
         break;
       case 'incomplete':
