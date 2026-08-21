@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.2-beta.1 - 2026-08-19
+## 0.3.2 - 2026-08-21
 
 > Unifies durable human-in-the-loop decisions behind one `Interaction/v1`
 > client. Counterpart of the agent-kernel Interaction/v1 contract: pending
