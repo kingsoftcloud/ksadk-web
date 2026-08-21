@@ -78,6 +78,13 @@ describe('InteractionTray contract', () => {
     // Interaction record and only while pending.
     expect(source).toContain("tool.approvalStatus === 'pending' ? (");
   });
+
+  it('keeps a streamed tool approval read-only once the composer tray owns it', () => {
+    const source = readSource('components/chat/ProcessingBlocksView.tsx');
+    expect(source).toContain('interactionRecord={record}');
+    expect(source).toContain("approvalStatus === 'pending' && !interactionRecord");
+    expect(source).toContain('请在输入区确认面板中操作。');
+  });
 });
 
 describe('A2UI v0.9.1 validation and safe fallback', () => {
