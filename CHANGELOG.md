@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 - 2026-08-21
+
+Release candidate for the durable Interaction/v1 web experience. This is the
+reviewed source that replaces the internal beta sequence; publication remains
+blocked on the cross-repository preproduction gate.
+
 ## 0.3.2-beta.5 - 2026-08-21
 
 When the composer Interaction tray owns a pending approval, its tool-history
