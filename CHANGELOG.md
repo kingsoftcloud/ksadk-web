@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2-beta.4 - 2026-08-21
+
+Fixes the legacy Responses approval bridge: a pending approval is retained in
+the read-only tool history and also normalized into the unified Interaction
+tray immediately above the composer.  The submit still uses the compatible
+Responses approval transport when Interaction/v1 is unavailable.
+
 ## 0.3.2-beta.3 - 2026-08-20
 
 Adds package-internal release provenance. Hosted UI and the preproduction gate
