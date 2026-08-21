@@ -100,16 +100,6 @@ export function ChatSidebar({
               return (
                 <div
                   key={session.SessionId}
-                  role="button"
-                  tabIndex={0}
-                  aria-current={selected ? 'page' : undefined}
-                  onClick={() => onSelectSession(session.SessionId)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      onSelectSession(session.SessionId);
-                    }
-                  }}
                   className={cn(
                     'group relative flex h-[30px] items-center gap-1 rounded-[10px] border-l-2 border-transparent px-2 text-sm leading-5 transition-colors',
                     selected
@@ -123,17 +113,24 @@ export function ChatSidebar({
                   {meta.running ? (
                     <span className="absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary" aria-hidden="true" />
                   ) : null}
-                  <div className="min-w-0 flex-1 truncate text-[13px]">
-                    {sessionTitle(session)}
-                  </div>
-                  {meta.running ? (
-                    <LoaderCircle className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary" />
-                  ) : meta.label ? (
-                    <span className="flex-shrink-0 text-[11px] leading-none text-sidebar-text-muted group-hover:hidden">
-                      {meta.label}
+                  <button
+                    type="button"
+                    aria-current={selected ? 'page' : undefined}
+                    className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                    onClick={() => onSelectSession(session.SessionId)}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[13px]">
+                      {sessionTitle(session)}
                     </span>
-                  ) : null}
-                  <div className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                    {meta.running ? (
+                      <LoaderCircle className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary" />
+                    ) : meta.label ? (
+                      <span className="flex-shrink-0 text-[11px] leading-none text-sidebar-text-muted group-hover:hidden">
+                        {meta.label}
+                      </span>
+                    ) : null}
+                  </button>
+                  <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-end gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
                     <button
                       type="button"
                       onClick={(event) => onTogglePinSession(session.SessionId, event)}
