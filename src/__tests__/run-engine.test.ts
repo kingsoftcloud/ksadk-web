@@ -997,6 +997,34 @@ describe('RunEngineImpl', () => {
     expect(settledSessionIds).toEqual(['session-history']);
   });
 
+  it('does not create a second session when a newly created session has an empty stream', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const createdSessions: string[] = [];
+    const engine = createRunEngine({
+      ...createApiFacade(calls),
+      async createSession() {
+        const sessionId = `session-${createdSessions.length + 1}`;
+        createdSessions.push(sessionId);
+        return { SessionId: sessionId };
+      },
+      async runAgent(body) {
+        calls.push(body);
+        return new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
+      },
+    });
+    engine.updateConfig({
+      agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'codex', selectedModel: '', thinkingMode: 'auto',
+    });
+
+    expect(engine.start({ text: '你好', attachments: [] })).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+
+    expect(createdSessions).toEqual(['session-1']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ SessionId: 'session-1' });
+  });
+
   it('keeps response.failed as failed instead of overwriting it as completed', async () => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine({

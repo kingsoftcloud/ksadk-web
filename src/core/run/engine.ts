@@ -22,10 +22,7 @@ import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
 
-type StreamConsumeResult = {
-  receivedData: boolean;
-  terminalStatus?: string;
-};
+type StreamConsumeResult = { terminalStatus?: string };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -259,8 +256,6 @@ export class RunEngineImpl implements RunEngine {
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
       try {
-        let retriedWithNewSession = false;
-
         if (!sessionId) {
           sessionId = await this.createSession(draft);
         }
@@ -331,23 +326,6 @@ export class RunEngineImpl implements RunEngine {
         const assistantMessageId = `msg-${Date.now()}`;
 
         const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId, invocationId);
-
-        if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
-          retriedWithNewSession = true;
-          sessionId = await this.createSession(draft);
-          if (sessionId) {
-            this.activeSessionId = sessionId;
-            body.SessionId = sessionId;
-            this.setStage('connecting');
-            this.emit({ type: 'activity', phase: '重建会话后重新连接', status: 'connecting', countEvent: false });
-            const retryStream = await this.api.runAgent(body, { signal: this.abortController?.signal });
-            this.setStage('streaming');
-            this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
-            const retryMsgId = `msg-${Date.now()}`;
-            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
-            streamResult.terminalStatus = retryResult.terminalStatus;
-          }
-        }
 
         if (streamResult.terminalStatus === 'cancelled') {
           this.setStage('stopping');
@@ -859,15 +837,12 @@ export class RunEngineImpl implements RunEngine {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let receivedData = false;
     let messageCreated = false;
 
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        receivedData = true;
-
         if (!messageCreated) {
           messageCreated = true;
           this.emit({ type: 'assistant_message_created', messageId, invocationId });
@@ -921,7 +896,7 @@ export class RunEngineImpl implements RunEngine {
 
           if (shouldStop) {
             reader.cancel().catch(() => {});
-            return { receivedData, terminalStatus };
+            return { terminalStatus };
           }
         }
       }
@@ -931,7 +906,7 @@ export class RunEngineImpl implements RunEngine {
       }
     }
 
-    return { receivedData };
+    return {};
   }
 
   private isCompactionChunk(chunk: string): boolean {
