@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2-beta.5 - 2026-08-21
+
+When the composer Interaction tray owns a pending approval, its tool-history
+row is now strictly read-only. This removes the second legacy approve/reject
+entry point while preserving the command arguments and terminal audit result.
+
 ## 0.3.2-beta.4 - 2026-08-21
 
 Fixes the legacy Responses approval bridge: a pending approval is retained in
