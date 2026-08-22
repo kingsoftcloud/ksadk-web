@@ -36,6 +36,15 @@ async function parseActionResponse<T>(response: Response): Promise<T> {
   try {
     data = await response.json();
   } catch {
+    // Hosted Agent domains deliberately return an HTML 401/403 page when a
+    // user opens the raw URL without the short-lived Dashboard session.  This
+    // is an authentication boundary, not a malformed AgentEngine response.
+    if (response.status === 401 || response.status === 403) {
+      throw new ApiError(
+        response.status,
+        '访问会话已失效，请从 Dashboard 或 Studio 的云端会话重新打开 Agent。',
+      );
+    }
     throw new ApiError(-2, '响应格式异常');
   }
 
