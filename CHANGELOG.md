@@ -53,6 +53,12 @@
 - Public runtime bundle exports `InteractionClientImpl`, `Interaction`,
   adapters, and `interactionIdempotencyKey`.
 
+### Supply chain
+
+- Refresh the lockfile's production transitive dependencies for the `0.3.2`
+  candidate: Mermaid/DOMPurify and PostCSS/nanoid now resolve to the patched
+  releases verified by `npm audit --omit=dev`.
+
 ## 0.3.1 - 2026-08-12 - 2026-08-12
 
 > Identity-aware runtime item reducer. Counterpart of the KsADK `0.8.1`
