@@ -11,7 +11,7 @@ function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData
   return {
     async listSessions() { return []; },
     async createSession() { return { SessionId: 'session-1' }; },
-    async deleteSession() {},
+    async deleteSession() { return {}; },
     async getSession() {
       return { SessionId: 'session-1', ActiveRunStatus: '' };
     },

@@ -7,7 +7,10 @@ export interface ApiFacade {
     PageSize?: number;
   }>;
   createSession(agentId: string, opts?: { signal?: AbortSignal }): Promise<{ SessionId: string }>;
-  deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
+  deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{
+    Deleted?: boolean;
+    RuntimeSync?: string;
+  }>;
   getSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{
     SessionId: string;
     AgentId?: string;

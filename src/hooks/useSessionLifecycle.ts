@@ -618,7 +618,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const deleteSession = useCallback(
     async (sessionId: string) => {
       try {
-        await api.deleteSession(sessionId);
+        const result = await api.deleteSession(sessionId);
+        if (result.Deleted === false) {
+          useUIStore.getState().pushToast(
+            '会话暂未删除，云端运行时仍在同步，请稍后重试。',
+            'error',
+          );
+          void fetchSessions(agentId, currentSessionIdRef.current ?? undefined);
+          return;
+        }
         useSessionStore.getState().removeSession(sessionId);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
         if (currentSessionIdRef.current === sessionId) {
@@ -636,6 +644,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       } catch (error) {
         if (error instanceof CancelledError) return;
         console.error('Failed to delete session', error);
+        useUIStore.getState().pushToast('删除会话失败，请稍后重试。', 'error');
       }
     },
     [agentId, api, disconnectRun, fetchSessions],

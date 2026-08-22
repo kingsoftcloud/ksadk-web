@@ -8,6 +8,7 @@
     "build:hosted": "VITE_BASE_PATH=/chat/ vite build --outDir dist-hosted",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "build:all": "npm run build:ksadk && npm run build:hosted && npm run build:lib",
+    "prepack": "npm run build:lib && npm run build:ksadk",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",

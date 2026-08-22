@@ -23,7 +23,7 @@ export class ApiFacadeImpl implements ApiFacade {
   }
 
   async deleteSession(sessionId: string, opts?: { signal?: AbortSignal }) {
-    await deleteSessionApi(sessionId, opts);
+    return deleteSessionApi(sessionId, opts);
   }
 
   async getSession(sessionId: string, opts?: { signal?: AbortSignal }) {
