@@ -260,8 +260,6 @@ export class RunEngineImpl implements RunEngine {
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
       try {
-        let retriedWithNewSession = false;
-
         if (!sessionId) {
           sessionId = await this.createSession(draft);
         }
@@ -344,34 +342,6 @@ export class RunEngineImpl implements RunEngine {
           );
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
-        }
-
-        if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
-          retriedWithNewSession = true;
-          sessionId = await this.createSession(draft);
-          if (sessionId) {
-            this.activeSessionId = sessionId;
-            body.SessionId = sessionId;
-            this.setStage('connecting');
-            this.emit({ type: 'activity', phase: '重建会话后重新连接', status: 'connecting', countEvent: false });
-            const retryStream = await this.api.runAgent(body, { signal: this.abortController?.signal });
-            this.setStage('streaming');
-            this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
-            const retryMsgId = `msg-${Date.now()}`;
-            const retryPeeked = await peekKernelReceipt(retryStream);
-            if (retryPeeked.receipt) {
-              const retryResult = await this.consumeKernelRunEvents(
-                sessionId,
-                invocationId,
-                retryPeeked.receipt,
-                retryMsgId,
-              );
-              streamResult.terminalStatus = retryResult.terminalStatus;
-            } else {
-              const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
-              streamResult.terminalStatus = retryResult.terminalStatus;
-            }
-          }
         }
 
         if (streamResult.terminalStatus === 'cancelled') {
