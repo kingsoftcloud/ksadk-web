@@ -174,6 +174,13 @@ test('responses stream utils expose standard mcp approval request resume metadat
         previousResponseId: 'resp_123',
         serverLabel: 'workspace',
       },
+      {
+        type: 'approval_request',
+        approvalRequestId: 'appr_123',
+        previousResponseId: 'resp_123',
+        name: 'delete_file',
+        args: '{"path":"README.md"}',
+      },
     ],
   );
 });
@@ -204,6 +211,12 @@ test('responses stream utils project wrapped LangGraph HITL interrupts immediate
       status: 'paused',
       approvalRequestId: 'interrupt-1',
       previousResponseId: '',
+    }, {
+      type: 'approval_request',
+      approvalRequestId: 'interrupt-1',
+      previousResponseId: '',
+      name: 'write_file',
+      args: '{"path":"/tmp/x.txt"}',
     }],
   );
 });
