@@ -111,12 +111,15 @@ function ToolRow({
   block,
   tool,
   isStreaming,
+  interactionRecord,
   onRespondToApproval,
   onRespondToAguiApproval,
 }: {
   block: ToolBlock;
   tool?: ToolData;
   isStreaming: boolean;
+  /** The composer tray owns all interaction decisions once normalized. */
+  interactionRecord?: Interaction;
   onRespondToApproval?: Props['onRespondToApproval'];
   onRespondToAguiApproval?: Props['onRespondToAguiApproval'];
 }) {
@@ -173,7 +176,7 @@ function ToolRow({
       }
     >
       <div className="flex flex-col gap-2.5 py-1 text-[13px]">
-        {approvalRequestId && approvalStatus === 'pending' && (
+        {approvalRequestId && approvalStatus === 'pending' && !interactionRecord && (
           <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200/90 bg-white/70 px-2.5 py-2 font-sans text-[12px] text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
@@ -208,6 +211,12 @@ function ToolRow({
             </div>
           </section>
         )}
+        {approvalRequestId && approvalStatus === 'pending' && interactionRecord ? (
+          <div className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
+            请在输入区确认面板中操作。
+          </div>
+        ) : null}
         {approvalRequestId && approvalStatus && approvalStatus !== 'pending' && (
           <div className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
             <span>{approvalStatus === 'approved' ? '已授权' : '已拒绝'}</span>
@@ -390,6 +399,7 @@ export function ProcessingBlocksView({
                 block={block}
                 tool={message.tools?.[block.toolName]}
                 isStreaming={isStreaming}
+                interactionRecord={record}
                 onRespondToApproval={onRespondToApproval}
                 onRespondToAguiApproval={onRespondToAguiApproval}
               />

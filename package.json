@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "test": "vitest run src",
     "test:watch": "vitest src",
+    "test:e2e:interaction": "playwright test --config playwright.interaction.config.mjs",
     "test:e2e:agui": "playwright test --config playwright.agui.config.mjs",
     "test:e2e:reconnect": "playwright test --config playwright.reconnect.config.mjs",
     "build:ksadk": "VITE_BASE_PATH=./ vite build --outDir dist-ksadk"
@@ -45,6 +46,7 @@
     "dist-ksadk",
     "README.md",
     "CHANGELOG.md",
+    "RELEASE_PROVENANCE.json",
     "LICENSE",
     "package.json"
   ],

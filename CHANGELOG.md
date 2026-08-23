@@ -2,6 +2,43 @@
 
 ## 0.3.2 - 2026-08-21
 
+Release candidate for the durable Interaction/v1 web experience. This is the
+reviewed source that replaces the internal beta sequence. The cross-repository
+preproduction gate is green; publication still uses the protected release
+workflow.
+
+## 0.3.2-beta.5 - 2026-08-21
+
+When the composer Interaction tray owns a pending approval, its tool-history
+row is now strictly read-only. This removes the second legacy approve/reject
+entry point while preserving the command arguments and terminal audit result.
+
+## 0.3.2-beta.4 - 2026-08-21
+
+Fixes the legacy Responses approval bridge: a pending approval is retained in
+the read-only tool history and also normalized into the unified Interaction
+tray immediately above the composer.  The submit still uses the compatible
+Responses approval transport when Interaction/v1 is unavailable.
+
+## 0.3.2-beta.3 - 2026-08-20
+
+Adds package-internal release provenance. Hosted UI and the preproduction gate
+can verify the resolved tarball's source basis and Interaction/v1 contract
+digest instead of trusting an external evidence label.
+
+## 0.3.2-beta.2 - 2026-08-20
+
+Rebuilt the immutable beta artifact from the complete Interaction/v1 source.
+This supersedes `0.3.2-beta.1`, whose vendored Hosted UI tarball predated the
+two fixes below.
+
+- Treat a successful `SubmitInteraction` receipt as durable acceptance, not as
+  proof that the framework execution has already completed its resolution.
+- Add the queue tray and read-only historical interaction anchors to the
+  published artifact, rather than leaving them only on the Web source branch.
+
+## 0.3.2-beta.1 - 2026-08-19
+
 > Unifies durable human-in-the-loop decisions behind one `Interaction/v1`
 > client. Counterpart of the agent-kernel Interaction/v1 contract: pending
 > approvals, structured inputs, and AG-UI interrupts normalize to a single

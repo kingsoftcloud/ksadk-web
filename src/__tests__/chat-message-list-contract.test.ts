@@ -71,6 +71,18 @@ describe('chat message list contracts', () => {
     expect(source).toContain('onLoadMoreSessions()');
   });
 
+  it('keeps each session selection control separate from pin and delete actions', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
+
+    // A role=button wrapper containing real action buttons creates an invalid
+    // interactive nesting tree.  Browsers then route the delete click to the
+    // session selector instead of the delete handler.
+    expect(source).not.toContain('role="button"');
+    expect(source).toContain('onClick={() => onSelectSession(session.SessionId)}');
+    expect(source).toContain('onDeleteSession(session.SessionId, event)');
+    expect(source).toContain('group-focus-within:opacity-100');
+  });
+
   it('keeps reasoning panels scrollable and lightweight', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 

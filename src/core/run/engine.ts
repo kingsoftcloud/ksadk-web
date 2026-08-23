@@ -23,10 +23,7 @@ import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
 
-type StreamConsumeResult = {
-  receivedData: boolean;
-  terminalStatus?: string;
-};
+type StreamConsumeResult = { terminalStatus?: string };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -863,12 +860,12 @@ export class RunEngineImpl implements RunEngine {
         type: 'error',
         error: new Error(receipt.error?.message || `运行提交被拒绝（${receipt.status}）`),
       });
-      return { receivedData: false, terminalStatus: 'failed' };
+      return { terminalStatus: 'failed' };
     }
     if (receipt.status === 'queue_full') {
       this.setStage('error');
       this.emit({ type: 'rate_limited', message: '运行队列已满，请稍后重试' });
-      return { receivedData: false, terminalStatus: 'failed' };
+      return { terminalStatus: 'failed' };
     }
     // accepted / duplicate / persistence_uncertain: the run is (very likely)
     // durable on the kernel; watch the event stream for its outcome.
@@ -890,7 +887,6 @@ export class RunEngineImpl implements RunEngine {
     while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
       try {
         const afterSeq = useStreamingStore.getState().lastSeqId || 0;
-        // eslint-disable-next-line no-await-in-loop
         const stream = await this.api.subscribeSessionEvents(
           sessionId,
           afterSeq,
@@ -901,7 +897,6 @@ export class RunEngineImpl implements RunEngine {
         const decoder = new TextDecoder();
         let buffer = '';
         while (terminalStatus === undefined) {
-          // eslint-disable-next-line no-await-in-loop
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -936,21 +931,19 @@ export class RunEngineImpl implements RunEngine {
         if (terminalStatus === undefined) {
           // Kernel subscriptions replay the backlog and close; poll until the
           // run reaches a terminal state (it may wait on an interaction).
-          // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
-          return { receivedData: true, terminalStatus: 'cancelled' };
+          return { terminalStatus: 'cancelled' };
         }
         consecutiveErrors += 1;
         if (consecutiveErrors >= maxConsecutiveErrors) break;
-        // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveErrors));
       }
     }
-        if (terminalStatus === undefined) terminalStatus = 'interrupted';
-    return { receivedData: true, terminalStatus };
+    if (terminalStatus === undefined) terminalStatus = 'interrupted';
+    return { terminalStatus };
   }
 
   private async consumeStream(
@@ -963,15 +956,12 @@ export class RunEngineImpl implements RunEngine {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let receivedData = false;
     let messageCreated = false;
 
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        receivedData = true;
-
         if (!messageCreated) {
           messageCreated = true;
           this.emit({ type: 'assistant_message_created', messageId, invocationId });
@@ -1025,7 +1015,7 @@ export class RunEngineImpl implements RunEngine {
 
           if (shouldStop) {
             reader.cancel().catch(() => {});
-            return { receivedData, terminalStatus };
+            return { terminalStatus };
           }
         }
       }
@@ -1035,7 +1025,7 @@ export class RunEngineImpl implements RunEngine {
       }
     }
 
-    return { receivedData };
+    return {};
   }
 
   private isCompactionChunk(chunk: string): boolean {
@@ -1065,9 +1055,9 @@ export class RunEngineImpl implements RunEngine {
           messageId,
           approvalRequestId: action.approvalRequestId,
           protocol: 'responses',
-          name: '人工确认',
-          args: '',
-          message: '本次运行需要人工审批后才能继续。',
+          name: action.name || '人工确认',
+          args: action.args || '',
+          message: action.message || '本次运行需要人工审批后才能继续。',
         });
         break;
       case 'incomplete':
