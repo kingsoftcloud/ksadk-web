@@ -32,10 +32,21 @@ export class CancelledError extends Error {
 const API_BASE = '/agentengine/api/v1';
 
 async function parseActionResponse<T>(response: Response): Promise<T> {
-  let data: Record<string, unknown>;
+  const raw = await response.text();
+  let data: Record<string, unknown> = {};
   try {
-    data = await response.json();
+    data = raw ? JSON.parse(raw) as Record<string, unknown> : {};
   } catch {
+    if (!response.ok) {
+      const plainMessage = raw.trim();
+      throw new ApiError(
+        response.status,
+        plainMessage && plainMessage.length <= 256 && !plainMessage.startsWith('<')
+          ? plainMessage
+          : response.statusText || `HTTP ${response.status}`,
+        raw,
+      );
+    }
     throw new ApiError(-2, '响应格式异常');
   }
 

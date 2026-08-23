@@ -9,6 +9,13 @@ import { readPersistedSessionId } from '../utils/session.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { BootstrapModel, BootstrapWorkspaceFiles } from '../types/bootstrap.js';
 import type { RuntimeApiFormat } from '../types/api.js';
+import { ApiError } from '../api/client.js';
+
+export function classifyBootstrapFailure(error: unknown): 'auth-required' | 'error' {
+  return error instanceof ApiError && (error.code === 401 || error.code === 403)
+    ? 'auth-required'
+    : 'error';
+}
 
 function normalizeApiFormats(value: unknown): RuntimeApiFormat[] {
   if (!Array.isArray(value)) {
@@ -48,6 +55,7 @@ type SessionCallbacks = {
 export function useBootstrap(sessionCallbacks: SessionCallbacks) {
   useEffect(() => {
     void (async () => {
+      useBootstrapStore.getState().setStatus('loading');
       try {
         const data = await getAgentUiBootstrap();
         const dataRecord = data as Record<string, unknown>;
@@ -91,19 +99,16 @@ export function useBootstrap(sessionCallbacks: SessionCallbacks) {
           useModelStore.getState().setModelSource(bootstrapModel.source || '');
         }
         void fetchModels(bootstrapAgentId);
+        useBootstrapStore.getState().setStatus('ready');
       } catch (error) {
         console.error('Failed to fetch bootstrap:', error);
-        useBootstrapStore.getState().setCapabilities(
-          normalizeCapabilities({
-            Data: {
-              Agent: { Framework: '' },
-              ApiFormats: ['responses', 'chat_completions'],
-              Capabilities: {},
-            },
-          }) as UiCapabilities,
+        const status = classifyBootstrapFailure(error);
+        useBootstrapStore.getState().setStatus(
+          status,
+          status === 'auth-required'
+            ? '当前访问链接未授权或已过期。'
+            : '无法加载 Agent 配置，请稍后重试。',
         );
-        void sessionCallbacks.fetchSessions('default-agent', readPersistedSessionId('default-agent'));
-        void fetchModels('default-agent');
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
