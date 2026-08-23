@@ -48,3 +48,11 @@ test('npm publishing uses trusted publishing instead of repository tokens', () =
   assert.match(publishWorkflow, /npm publish --access public --provenance/);
   assert.doesNotMatch(publishWorkflow, /NODE_AUTH_TOKEN|NPM_TOKEN/);
 });
+
+test('successful npm release automatically deploys the matching Pages bundle', () => {
+  assert.match(publishWorkflow, /actions\/upload-pages-artifact@v3/);
+  assert.match(publishWorkflow, /path:\s+dist-ksadk/);
+  assert.match(publishWorkflow, /deploy-pages:\s*[\s\S]*needs:\s+publish/);
+  assert.match(publishWorkflow, /pages:\s+write/);
+  assert.match(publishWorkflow, /actions\/deploy-pages@v4/);
+});

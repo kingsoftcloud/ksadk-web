@@ -233,7 +233,7 @@ test('approve sends exactly one SubmitInteraction and replay never resubmits', a
     Action: 'approve',
     IdempotencyKey: 'interaction:int-1:revision-1',
   });
-  expect(state.submits[0].Response).toMatchObject({ approved: true });
+  expect(state.submits[0].Response).toMatchObject({ decision: 'approve' });
 
   // The accepted receipt only proves the command entered the durable
   // Inbox — the UI stays "resolving" until the authoritative
@@ -278,7 +278,7 @@ test('reject stays resolving after the receipt and resolves on the terminal even
     Action: 'reject',
     ExpectedRevision: 1,
   });
-  expect(state.submits[0].Response).toMatchObject({ approved: false });
+  expect(state.submits[0].Response).toMatchObject({ decision: 'reject' });
   // Receipt accepted, terminal state not yet authoritative.
   await expect(tray).toHaveAttribute('data-interaction-status', 'resolving');
 

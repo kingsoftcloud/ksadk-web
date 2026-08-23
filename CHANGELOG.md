@@ -59,7 +59,7 @@
   candidate: Mermaid/DOMPurify and PostCSS/nanoid now resolve to the patched
   releases verified by `npm audit --omit=dev`.
 
-## 0.3.1 - 2026-08-12 - 2026-08-12
+## 0.3.1 - 2026-08-12
 
 > Identity-aware runtime item reducer. Counterpart of the KsADK `0.8.1`
 > canonical RuntimeEvent(schema_version=2) release. Hosted UI and Studio must
@@ -87,11 +87,10 @@
   identity-aware version. `0.3.0` used the v1 heuristic reducer and will
   duplicate or drop output when paired with canonical v2 producers.
 
-## 0.3.0 - 2026-07-24
+## 0.3.0 - 2026-07-29
 
-> **Review candidate, not a published npm release.** `0.3.0` is the web
-> counterpart of the KsADK `0.8.0` review branch. No npm tag or package is
-> created by this changelog entry.
+> Published baseline for Hosted runtime transport and the KsADK `0.8.0`
+> web integration.
 
 ### Hosted runtime transport
 
