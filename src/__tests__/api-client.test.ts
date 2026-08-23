@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, postJsonAction } from '../api/client.js';
+import { ApiError, postJsonAction, streamAction } from '../api/client.js';
 
 describe('AgentEngine action response parsing', () => {
   it('explains Dashboard authentication when a hosted Agent returns an HTML 401', async () => {
@@ -33,6 +33,32 @@ describe('AgentEngine action response parsing', () => {
       await expect(postJsonAction('GetAgentUiBootstrap', { AgentId: 'agent-1' }))
         .rejects
         .toMatchObject<ApiError>({ code: -2, message: '响应格式异常' });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('rejects an HTTP 200 action error before exposing it as an SSE stream', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      Code: 503,
+      Message: 'runtime agent kernel is not ready',
+      Data: {
+        ReceiptStatus: 'rejected',
+        Error: { code: 'runtime_not_ready' },
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    })) as typeof fetch;
+
+    try {
+      await expect(streamAction('RunAgent', { Stream: true }))
+        .rejects
+        .toMatchObject<ApiError>({
+          code: 503,
+          message: 'runtime agent kernel is not ready',
+        });
     } finally {
       globalThis.fetch = previousFetch;
     }

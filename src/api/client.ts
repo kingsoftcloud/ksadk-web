@@ -164,6 +164,14 @@ export async function streamAction(
     throw new ApiError(response.status, `流式请求失败: ${response.statusText}`);
   }
 
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  if (contentType.includes('application/json')) {
+    // Action endpoints sometimes carry business failures in an HTTP 200 JSON
+    // envelope. Validate a clone so successful legacy JSON responses keep
+    // their original body while rejected admissions never masquerade as SSE.
+    await parseActionResponse(response.clone());
+  }
+
   if (!response.body) {
     throw new ApiError(-1, '无法获取响应流');
   }
