@@ -142,6 +142,10 @@ export type RuntimeCapabilityMatrix = {
   inject: RuntimeCapability;
   checkpoint: RuntimeCapability;
   durable_restore: RuntimeCapability;
+  /** Runtime v2 execution modes are additive and absent on legacy runtimes. */
+  goal?: RuntimeCapability;
+  loop?: RuntimeCapability;
+  plan?: RuntimeCapability;
   extensions: Record<string, unknown>;
 };
 
@@ -149,6 +153,8 @@ const CAPABILITY_KEYS = [
   'cancel', 'pause', 'resume', 'submit_interaction', 'attach',
   'steer', 'inject', 'checkpoint', 'durable_restore',
 ] as const;
+
+const EXECUTION_MODE_KEYS = ['goal', 'loop', 'plan'] as const;
 
 const capabilityValue = z
   .object({
@@ -196,7 +202,11 @@ export function decodeCapabilityMatrix(raw: unknown): RuntimeCapabilityMatrix {
   const value = base.data as Record<string, unknown>;
   const extensions: Record<string, unknown> = {};
   for (const key of Object.keys(value)) {
-    if (key !== 'schema_version' && !(CAPABILITY_KEYS as readonly string[]).includes(key)) {
+    if (
+      key !== 'schema_version'
+      && !(CAPABILITY_KEYS as readonly string[]).includes(key)
+      && !(EXECUTION_MODE_KEYS as readonly string[]).includes(key)
+    ) {
       extensions[key] = value[key];
     }
   }
@@ -206,6 +216,11 @@ export function decodeCapabilityMatrix(raw: unknown): RuntimeCapabilityMatrix {
   } as RuntimeCapabilityMatrix;
   for (const key of CAPABILITY_KEYS) {
     matrix[key] = decodeCapability(value[key], key);
+  }
+  for (const key of EXECUTION_MODE_KEYS) {
+    if (value[key] !== undefined && value[key] !== null) {
+      matrix[key] = decodeCapability(value[key], key);
+    }
   }
   return matrix;
 }

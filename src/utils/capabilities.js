@@ -1,3 +1,5 @@
+import { decodeCapabilityMatrix } from '../types/agent-control.js';
+
 const DEFAULT_API_FORMATS = ['responses', 'chat_completions'];
 const NATIVE_DASHBOARD_FRAMEWORKS = new Map([
   ['openclaw', 'OpenClaw'],
@@ -74,6 +76,16 @@ function normalizeApprovalPolicy(value) {
   };
 }
 
+function normalizeRuntimeCapabilityMatrix(value) {
+  if (value === undefined || value === null) return undefined;
+  try {
+    return decodeCapabilityMatrix(value);
+  } catch {
+    // A malformed or legacy-shaped capability must never enable controls.
+    return undefined;
+  }
+}
+
 function normalizeHostedChatTransports(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -143,9 +155,13 @@ export function normalizeCapabilities(bootstrap) {
     ?? rawCapabilities.InteractionV1
     ?? false,
   );
+  const runtimeCapabilityMatrix = normalizeRuntimeCapabilityMatrix(
+    rawCapabilities.RuntimeCapabilityMatrix ?? data.RuntimeCapabilityMatrix,
+  );
 
   return {
     ...rawCapabilities,
+    RuntimeCapabilityMatrix: runtimeCapabilityMatrix,
     InteractionV1: interactionV1,
     HostedChat: {
       Enabled: hostedChatEnabled,

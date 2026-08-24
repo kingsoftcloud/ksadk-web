@@ -99,6 +99,26 @@ describe('agent-kernel/v1 contract decoders', () => {
     });
   });
 
+  it('decodes optional Runtime v2 goal loop and plan capabilities without changing legacy matrices', () => {
+    const native = { supported: true, mode: 'native' } as const;
+    const matrix = decodeCapabilityMatrix({
+      ...CAPABILITY_MATRIX,
+      goal: native,
+      loop: native,
+      plan: native,
+    });
+
+    expect(matrix.goal).toMatchObject(native);
+    expect(matrix.loop).toMatchObject(native);
+    expect(matrix.plan).toMatchObject(native);
+    expect(matrix.extensions).toEqual({});
+
+    const legacy = decodeCapabilityMatrix(CAPABILITY_MATRIX);
+    expect(legacy.goal).toBeUndefined();
+    expect(legacy.loop).toBeUndefined();
+    expect(legacy.plan).toBeUndefined();
+  });
+
   it('rejects a capability matrix that drops required capabilities', () => {
     const { checkpoint, ...partial } = CAPABILITY_MATRIX;
     expect(checkpoint).toBeDefined();

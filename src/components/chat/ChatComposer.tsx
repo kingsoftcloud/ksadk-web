@@ -7,14 +7,17 @@ import type {
   RefObject,
 } from 'react';
 
-import { ArrowUp, Paperclip, Plus, Square } from 'lucide-react';
+import { ArrowUp, Paperclip, Square } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useModelStore } from '@/stores/model.js';
 import type { ModelStore } from '@/stores/model.js';
 import type { ApprovalPolicyCapability } from '@/types/capabilities.js';
+import type { RuntimeExecutionMode } from '@/core/run/types.js';
 
 import { ContextUsageIndicator } from './ContextUsageIndicator';
+import { ExecutionModeMenu } from './ExecutionModeMenu';
+import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 import { ModelSettingsMenu } from './ModelSettingsMenu';
 import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
@@ -31,9 +34,12 @@ type ChatComposerProps = {
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
   thinkingEnabled?: boolean;
-  queuedDrafts: Array<{ text: string; attachments: File[] }>;
+  executionMode?: RuntimeExecutionMode;
+  executionModeSupport: RuntimeExecutionModeSupport;
+  queuedDrafts: Array<{ text: string; attachments: File[]; executionMode?: RuntimeExecutionMode }>;
   onAppendAttachments: (files: File[]) => void;
   onInputChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+  onSelectExecutionMode: (mode: RuntimeExecutionMode) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onRemoveAttachment: (index: number) => void;
   onStopGeneration: () => void;
@@ -54,9 +60,12 @@ export function ChatComposer({
   approvalEnabled = false,
   approvalPolicy,
   thinkingEnabled = false,
+  executionMode,
+  executionModeSupport,
   queuedDrafts,
   onAppendAttachments,
   onInputChange,
+  onSelectExecutionMode,
   onPaste,
   onRemoveAttachment,
   onStopGeneration,
@@ -64,8 +73,15 @@ export function ChatComposer({
   onSubmit,
   textareaRef,
 }: ChatComposerProps) {
-  const placeholderText = isMobile ? '发送消息...' : '发送消息…';
+  const placeholderText = executionMode === 'goal'
+    ? '描述需要持续完成的目标…'
+    : executionMode === 'plan'
+      ? '描述需要先规划的任务…'
+      : isMobile ? '发送消息...' : '发送消息…';
   const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成';
+  const canSubmit = executionMode === 'goal'
+    ? Boolean(input.trim())
+    : Boolean(input.trim() || attachments.length > 0);
 
   // wework 风格:model/思考 chip 放输入框工具栏(从 model store 直读,不经 props)。
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
@@ -99,7 +115,7 @@ export function ChatComposer({
       return;
     }
     const text = input.trim();
-    if (!text && attachments.length === 0) return;
+    if (!canSubmit) return;
     onSubmit(text, attachments);
   };
 
@@ -208,24 +224,25 @@ export function ChatComposer({
 
               <div className="mt-auto flex min-h-8 items-center justify-between gap-2 pt-1.5">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  {attachmentsEnabled ? <label
-                    className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-secondary transition hover:bg-muted hover:text-text-primary focus-within:ring-2 focus-within:ring-primary/25"
-                    title="上传附件"
-                  >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(event) => {
-                        if (event.target.files && event.target.files.length > 0) {
-                          onAppendAttachments(Array.from(event.target.files));
-                          event.target.value = '';
-                        }
-                      }}
-                    />
-                    <Plus className="h-[19px] w-[19px]" />
-                  </label> : null}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      if (event.target.files && event.target.files.length > 0) {
+                        onAppendAttachments(Array.from(event.target.files));
+                        event.target.value = '';
+                      }
+                    }}
+                  />
+                  <ExecutionModeMenu
+                    attachmentsEnabled={attachmentsEnabled}
+                    mode={executionMode}
+                    support={executionModeSupport}
+                    onSelectMode={onSelectExecutionMode}
+                    onUpload={() => fileInputRef.current?.click()}
+                  />
 
                   {approvalEnabled ? <PermissionMenu approvalPolicy={approvalPolicy} /> : null}
                 </div>
@@ -246,12 +263,12 @@ export function ChatComposer({
 
                   <button
                     type="submit"
-                    disabled={!isStreaming && !input.trim() && attachments.length === 0}
+                    disabled={!isStreaming && !canSubmit}
                     className={cn(
                       'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
                       isStreaming
                         ? 'bg-[#1f1f1f] text-white hover:opacity-80'
-                        : input.trim() || attachments.length > 0
+                        : canSubmit
                           ? 'bg-[#1f1f1f] text-white hover:opacity-80'
                           : 'bg-muted text-text-muted/45',
                     )}

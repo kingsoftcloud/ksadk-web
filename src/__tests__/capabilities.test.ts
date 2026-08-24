@@ -37,6 +37,43 @@ describe('normalizeCapabilities', () => {
     expect(capabilities.RunLifecycle.CheckpointResume).toBe(true);
     expect(capabilities.RunLifecycle.CheckpointResumePreview).toBe(true);
   });
+
+  it('projects an explicit RuntimeCapabilityMatrix and fails closed for legacy or malformed bootstraps', () => {
+    const native = { supported: true, mode: 'native' };
+    const base = {
+      schema_version: 1,
+      cancel: native,
+      pause: native,
+      resume: native,
+      submit_interaction: native,
+      attach: native,
+      steer: native,
+      inject: native,
+      checkpoint: native,
+      durable_restore: native,
+    };
+
+    const advertised = normalizeCapabilities({
+      Data: {
+        Capabilities: {
+          RuntimeCapabilityMatrix: {
+            ...base,
+            goal: native,
+            loop: native,
+            plan: native,
+          },
+        },
+      },
+    });
+    expect(advertised.RuntimeCapabilityMatrix?.goal?.supported).toBe(true);
+    expect(advertised.RuntimeCapabilityMatrix?.loop?.supported).toBe(true);
+    expect(advertised.RuntimeCapabilityMatrix?.plan?.supported).toBe(true);
+
+    expect(normalizeCapabilities({ Data: { Capabilities: {} } }).RuntimeCapabilityMatrix).toBeUndefined();
+    expect(normalizeCapabilities({
+      Data: { Capabilities: { RuntimeCapabilityMatrix: { schema_version: 1 } } },
+    }).RuntimeCapabilityMatrix).toBeUndefined();
+  });
 });
 
 import { decodeCapabilityMatrix } from '../types/agent-control.js';

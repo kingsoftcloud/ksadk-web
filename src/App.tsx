@@ -36,6 +36,7 @@ import { NativeRuntimeLauncher } from './components/native/NativeRuntimeLauncher
 import { WorkspacePanelContainer } from './components/workspace/WorkspacePanelContainer';
 import { ApiFacadeImpl } from './core/api/facade.js';
 import type { UiCapabilities } from './types/capabilities.js';
+import type { RuntimeExecutionMode } from './core/run/types.js';
 import type { BootstrapWorkspaceFiles } from './types/bootstrap.js';
 import type { RuntimeApiFormat } from './types/api.js';
 import type { ThinkingMode } from './stores/model.js';
@@ -94,7 +95,11 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const apiFormats = useBootstrapStore((s: BootstrapStore) => s.apiFormats) as RuntimeApiFormat[];
   const uiCapabilities = useBootstrapStore((s: BootstrapStore) => s.capabilities) as UiCapabilities;
   const artifactVisible = useArtifactStore((s: ArtifactStore) => s.visible && Boolean(s.content));
-  const queuedDraftRef = useRef<Array<{ text: string; attachments: File[] }>>([]);
+  const queuedDraftRef = useRef<Array<{
+    text: string;
+    attachments: File[];
+    executionMode?: RuntimeExecutionMode;
+  }>>([]);
   const disconnectRunRef = useRef<(() => void) | null>(null);
 
   const { isMobile, viewportHeight } = useResponsiveViewport();
@@ -468,6 +473,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
           approvalPolicy={uiCapabilities.ApprovalPolicy}
           thinkingEnabled={thinkingEnabled}
+          runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}
           pendingInteractions={pendingInteractions}
           onRespondInteraction={(input) => {
             void respondInteraction(input);

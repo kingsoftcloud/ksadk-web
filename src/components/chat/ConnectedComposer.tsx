@@ -16,10 +16,19 @@ import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
 import type { ComposerContextIndicator } from './types';
 import type { ApprovalPolicyCapability } from '../../types/capabilities.js';
+import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
+import type { RuntimeExecutionMode } from '../../core/run/types.js';
+import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 
 type ConnectedComposerProps = {
   composerMaxHeight: number;
-  submitDraft: (text: string, attachments: File[]) => Promise<void>;
+  submitDraft: (
+    text: string,
+    attachments: File[],
+    responsesInput?: unknown,
+    previousResponseId?: string,
+    executionMode?: RuntimeExecutionMode,
+  ) => Promise<void>;
   stopGeneration: () => void;
   cancelRemote?: () => void;
   isMobile: boolean;
@@ -27,6 +36,7 @@ type ConnectedComposerProps = {
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
   thinkingEnabled?: boolean;
+  runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   /** Pending interactions rendered in the tray above the composer. */
   pendingInteractions?: readonly Interaction[];
   onRespondInteraction?: (input: InteractionTrayRespondInput) => void;
@@ -43,11 +53,13 @@ export function ConnectedComposer({
   approvalEnabled = false,
   approvalPolicy,
   thinkingEnabled = false,
+  runtimeCapabilityMatrix,
   pendingInteractions,
   onRespondInteraction,
   localCatalog,
 }: ConnectedComposerProps) {
   const [activeInteractionIndex, setActiveInteractionIndex] = useState(0);
+  const [selectedExecutionMode, setSelectedExecutionMode] = useState<RuntimeExecutionMode>('loop');
   const input = useUIStore((s: UIStore) => s.input);
   const attachments = useUIStore((s: UIStore) => s.attachments);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -72,13 +84,24 @@ export function ConnectedComposer({
       }) as ComposerContextIndicator,
     [input, messages, selectedModelMetadata],
   );
+  const executionModeSupport = useMemo<RuntimeExecutionModeSupport>(() => ({
+    loop: Boolean(runtimeCapabilityMatrix?.loop?.supported),
+    plan: Boolean(runtimeCapabilityMatrix?.plan?.supported),
+    goal: Boolean(runtimeCapabilityMatrix?.goal?.supported),
+  }), [runtimeCapabilityMatrix]);
+  const executionMode = executionModeSupport[selectedExecutionMode]
+    ? selectedExecutionMode
+    : executionModeSupport.loop ? 'loop' : undefined;
 
   const handleSubmit = useCallback((draftText: string, draftAttachments: File[]) => {
     if (!draftText && draftAttachments.length === 0) return;
     useUIStore.getState().setInput('');
     useUIStore.getState().setAttachments([]);
-    void submitDraft(draftText, draftAttachments);
-  }, [submitDraft]);
+    void submitDraft(draftText, draftAttachments, undefined, undefined, executionMode);
+    if (executionMode === 'goal') {
+      setSelectedExecutionMode('loop');
+    }
+  }, [executionMode, submitDraft]);
 
   useEffect(() => {
     if (!textareaRef.current) return;
@@ -136,9 +159,12 @@ export function ConnectedComposer({
       approvalEnabled={approvalEnabled}
       approvalPolicy={approvalPolicy}
       thinkingEnabled={thinkingEnabled}
+      executionMode={executionMode}
+      executionModeSupport={executionModeSupport}
       queuedDrafts={queuedDrafts}
       onAppendAttachments={appendAttachments}
       onInputChange={handleInputChange}
+      onSelectExecutionMode={setSelectedExecutionMode}
       onPaste={handleComposerPaste}
       onRemoveAttachment={(index) =>
         useUIStore.getState().setAttachments((prev: File[]) =>

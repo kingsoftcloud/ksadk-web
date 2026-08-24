@@ -4,6 +4,7 @@ import type {
   RunStage,
   RunEvent,
   RunEngineConfig,
+  RuntimeExecutionMode,
   SubmitControlCommand,
 } from './types.js';
 import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
@@ -244,6 +245,7 @@ export class RunEngineImpl implements RunEngine {
     attachments: File[];
     responsesInput?: unknown;
     previousResponseId?: string;
+    executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
@@ -284,6 +286,7 @@ export class RunEngineImpl implements RunEngine {
 
         const hostedTransport = this.config.hostedChatTransport;
         const useAgui = !isResponsesResume
+          && !draft.executionMode
           && draft.attachments.length === 0
           && hostedTransport?.Protocol === 'ag-ui';
         const aguiClient = useAgui ? this.getAguiClient(sessionId) : null;
@@ -805,10 +808,16 @@ export class RunEngineImpl implements RunEngine {
     sessionId: string,
     apiFormat: RuntimeApiFormat,
     isResponsesResume: boolean,
-    draft: { text: string; responsesInput?: unknown; previousResponseId?: string },
+    draft: {
+      text: string;
+      responsesInput?: unknown;
+      previousResponseId?: string;
+      executionMode?: RuntimeExecutionMode;
+    },
     fileParts: Array<Record<string, unknown>>,
     invocationId: string,
   ): Record<string, unknown> {
+    const executionMetadata = this.buildExecutionMetadata(draft);
     const body: Record<string, unknown> = {
       AgentId: this.config.agentId,
       SessionId: sessionId,
@@ -823,6 +832,7 @@ export class RunEngineImpl implements RunEngine {
       Metadata: {
         agentengine: {
           tool_approval_mode: this.config.permissionMode || 'risk',
+          ...executionMetadata,
         },
       },
     };
@@ -839,6 +849,23 @@ export class RunEngineImpl implements RunEngine {
       body.PreviousResponseId = draft.previousResponseId;
     }
     return body;
+  }
+
+  private buildExecutionMetadata(
+    draft: { text: string; executionMode?: RuntimeExecutionMode },
+  ): Record<string, string> {
+    const mode = draft.executionMode;
+    if (!mode) return {};
+    const capability = this.config.runtimeCapabilityMatrix?.[mode];
+    if (!capability?.supported || capability.mode === 'unavailable') return {};
+    if (mode === 'plan') return { collaboration_mode: 'plan' };
+    if (mode === 'goal') {
+      const objective = draft.text.trim();
+      return objective
+        ? { collaboration_mode: 'default', goal_objective: objective }
+        : {};
+    }
+    return { collaboration_mode: 'default' };
   }
 
   /**

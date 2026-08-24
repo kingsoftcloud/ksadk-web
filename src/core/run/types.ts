@@ -2,6 +2,7 @@ import type { RuntimeApiFormat } from '../../types/api.js';
 import type { AgentControlError, AgentControlReceipt } from '../../types/agent-control.js';
 import type { HostedChatTransport } from '../../types/api.js';
 import type { ModelCatalogItem } from '../../components/chat/types.js';
+import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
 
 export type RunStage =
   | 'idle' | 'creating-session' | 'uploading-files'
@@ -11,6 +12,7 @@ export type RunStage =
 
 /** Default approval policy applied to a newly started conversation run. */
 export type PermissionMode = 'ask' | 'risk' | 'full';
+export type RuntimeExecutionMode = 'loop' | 'plan' | 'goal';
 
 export type RunEvent =
   | { type: 'stage_changed'; stage: RunStage; sessionId?: string | null }
@@ -74,6 +76,7 @@ export type RunEngineConfig = {
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
   permissionMode?: PermissionMode;
+  runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;
 };
@@ -85,6 +88,7 @@ export interface RunEngine {
     attachments: File[];
     responsesInput?: unknown;
     previousResponseId?: string;
+    executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;

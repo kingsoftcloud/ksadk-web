@@ -486,6 +486,89 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('maps advertised loop plan and goal modes to runtime request metadata', async () => {
+    const native = { supported: true, mode: 'native' as const, extensions: {} };
+    const runtimeCapabilityMatrix = {
+      schema_version: 1 as const,
+      cancel: native,
+      pause: native,
+      resume: native,
+      submit_interaction: native,
+      attach: native,
+      steer: native,
+      inject: native,
+      checkpoint: native,
+      durable_restore: native,
+      goal: native,
+      loop: native,
+      plan: native,
+      extensions: {},
+    };
+    const cases = [
+      {
+        mode: 'loop' as const,
+        expected: { collaboration_mode: 'default' },
+      },
+      {
+        mode: 'plan' as const,
+        expected: { collaboration_mode: 'plan' },
+      },
+      {
+        mode: 'goal' as const,
+        expected: { collaboration_mode: 'default', goal_objective: 'ship the goal' },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const calls: Record<string, unknown>[] = [];
+      const engine = createRunEngine(createApiFacade(calls));
+      engine.updateConfig({
+        agentId: 'agent-live',
+        apiFormats: ['responses'],
+        agentFramework: 'codex',
+        selectedModel: '',
+        thinkingMode: 'auto',
+        runtimeCapabilityMatrix,
+      });
+
+      engine.start({
+        text: 'ship the goal',
+        attachments: [],
+        sessionId: `session-${testCase.mode}`,
+        executionMode: testCase.mode,
+      });
+      await waitForCalls(calls);
+      expect(calls[0]).toMatchObject({
+        Metadata: {
+          agentengine: testCase.expected,
+        },
+      });
+    }
+  });
+
+  it('does not send execution-mode metadata without an explicit typed capability', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({
+      agentId: 'agent-live',
+      apiFormats: ['responses'],
+      agentFramework: 'codex',
+      selectedModel: '',
+      thinkingMode: 'auto',
+    });
+
+    engine.start({
+      text: 'legacy request',
+      attachments: [],
+      sessionId: 'session-live',
+      executionMode: 'plan',
+    });
+    await waitForCalls(calls);
+    expect(calls[0]).not.toMatchObject({
+      Metadata: { agentengine: { collaboration_mode: 'plan' } },
+    });
+  });
+
   it('sends uploaded attachments as Responses input_file references', async () => {
     const calls: Record<string, unknown>[] = [];
     const uploadCalls: FormData[] = [];

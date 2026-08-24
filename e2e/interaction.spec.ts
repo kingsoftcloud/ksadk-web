@@ -21,7 +21,26 @@ function sse(events) {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
 }
 
-function bootstrap(interactionV1 = true) {
+function runtimeCapabilityMatrix() {
+  const native = { supported: true, mode: 'native' };
+  return {
+    schema_version: 1,
+    cancel: native,
+    pause: native,
+    resume: native,
+    submit_interaction: native,
+    attach: native,
+    steer: native,
+    inject: native,
+    checkpoint: native,
+    durable_restore: native,
+    goal: native,
+    loop: native,
+    plan: native,
+  };
+}
+
+function bootstrap(interactionV1 = true, executionModes = false) {
   return {
     Agent: { AgentId: AGENT_ID, Name: 'Interaction Fixture', Framework: 'ksadk' },
     ApiFormats: ['responses'],
@@ -33,6 +52,7 @@ function bootstrap(interactionV1 = true) {
       StopRun: true,
       ResumeRun: false,
       ...(interactionV1 ? { interaction_v1: { enabled: true } } : {}),
+      ...(executionModes ? { RuntimeCapabilityMatrix: runtimeCapabilityMatrix() } : {}),
     },
     HostedChat: {
       PreferredTransport: 'responses',
@@ -131,6 +151,7 @@ async function installFixture(page, state, options = {}) {
     }
 
     if (action === 'RunAgent') {
+      state.runs?.push(route.request().postDataJSON());
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
@@ -143,7 +164,7 @@ async function installFixture(page, state, options = {}) {
 
     const events = typeof state.events === 'function' ? state.events() : state.events;
     const payloadByAction = {
-      GetAgentUiBootstrap: bootstrap(options.interactionV1 !== false),
+      GetAgentUiBootstrap: bootstrap(options.interactionV1 !== false, options.executionModes === true),
       ListSessions: {
         Sessions: state.sessionCreated
           ? [{ SessionId: SESSION_ID, AgentId: AGENT_ID, Title: 'Interaction fixture' }]
@@ -596,4 +617,53 @@ test('resolved anchor expands a read-only snapshot with actor, time, and schema 
   // Read-only: no editable controls inside the anchor.
   const editable = await anchor.locator('input, textarea, select, form, button').count();
   expect(editable).toBe(0);
+});
+
+test('typed Runtime v2 capabilities expose loop plan and goal and project plan metadata', async ({ page }) => {
+  const state = {
+    submits: [],
+    runs: [],
+    resolvedIds: new Set(),
+    sessionCreated: false,
+    events: [],
+  };
+  await installFixture(page, state, { executionModes: true });
+  await page.goto('/');
+
+  await expect(page.getByRole('button', { name: '当前执行模式：Agent Loop' })).toBeVisible();
+  await page.getByRole('button', { name: '添加附件或选择执行模式' }).click();
+  const menu = page.getByRole('menu', { name: '附件与执行模式' });
+  await expect(menu.getByRole('menuitemradio', { name: /Agent Loop/ })).toBeVisible();
+  await expect(menu.getByRole('menuitemradio', { name: /计划模式/ })).toBeVisible();
+  await expect(menu.getByRole('menuitemradio', { name: /设定目标/ })).toBeVisible();
+
+  await menu.getByRole('menuitemradio', { name: /计划模式/ }).click();
+  const composer = page.getByPlaceholder('描述需要先规划的任务…');
+  await composer.fill('先制定发布计划');
+  await composer.press('Enter');
+
+  await expect.poll(() => state.runs.length).toBe(1);
+  expect(state.runs[0]).toMatchObject({
+    Metadata: {
+      agentengine: {
+        collaboration_mode: 'plan',
+      },
+    },
+  });
+});
+
+test('legacy capabilities do not expose Runtime v2 execution controls', async ({ page }) => {
+  const state = {
+    submits: [],
+    resolvedIds: new Set(),
+    sessionCreated: false,
+    events: [],
+  };
+  await installFixture(page, state);
+  await page.goto('/');
+
+  await expect(page.getByRole('button', { name: '添加附件或选择执行模式' })).toHaveCount(0);
+  await expect(page.getByText('Agent Loop')).toHaveCount(0);
+  await expect(page.getByText('计划模式')).toHaveCount(0);
+  await expect(page.getByText('设定目标')).toHaveCount(0);
 });
