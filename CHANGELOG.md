@@ -14,6 +14,9 @@ protected release workflow only after that gate is green.
 - Simplify the session list: completed runs no longer expose raw status text;
   active sessions use a small activity ring and subtle background, while failed
   sessions use a restrained error dot.
+- Keep RuntimeCapabilityMatrix decoding executable before the TypeScript build,
+  so the same fail-closed contract projection is covered by both browser tests
+  and the npm publication workflow's Node compatibility gate.
 
 ## 0.3.2-beta.5 - 2026-08-21
 
