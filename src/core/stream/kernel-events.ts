@@ -267,7 +267,6 @@ export async function peekKernelReceipt(
 
   try {
     while (true) {
-      // eslint-disable-next-line no-await-in-loop
       const { value, done } = await reader.read();
       if (value) buffer += decoder.decode(value, { stream: true });
       if (done) {

@@ -3,9 +3,9 @@
 ## 0.3.2 - 2026-08-21
 
 Release candidate for the durable Interaction/v1 web experience. This is the
-reviewed source that replaces the internal beta sequence. The cross-repository
-preproduction gate is green; publication still uses the protected release
-workflow.
+reviewed source that replaces the internal beta sequence. Publication remains
+blocked on the current-digest cross-repository preproduction gate and uses the
+protected release workflow only after that gate is green.
 
 - Unify the Hosted UI composer with Studio's compact attachment, approval,
   model, Goal, and Plan controls. The runtime's ordinary agent loop remains

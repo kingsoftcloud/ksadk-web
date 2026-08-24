@@ -481,7 +481,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     },
     [
       api,
-      disconnectRun,
       isMobile,
       loadFeedbackForMessages,
       resetCompaction,
