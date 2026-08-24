@@ -464,8 +464,10 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           stopGeneration={handleStopGeneration}
           cancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
           isMobile={isMobile}
+          attachmentsEnabled={uiCapabilities.Attachments !== false}
           approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
           approvalPolicy={uiCapabilities.ApprovalPolicy}
+          thinkingEnabled={thinkingEnabled}
           pendingInteractions={pendingInteractions}
           onRespondInteraction={(input) => {
             void respondInteraction(input);

@@ -29,6 +29,33 @@ describe('ChatComposer interaction contract', () => {
     expect(source).toContain('void submitDraft(draftText, draftAttachments)');
   });
 
+  it('uses the compact Codex-style composer controls without native selects', () => {
+    const composerSource = readSource('components/chat/ChatComposer.tsx');
+    const modelMenuSource = readSource('components/chat/ModelSettingsMenu.tsx');
+    const permissionSource = readSource('components/chat/PermissionMenu.tsx');
+
+    expect(composerSource).toContain('<Plus');
+    expect(composerSource).toContain('<ModelSettingsMenu');
+    expect(composerSource).toContain("'flex h-9 w-9 shrink-0 items-center justify-center rounded-full");
+    expect(modelMenuSource).not.toContain('<select');
+    expect(modelMenuSource).toContain('rounded-xl bg-muted/80');
+    expect(modelMenuSource).toContain("type SettingsPanel = 'model' | 'reasoning'");
+    expect(permissionSource).toContain("value: 'ask'");
+    expect(permissionSource).toContain("value: 'risk'");
+    expect(permissionSource).toContain("value: 'full'");
+  });
+
+  it('hides unsupported controls and never sends unsupported thinking options', () => {
+    const appSource = readSource('App.tsx');
+    const connectedSource = readSource('components/chat/ConnectedComposer.tsx');
+    const runSource = readSource('hooks/useRunAgent.ts');
+
+    expect(appSource).toContain('attachmentsEnabled={uiCapabilities.Attachments !== false}');
+    expect(appSource).toContain('thinkingEnabled={thinkingEnabled}');
+    expect(connectedSource).toContain("if (!thinkingEnabled) setThinkingMode('auto')");
+    expect(runSource).toContain("thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto'");
+  });
+
   it('refreshes the active session after runtime cancel so checkpoint controls can appear', () => {
     const source = readSource('App.tsx');
     const cancelHandlerStart = source.indexOf('const handleCancelRemote = useCallback');

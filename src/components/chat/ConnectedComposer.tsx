@@ -23,8 +23,10 @@ type ConnectedComposerProps = {
   stopGeneration: () => void;
   cancelRemote?: () => void;
   isMobile: boolean;
+  attachmentsEnabled?: boolean;
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
+  thinkingEnabled?: boolean;
   /** Pending interactions rendered in the tray above the composer. */
   pendingInteractions?: readonly Interaction[];
   onRespondInteraction?: (input: InteractionTrayRespondInput) => void;
@@ -37,8 +39,10 @@ export function ConnectedComposer({
   stopGeneration,
   cancelRemote,
   isMobile,
+  attachmentsEnabled = true,
   approvalEnabled = false,
   approvalPolicy,
+  thinkingEnabled = false,
   pendingInteractions,
   onRespondInteraction,
   localCatalog,
@@ -52,6 +56,7 @@ export function ConnectedComposer({
   const messages = useMessageStore(s => s.messages);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
   const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
+  const setThinkingMode = useModelStore((s: ModelStore) => s.setThinkingMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedModelMetadata = useMemo(
@@ -88,11 +93,12 @@ export function ConnectedComposer({
   };
 
   const appendAttachments = (incoming: File[]) => {
-    if (!incoming.length) return;
+    if (!attachmentsEnabled || !incoming.length) return;
     useUIStore.getState().setAttachments((prev: File[]) => mergeAttachmentFiles(prev, incoming));
   };
 
   const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!attachmentsEnabled) return;
     const pastedFiles = extractClipboardFiles(event);
     if (!pastedFiles.length) return;
     event.preventDefault();
@@ -102,6 +108,10 @@ export function ConnectedComposer({
 
   const trayInteractions = pendingInteractions || [];
   const trayIndex = Math.min(activeInteractionIndex, Math.max(trayInteractions.length - 1, 0));
+
+  useEffect(() => {
+    if (!thinkingEnabled) setThinkingMode('auto');
+  }, [setThinkingMode, thinkingEnabled]);
 
   return (
     <div className="flex w-full flex-col justify-center">
@@ -122,8 +132,10 @@ export function ConnectedComposer({
       input={input}
       isMobile={isMobile}
       isStreaming={isStreaming}
+      attachmentsEnabled={attachmentsEnabled}
       approvalEnabled={approvalEnabled}
       approvalPolicy={approvalPolicy}
+      thinkingEnabled={thinkingEnabled}
       queuedDrafts={queuedDrafts}
       onAppendAttachments={appendAttachments}
       onInputChange={handleInputChange}

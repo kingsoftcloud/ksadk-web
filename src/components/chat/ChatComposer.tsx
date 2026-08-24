@@ -7,16 +7,15 @@ import type {
   RefObject,
 } from 'react';
 
-import { ArrowUp, Paperclip, Square } from 'lucide-react';
+import { ArrowUp, Paperclip, Plus, Square } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useModelStore } from '@/stores/model.js';
 import type { ModelStore } from '@/stores/model.js';
 import type { ApprovalPolicyCapability } from '@/types/capabilities.js';
-import { normalizeThinkingMode } from '@/utils/model-options.js';
 
 import { ContextUsageIndicator } from './ContextUsageIndicator';
-import { MenuChip } from './MenuChip';
+import { ModelSettingsMenu } from './ModelSettingsMenu';
 import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
@@ -28,8 +27,10 @@ type ChatComposerProps = {
   input: string;
   isMobile: boolean;
   isStreaming: boolean;
+  attachmentsEnabled?: boolean;
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
+  thinkingEnabled?: boolean;
   queuedDrafts: Array<{ text: string; attachments: File[] }>;
   onAppendAttachments: (files: File[]) => void;
   onInputChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
@@ -49,8 +50,10 @@ export function ChatComposer({
   input,
   isMobile,
   isStreaming,
+  attachmentsEnabled = true,
   approvalEnabled = false,
   approvalPolicy,
+  thinkingEnabled = false,
   queuedDrafts,
   onAppendAttachments,
   onInputChange,
@@ -70,10 +73,6 @@ export function ChatComposer({
   const thinkingMode = useModelStore((s: ModelStore) => s.thinkingMode);
   const setSelectedModel = useModelStore((s: ModelStore) => s.setSelectedModel);
   const setThinkingMode = useModelStore((s: ModelStore) => s.setThinkingMode);
-  const selectedModelLabel =
-    availableModels.find((m) => m.id === selectedModel)?.display_name || selectedModel || '';
-  const thinkingLabel = (mode: 'auto' | 'enabled' | 'disabled') =>
-    mode === 'enabled' ? '开启思考' : mode === 'disabled' ? '关闭思考' : '思考自动';
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -84,7 +83,7 @@ export function ChatComposer({
     event.preventDefault();
     event.stopPropagation();
 
-    if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+    if (attachmentsEnabled && event.dataTransfer.files && event.dataTransfer.files.length > 0) {
       onAppendAttachments(Array.from(event.dataTransfer.files));
     }
   };
@@ -151,8 +150,7 @@ export function ChatComposer({
           </div>
         ) : null}
 
-        {/* wework 风格:外层 surface+软阴影,内层 background+细边,圆角 26px */}
-        <div className="relative rounded-[26px] bg-surface shadow-[0_0_0_0.5px_rgba(15,23,42,0.08),0_3px_7.5px_rgba(0,0,0,0.04),0_0_20px_rgba(0,0,0,0.05)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06),0_3px_7.5px_rgba(0,0,0,0.2)]">
+        <div className="relative rounded-[28px] bg-surface shadow-[0_0_0_0.5px_rgba(15,23,42,0.08),0_5px_18px_rgba(15,23,42,0.07)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06),0_8px_24px_rgba(0,0,0,0.24)]">
           <div className="flex items-center gap-3">
             <form
               onSubmit={handleSubmit}
@@ -161,7 +159,7 @@ export function ChatComposer({
                 event.stopPropagation();
               }}
               onDrop={handleDrop}
-              className="relative flex min-h-[76px] min-w-0 flex-1 flex-col rounded-[26px] border border-border/45 bg-background px-4 pb-1.5 pt-2 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15"
+              className="relative flex min-h-[116px] min-w-0 flex-1 flex-col rounded-[28px] border border-border/55 bg-background px-4 pb-3 pt-3 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:px-5"
             >
               {attachments.length > 0 ? (
                 <div className="mb-1.5 flex flex-wrap gap-2">
@@ -202,17 +200,16 @@ export function ChatComposer({
                 onPaste={onPaste}
                 placeholder={placeholderText}
                 className={cn(
-                  'custom-scrollbar max-h-[112px] min-h-[48px] w-full resize-none overflow-y-auto border-0 bg-transparent px-0 pb-0 pt-1 text-[14px] leading-6 text-text-primary outline-none placeholder:text-text-muted/55',
+                  'custom-scrollbar max-h-[176px] min-h-[62px] w-full resize-none overflow-y-auto border-0 bg-transparent px-0 pb-1 pt-1 text-[15px] leading-6 text-text-primary outline-none placeholder:text-text-muted/60',
                   isMobile ? 'text-[16px]' : 'text-[14px]',
                 )}
                 style={{ maxHeight: `${composerMaxHeight}px`, overflowY: 'auto' }}
               />
 
-              {/* wework 风格工具栏:左组(附件+权限+model+思考) | 右组(上下文环+发送) */}
-              <div className="mt-auto flex min-h-8 items-center justify-between gap-2 pt-1">
-                <div className="flex items-center gap-2">
-                  <label
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-text-muted transition hover:bg-muted hover:text-text-secondary"
+              <div className="mt-auto flex min-h-8 items-center justify-between gap-2 pt-1.5">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  {attachmentsEnabled ? <label
+                    className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-secondary transition hover:bg-muted hover:text-text-primary focus-within:ring-2 focus-within:ring-primary/25"
                     title="上传附件"
                   >
                     <input
@@ -227,47 +224,31 @@ export function ChatComposer({
                         }
                       }}
                     />
-                    <Paperclip className="h-[18px] w-[18px]" />
-                  </label>
+                    <Plus className="h-[19px] w-[19px]" />
+                  </label> : null}
 
                   {approvalEnabled ? <PermissionMenu approvalPolicy={approvalPolicy} /> : null}
-
-                  {availableModels.length > 0 ? (
-                    <MenuChip
-                      label={selectedModelLabel || selectedModel}
-                      title={selectedModelLabel || selectedModel}
-                      value={selectedModel}
-                      onChange={(value) => setSelectedModel(value)}
-                      options={availableModels.map((model) => ({
-                        value: model.id,
-                        label: model.display_name || model.id,
-                      }))}
-                    />
-                  ) : null}
-
-                  <MenuChip
-                    label={thinkingLabel(thinkingMode)}
-                    title="控制模型 thinking/reasoning 参数"
-                    value={thinkingMode}
-                    onChange={(value) =>
-                      setThinkingMode(normalizeThinkingMode(value) as 'auto' | 'enabled' | 'disabled')
-                    }
-                    options={[
-                      { value: 'auto', label: '思考自动' },
-                      { value: 'enabled', label: '开启思考' },
-                      { value: 'disabled', label: '关闭思考' },
-                    ]}
-                  />
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex min-w-0 items-center gap-1.5">
                   {composerContextIndicator ? <ContextUsageIndicator indicator={composerContextIndicator} /> : null}
+
+                  {availableModels.length > 0 ? (
+                    <ModelSettingsMenu
+                      availableModels={availableModels}
+                      selectedModel={selectedModel}
+                      thinkingEnabled={thinkingEnabled}
+                      thinkingMode={thinkingMode}
+                      onSelectModel={setSelectedModel}
+                      onSelectThinkingMode={setThinkingMode}
+                    />
+                  ) : null}
 
                   <button
                     type="submit"
                     disabled={!isStreaming && !input.trim() && attachments.length === 0}
                     className={cn(
-                      'flex h-8 w-8 items-center justify-center rounded-full transition-all',
+                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
                       isStreaming
                         ? 'bg-[#1f1f1f] text-white hover:opacity-80'
                         : input.trim() || attachments.length > 0

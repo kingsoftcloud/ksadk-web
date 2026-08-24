@@ -61,7 +61,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       agentFramework,
       selectedModel,
       selectedModelMetadata,
-      thinkingMode,
+      thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto',
       permissionMode,
       hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
         requireResumableRun: Boolean(
