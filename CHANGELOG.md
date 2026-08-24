@@ -7,6 +7,13 @@ reviewed source that replaces the internal beta sequence. The cross-repository
 preproduction gate is green; publication still uses the protected release
 workflow.
 
+- Unify the Hosted UI composer with Studio's compact attachment, approval,
+  model, goal, Agent Loop, and plan controls; runtime-only execution modes stay
+  hidden unless the capability matrix explicitly declares support.
+- Simplify the session list: completed runs no longer expose raw status text;
+  active sessions use a small activity ring and subtle background, while failed
+  sessions use a restrained error dot.
+
 ## 0.3.2-beta.5 - 2026-08-21
 
 When the composer Interaction tray owns a pending approval, its tool-history
