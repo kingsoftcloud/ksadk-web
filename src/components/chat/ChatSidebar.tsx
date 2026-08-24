@@ -105,14 +105,10 @@ export function ChatSidebar({
                     selected
                       ? 'border-l-2 border-primary bg-primary/10 font-medium text-sidebar-text'
                       : meta.running
-                        ? 'cursor-pointer bg-primary/8 text-sidebar-text'
+                        ? 'cursor-pointer bg-primary/[0.035] text-sidebar-text'
                         : 'cursor-pointer text-sidebar-text-secondary hover:bg-sidebar-hover hover:text-sidebar-text',
                   )}
                 >
-                  {/* wework 风格:活跃会话行首 primary 竖条,一眼区分正在流式的会话 */}
-                  {meta.running ? (
-                    <span className="absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary" aria-hidden="true" />
-                  ) : null}
                   <button
                     type="button"
                     aria-current={selected ? 'page' : undefined}
@@ -123,7 +119,16 @@ export function ChatSidebar({
                       {sessionTitle(session)}
                     </span>
                     {meta.running ? (
-                      <LoaderCircle className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary" />
+                      <span
+                        aria-label="运行中"
+                        className="h-1.5 w-1.5 flex-shrink-0 animate-spin rounded-full border border-primary border-t-transparent"
+                      />
+                    ) : meta.failed ? (
+                      <span
+                        aria-label="运行失败"
+                        title="运行失败"
+                        className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-rose-500/75"
+                      />
                     ) : meta.label ? (
                       <span className="flex-shrink-0 text-[11px] leading-none text-sidebar-text-muted group-hover:hidden">
                         {meta.label}

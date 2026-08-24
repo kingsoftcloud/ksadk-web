@@ -83,6 +83,19 @@ describe('chat message list contracts', () => {
     expect(source).toContain('group-focus-within:opacity-100');
   });
 
+  it('keeps hosted session activity as compact visual state instead of status copy', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
+
+    expect(source).toContain('aria-label="\u8fd0\u884c\u4e2d"');
+    expect(source).toContain('aria-label="\u8fd0\u884c\u5931\u8d25"');
+    expect(source).toContain('h-1.5 w-1.5');
+    expect(source).toContain('border-t-transparent');
+    expect(source).toContain('bg-primary/[0.035]');
+    expect(source).not.toContain('bg-primary/8');
+    expect(source).not.toContain('\u6b63\u5728\u8fd0\u884c');
+    expect(source).not.toContain('completed');
+  });
+
   it('keeps reasoning panels scrollable and lightweight', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 

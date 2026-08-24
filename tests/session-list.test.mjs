@@ -139,6 +139,7 @@ test('session list utils format model and context labels', async () => {
   assert.equal(sessionList.formatSessionContextLabel(session), '上下文 37%');
   assert.equal(sessionList.isSessionRunning({ ActiveRunStatus: 'completed' }), false);
   assert.equal(sessionList.isSessionRunning({ ActiveRunStatus: 'in_progress' }), true);
+  assert.equal(sessionList.isSessionRunning({ ActiveRunStatus: 'resuming' }), true);
 });
 
 test('session list utils expose compact sidebar status labels', async () => {
@@ -153,6 +154,7 @@ test('session list utils expose compact sidebar status labels', async () => {
     }, { now }),
     {
       running: true,
+      failed: false,
       label: '',
     },
   );
@@ -163,7 +165,19 @@ test('session list utils expose compact sidebar status labels', async () => {
     }),
     {
       running: false,
+      failed: false,
       label: '5月7日 16:45',
+    },
+  );
+  assert.deepEqual(
+    sessionList.resolveCompactSessionMeta({
+      ActiveRunStatus: 'failed',
+      UpdatedAt: '2026-05-07T08:45:00Z',
+    }),
+    {
+      running: false,
+      failed: true,
+      label: '',
     },
   );
 });
