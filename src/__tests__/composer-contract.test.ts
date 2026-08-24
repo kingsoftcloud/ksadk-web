@@ -58,7 +58,7 @@ describe('ChatComposer interaction contract', () => {
     expect(runSource).toContain("thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto'");
   });
 
-  it('shows goal loop and plan only from explicit typed runtime capabilities', () => {
+  it('shows goal and plan only from explicit typed runtime capabilities', () => {
     const appSource = readSource('App.tsx');
     const composerSource = readSource('components/chat/ChatComposer.tsx');
     const actionMenuSource = readSource('components/chat/ExecutionModeMenu.tsx');
@@ -66,12 +66,13 @@ describe('ChatComposer interaction contract', () => {
 
     expect(appSource).toContain('runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}');
     expect(composerSource).toContain('<ExecutionModeMenu');
-    expect(actionMenuSource).toContain('Agent Loop');
+    expect(actionMenuSource).not.toContain('Agent Loop');
     expect(actionMenuSource).toContain('计划模式');
     expect(actionMenuSource).toContain('设定目标');
     expect(actionMenuSource).not.toContain('速度');
     expect(runSource).toContain('goal_objective');
     expect(runSource).toContain('collaboration_mode');
+    expect(runSource).not.toContain("return { collaboration_mode: 'default' };");
   });
 
   it('refreshes the active session after runtime cancel so checkpoint controls can appear', () => {

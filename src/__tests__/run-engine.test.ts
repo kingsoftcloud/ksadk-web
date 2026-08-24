@@ -486,7 +486,7 @@ describe('RunEngineImpl', () => {
     });
   });
 
-  it('maps advertised loop plan and goal modes to runtime request metadata', async () => {
+  it('maps advertised plan and goal controls to distinct runtime request metadata', async () => {
     const native = { supported: true, mode: 'native' as const, extensions: {} };
     const runtimeCapabilityMatrix = {
       schema_version: 1 as const,
@@ -505,10 +505,6 @@ describe('RunEngineImpl', () => {
       extensions: {},
     };
     const cases = [
-      {
-        mode: 'loop' as const,
-        expected: { collaboration_mode: 'default' },
-      },
       {
         mode: 'plan' as const,
         expected: { collaboration_mode: 'plan' },

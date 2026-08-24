@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { Check, ChevronDown, ListTodo, Plus, Repeat2, Target, Upload } from 'lucide-react';
+import { Check, ChevronDown, ListTodo, Plus, Target, Upload } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import type { RuntimeExecutionMode } from '@/core/run/types.js';
@@ -19,15 +19,13 @@ const modeOptions: Array<{
   value: RuntimeExecutionMode;
   label: string;
   description: string;
-  icon: typeof Repeat2;
+  icon: typeof ListTodo;
 }> = [
-  { value: 'loop', label: 'Agent Loop', description: '持续对话并执行任务', icon: Repeat2 },
   { value: 'plan', label: '计划模式', description: '先分析并形成可执行计划', icon: ListTodo },
-  { value: 'goal', label: '设定目标', description: '启动可持续完成的目标', icon: Target },
+  { value: 'goal', label: '设定目标', description: '朝可验证的停止条件持续推进', icon: Target },
 ];
 
 const modeLabels: Record<RuntimeExecutionMode, string> = {
-  loop: 'Agent Loop',
   plan: '计划模式',
   goal: '目标',
 };

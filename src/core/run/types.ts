@@ -12,7 +12,13 @@ export type RunStage =
 
 /** Default approval policy applied to a newly started conversation run. */
 export type PermissionMode = 'ask' | 'risk' | 'full';
-export type RuntimeExecutionMode = 'loop' | 'plan' | 'goal';
+/**
+ * User-selectable execution controls.
+ *
+ * A runtime's agent loop is its internal execution machinery, not a turn mode.
+ * Only Plan and Goal have distinct public request semantics.
+ */
+export type RuntimeExecutionMode = 'plan' | 'goal';
 
 export type RunEvent =
   | { type: 'stage_changed'; stage: RunStage; sessionId?: string | null }

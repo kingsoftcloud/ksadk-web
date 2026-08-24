@@ -865,7 +865,7 @@ export class RunEngineImpl implements RunEngine {
         ? { collaboration_mode: 'default', goal_objective: objective }
         : {};
     }
-    return { collaboration_mode: 'default' };
+    return {};
   }
 
   /**

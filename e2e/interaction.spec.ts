@@ -619,7 +619,7 @@ test('resolved anchor expands a read-only snapshot with actor, time, and schema 
   expect(editable).toBe(0);
 });
 
-test('typed Runtime v2 capabilities expose loop plan and goal and project plan metadata', async ({ page }) => {
+test('typed Runtime v2 capabilities expose plan and goal without presenting the internal loop as a mode', async ({ page }) => {
   const state = {
     submits: [],
     runs: [],
@@ -630,10 +630,9 @@ test('typed Runtime v2 capabilities expose loop plan and goal and project plan m
   await installFixture(page, state, { executionModes: true });
   await page.goto('/');
 
-  await expect(page.getByRole('button', { name: '当前执行模式：Agent Loop' })).toBeVisible();
   await page.getByRole('button', { name: '添加附件或选择执行模式' }).click();
   const menu = page.getByRole('menu', { name: '附件与执行模式' });
-  await expect(menu.getByRole('menuitemradio', { name: /Agent Loop/ })).toBeVisible();
+  await expect(menu.getByRole('menuitemradio', { name: /Agent Loop/ })).toHaveCount(0);
   await expect(menu.getByRole('menuitemradio', { name: /计划模式/ })).toBeVisible();
   await expect(menu.getByRole('menuitemradio', { name: /设定目标/ })).toBeVisible();
 

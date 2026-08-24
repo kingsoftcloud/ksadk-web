@@ -8,8 +8,9 @@ preproduction gate is green; publication still uses the protected release
 workflow.
 
 - Unify the Hosted UI composer with Studio's compact attachment, approval,
-  model, goal, Agent Loop, and plan controls; runtime-only execution modes stay
-  hidden unless the capability matrix explicitly declares support.
+  model, Goal, and Plan controls. The runtime's ordinary agent loop remains
+  internal rather than appearing as a third user-selectable mode; a future
+  eval-driven improvement loop must advertise its own honest capability.
 - Simplify the session list: completed runs no longer expose raw status text;
   active sessions use a small activity ring and subtle background, while failed
   sessions use a restrained error dot.

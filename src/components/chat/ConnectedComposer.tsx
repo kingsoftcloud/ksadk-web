@@ -59,7 +59,7 @@ export function ConnectedComposer({
   localCatalog,
 }: ConnectedComposerProps) {
   const [activeInteractionIndex, setActiveInteractionIndex] = useState(0);
-  const [selectedExecutionMode, setSelectedExecutionMode] = useState<RuntimeExecutionMode>('loop');
+  const [selectedExecutionMode, setSelectedExecutionMode] = useState<RuntimeExecutionMode | undefined>();
   const input = useUIStore((s: UIStore) => s.input);
   const attachments = useUIStore((s: UIStore) => s.attachments);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -85,13 +85,12 @@ export function ConnectedComposer({
     [input, messages, selectedModelMetadata],
   );
   const executionModeSupport = useMemo<RuntimeExecutionModeSupport>(() => ({
-    loop: Boolean(runtimeCapabilityMatrix?.loop?.supported),
     plan: Boolean(runtimeCapabilityMatrix?.plan?.supported),
     goal: Boolean(runtimeCapabilityMatrix?.goal?.supported),
   }), [runtimeCapabilityMatrix]);
-  const executionMode = executionModeSupport[selectedExecutionMode]
+  const executionMode = selectedExecutionMode && executionModeSupport[selectedExecutionMode]
     ? selectedExecutionMode
-    : executionModeSupport.loop ? 'loop' : undefined;
+    : undefined;
 
   const handleSubmit = useCallback((draftText: string, draftAttachments: File[]) => {
     if (!draftText && draftAttachments.length === 0) return;
@@ -99,7 +98,7 @@ export function ConnectedComposer({
     useUIStore.getState().setAttachments([]);
     void submitDraft(draftText, draftAttachments, undefined, undefined, executionMode);
     if (executionMode === 'goal') {
-      setSelectedExecutionMode('loop');
+      setSelectedExecutionMode(undefined);
     }
   }, [executionMode, submitDraft]);
 
