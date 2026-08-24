@@ -1,4 +1,4 @@
-import { decodeCapabilityMatrix } from '../types/agent-control.js';
+import { decodeCapabilityMatrixValue } from '../types/runtime-capability-matrix.js';
 
 const DEFAULT_API_FORMATS = ['responses', 'chat_completions'];
 const NATIVE_DASHBOARD_FRAMEWORKS = new Map([
@@ -79,7 +79,7 @@ function normalizeApprovalPolicy(value) {
 function normalizeRuntimeCapabilityMatrix(value) {
   if (value === undefined || value === null) return undefined;
   try {
-    return decodeCapabilityMatrix(value);
+    return decodeCapabilityMatrixValue(value);
   } catch {
     // A malformed or legacy-shaped capability must never enable controls.
     return undefined;

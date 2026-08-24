@@ -12,6 +12,7 @@
  *   compatibility instead of being dropped silently.
  */
 import { z } from 'zod';
+import { decodeCapabilityMatrixValue } from './runtime-capability-matrix.js';
 
 export class ContractMismatchError extends Error {
   constructor(message: string) {
@@ -149,80 +150,13 @@ export type RuntimeCapabilityMatrix = {
   extensions: Record<string, unknown>;
 };
 
-const CAPABILITY_KEYS = [
-  'cancel', 'pause', 'resume', 'submit_interaction', 'attach',
-  'steer', 'inject', 'checkpoint', 'durable_restore',
-] as const;
-
-const EXECUTION_MODE_KEYS = ['goal', 'loop', 'plan'] as const;
-
-const capabilityValue = z
-  .object({
-    supported: z.boolean(),
-    mode: z.enum(['native', 'emulated', 'unavailable']),
-    reason: z.string().min(1).nullable().optional(),
-  })
-  .passthrough();
-
-function decodeCapability(raw: unknown, field: string): RuntimeCapability {
-  const parsed = capabilityValue.safeParse(raw);
-  if (!parsed.success) {
-    throw new ContractMismatchError(
-      `RuntimeCapabilityMatrix/v1 mismatch at ${field}: ${parsed.error.message}`,
-    );
-  }
-  const value = parsed.data;
-  if (!value.supported && (value.mode !== 'unavailable' || !value.reason)) {
-    throw new ContractMismatchError(
-      `RuntimeCapabilityMatrix/v1 mismatch at ${field}: unsupported capability requires mode=unavailable and reason`,
-    );
-  }
-  const { supported, mode, reason, ...rest } = value;
-  return {
-    supported,
-    mode,
-    reason: reason ?? null,
-    extensions: rest as Record<string, unknown>,
-  };
-}
-
 export function decodeCapabilityMatrix(raw: unknown): RuntimeCapabilityMatrix {
-  const base = z
-    .object({
-      schema_version: z.literal(1),
-      ...Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, z.unknown()])),
-    })
-    .passthrough()
-    .safeParse(raw);
-  if (!base.success) {
-    throw new ContractMismatchError(
-      `RuntimeCapabilityMatrix/v1 mismatch: ${base.error.message}`,
-    );
+  try {
+    return decodeCapabilityMatrixValue(raw) as RuntimeCapabilityMatrix;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ContractMismatchError(`RuntimeCapabilityMatrix/v1 mismatch: ${detail}`);
   }
-  const value = base.data as Record<string, unknown>;
-  const extensions: Record<string, unknown> = {};
-  for (const key of Object.keys(value)) {
-    if (
-      key !== 'schema_version'
-      && !(CAPABILITY_KEYS as readonly string[]).includes(key)
-      && !(EXECUTION_MODE_KEYS as readonly string[]).includes(key)
-    ) {
-      extensions[key] = value[key];
-    }
-  }
-  const matrix: RuntimeCapabilityMatrix = {
-    schema_version: 1,
-    extensions,
-  } as RuntimeCapabilityMatrix;
-  for (const key of CAPABILITY_KEYS) {
-    matrix[key] = decodeCapability(value[key], key);
-  }
-  for (const key of EXECUTION_MODE_KEYS) {
-    if (value[key] !== undefined && value[key] !== null) {
-      matrix[key] = decodeCapability(value[key], key);
-    }
-  }
-  return matrix;
 }
 
 // ---------------------------------------------------------------------------
