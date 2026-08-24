@@ -26,7 +26,53 @@ describe('ChatComposer interaction contract', () => {
 
     expect(source).not.toContain('multimodal_input_image === false');
     expect(source).not.toContain('不支持图片输入');
-    expect(source).toContain('void submitDraft(draftText, draftAttachments)');
+    expect(source).toContain('void submitDraft(draftText, draftAttachments,');
+  });
+
+  it('uses the compact Codex-style composer controls without native selects', () => {
+    const composerSource = readSource('components/chat/ChatComposer.tsx');
+    const executionMenuSource = readSource('components/chat/ExecutionModeMenu.tsx');
+    const modelMenuSource = readSource('components/chat/ModelSettingsMenu.tsx');
+    const permissionSource = readSource('components/chat/PermissionMenu.tsx');
+
+    expect(composerSource).toContain('<ExecutionModeMenu');
+    expect(executionMenuSource).toContain('<Plus');
+    expect(composerSource).toContain('<ModelSettingsMenu');
+    expect(composerSource).toContain("'flex h-9 w-9 shrink-0 items-center justify-center rounded-full");
+    expect(modelMenuSource).not.toContain('<select');
+    expect(modelMenuSource).toContain('rounded-xl bg-muted/80');
+    expect(modelMenuSource).toContain("type SettingsPanel = 'model' | 'reasoning'");
+    expect(permissionSource).toContain("value: 'ask'");
+    expect(permissionSource).toContain("value: 'risk'");
+    expect(permissionSource).toContain("value: 'full'");
+  });
+
+  it('hides unsupported controls and never sends unsupported thinking options', () => {
+    const appSource = readSource('App.tsx');
+    const connectedSource = readSource('components/chat/ConnectedComposer.tsx');
+    const runSource = readSource('hooks/useRunAgent.ts');
+
+    expect(appSource).toContain('attachmentsEnabled={uiCapabilities.Attachments !== false}');
+    expect(appSource).toContain('thinkingEnabled={thinkingEnabled}');
+    expect(connectedSource).toContain("if (!thinkingEnabled) setThinkingMode('auto')");
+    expect(runSource).toContain("thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto'");
+  });
+
+  it('shows goal and plan only from explicit typed runtime capabilities', () => {
+    const appSource = readSource('App.tsx');
+    const composerSource = readSource('components/chat/ChatComposer.tsx');
+    const actionMenuSource = readSource('components/chat/ExecutionModeMenu.tsx');
+    const runSource = readSource('core/run/engine.ts');
+
+    expect(appSource).toContain('runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}');
+    expect(composerSource).toContain('<ExecutionModeMenu');
+    expect(actionMenuSource).not.toContain('Agent Loop');
+    expect(actionMenuSource).toContain('计划模式');
+    expect(actionMenuSource).toContain('设定目标');
+    expect(actionMenuSource).not.toContain('速度');
+    expect(runSource).toContain('goal_objective');
+    expect(runSource).toContain('collaboration_mode');
+    expect(runSource).not.toContain("return { collaboration_mode: 'default' };");
   });
 
   it('refreshes the active session after runtime cancel so checkpoint controls can appear', () => {

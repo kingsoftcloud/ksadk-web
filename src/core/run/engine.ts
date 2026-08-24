@@ -1,4 +1,13 @@
-import type { RunEngine, RunStage, RunEvent, RunEngineConfig } from './types.js';
+import type {
+  RunControlState,
+  RunEngine,
+  RunStage,
+  RunEvent,
+  RunEngineConfig,
+  RuntimeExecutionMode,
+  SubmitControlCommand,
+} from './types.js';
+import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
 import type { ApiFacade } from '../api/types.js';
 import type { StreamAction } from '../stream/types.js';
 import { createProtocol } from '../stream/index.js';
@@ -10,14 +19,12 @@ import { ApiError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
 import { useStreamingStore } from '../../stores/streaming.js';
+import { KernelRunEventTranslator, peekKernelReceipt } from '../stream/kernel-events.js';
 import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
 
-type StreamConsumeResult = {
-  receivedData: boolean;
-  terminalStatus?: string;
-};
+type StreamConsumeResult = { terminalStatus?: string };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -99,6 +106,8 @@ export class RunEngineImpl implements RunEngine {
   private aguiClient: AguiRunClient | null = null;
   private aguiThreadSessionId: string | null = null;
   private api: ApiFacade;
+  private controlStateValue: RunControlState = { phase: 'idle' };
+  private lastControlCommand: SubmitControlCommand | null = null;
   private config: RunEngineConfig = {
     agentId: 'default-agent',
     apiFormats: ['responses'],
@@ -112,6 +121,79 @@ export class RunEngineImpl implements RunEngine {
   }
 
   get stage() { return this._stage; }
+
+  get controlState(): RunControlState { return this.controlStateValue; }
+
+  /**
+   * Submit an agent-kernel/v1 control command. Receipt semantics:
+   * accepted/duplicate -> queued (never treated as completion), queue_full ->
+   * retryable with the same idempotency key, unsupported -> surfaces the
+   * capability reason, persistence_uncertain -> confirm status before retry.
+   */
+  async submitControl(command: SubmitControlCommand): Promise<RunControlState> {
+    this.lastControlCommand = command;
+    let receipt;
+    try {
+      receipt = decodeReceipt(await this.api.submitControl(command));
+    } catch (error) {
+      if (error instanceof ContractMismatchError) {
+        this.controlStateValue = { phase: 'contract_mismatch', error: null, receipt: null };
+        this.emit({ type: 'system_message', content: '【系统提示】控制指令响应不符合 agent-kernel/v1 合同，已停止变更本地状态。' });
+        return this.controlStateValue;
+      }
+      throw error;
+    }
+    this.controlStateValue = this.controlStateFor(receipt, command);
+    if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
+      this.emit({ type: 'activity', phase: '指令已入队，等待运行时处理', status: 'waiting', countEvent: false });
+    } else if (receipt.status === 'queue_full') {
+      this.emit({ type: 'system_message', content: '【系统提示】指令队列已满，可点击重试；重试将复用同一幂等键。' });
+    } else if (receipt.status === 'unsupported') {
+      this.emit({ type: 'system_message', content: `【系统提示】运行时不支持该操作：${receipt.error?.message || ''}` });
+    } else if (receipt.status === 'persistence_uncertain') {
+      this.emit({ type: 'system_message', content: '【系统提示】指令提交结果待确认，正在查询状态…' });
+    } else if (receipt.status === 'rejected') {
+      this.emit({ type: 'system_message', content: `【系统提示】指令被拒绝：${receipt.error?.message || ''}` });
+    }
+    return this.controlStateValue;
+  }
+
+  private controlStateFor(
+    receipt: ReturnType<typeof decodeReceipt>,
+    command: SubmitControlCommand,
+  ): RunControlState {
+    switch (receipt.status) {
+      case 'accepted':
+      case 'duplicate':
+        return { phase: 'queued', receipt, error: null };
+      case 'queue_full':
+        return { phase: 'retryable', retryKey: command.idempotency_key, receipt, error: receipt.error };
+      case 'unsupported':
+        return { phase: 'unsupported', receipt, error: receipt.error };
+      case 'persistence_uncertain':
+        return { phase: 'confirming', retryKey: command.idempotency_key, receipt, error: receipt.error };
+      case 'rejected':
+      default:
+        return { phase: 'rejected', receipt, error: receipt.error };
+    }
+  }
+
+  /** Retry the last control command, reusing its idempotency key. */
+  async retryControl(): Promise<RunControlState> {
+    const previous = this.lastControlCommand;
+    if (!previous || (this.controlStateValue.phase !== 'retryable' && this.controlStateValue.phase !== 'confirming')) {
+      return this.controlStateValue;
+    }
+    if (this.controlStateValue.phase === 'confirming') {
+      // persistence_uncertain: confirm via status query before deciding to retry.
+      try {
+        await this.api.getAgentStatus();
+      } catch (error) {
+        console.warn('[RunEngine] status query after persistence_uncertain failed:', error);
+      }
+    }
+    return this.submitControl(previous);
+  }
 
   updateConfig(config: RunEngineConfig): void {
     this.config = {
@@ -163,6 +245,7 @@ export class RunEngineImpl implements RunEngine {
     attachments: File[];
     responsesInput?: unknown;
     previousResponseId?: string;
+    executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
@@ -176,8 +259,6 @@ export class RunEngineImpl implements RunEngine {
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
       try {
-        let retriedWithNewSession = false;
-
         if (!sessionId) {
           sessionId = await this.createSession(draft);
         }
@@ -205,6 +286,7 @@ export class RunEngineImpl implements RunEngine {
 
         const hostedTransport = this.config.hostedChatTransport;
         const useAgui = !isResponsesResume
+          && !draft.executionMode
           && draft.attachments.length === 0
           && hostedTransport?.Protocol === 'ag-ui';
         const aguiClient = useAgui ? this.getAguiClient(sessionId) : null;
@@ -247,23 +329,19 @@ export class RunEngineImpl implements RunEngine {
 
         const assistantMessageId = `msg-${Date.now()}`;
 
-        const streamResult = await this.consumeStream(stream, protocol, protocolState, assistantMessageId, invocationId);
-
-        if (!streamResult.receivedData && !draft.sessionId && !retriedWithNewSession) {
-          retriedWithNewSession = true;
-          sessionId = await this.createSession(draft);
-          if (sessionId) {
-            this.activeSessionId = sessionId;
-            body.SessionId = sessionId;
-            this.setStage('connecting');
-            this.emit({ type: 'activity', phase: '重建会话后重新连接', status: 'connecting', countEvent: false });
-            const retryStream = await this.api.runAgent(body, { signal: this.abortController?.signal });
-            this.setStage('streaming');
-            this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
-            const retryMsgId = `msg-${Date.now()}`;
-            const retryResult = await this.consumeStream(retryStream, protocol, protocolState, retryMsgId, invocationId);
-            streamResult.terminalStatus = retryResult.terminalStatus;
-          }
+        // AgentKernel path: RunAgent answers with a control receipt (JSON);
+        // run output arrives on SubscribeSessionEvents as raw kernel frames.
+        const peeked = await peekKernelReceipt(stream);
+        let streamResult: StreamConsumeResult;
+        if (peeked.receipt) {
+          streamResult = await this.consumeKernelRunEvents(
+            sessionId,
+            invocationId,
+            peeked.receipt,
+            assistantMessageId,
+          );
+        } else {
+          streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
         }
 
         if (streamResult.terminalStatus === 'cancelled') {
@@ -730,10 +808,16 @@ export class RunEngineImpl implements RunEngine {
     sessionId: string,
     apiFormat: RuntimeApiFormat,
     isResponsesResume: boolean,
-    draft: { text: string; responsesInput?: unknown; previousResponseId?: string },
+    draft: {
+      text: string;
+      responsesInput?: unknown;
+      previousResponseId?: string;
+      executionMode?: RuntimeExecutionMode;
+    },
     fileParts: Array<Record<string, unknown>>,
     invocationId: string,
   ): Record<string, unknown> {
+    const executionMetadata = this.buildExecutionMetadata(draft);
     const body: Record<string, unknown> = {
       AgentId: this.config.agentId,
       SessionId: sessionId,
@@ -748,6 +832,7 @@ export class RunEngineImpl implements RunEngine {
       Metadata: {
         agentengine: {
           tool_approval_mode: this.config.permissionMode || 'risk',
+          ...executionMetadata,
         },
       },
     };
@@ -766,6 +851,128 @@ export class RunEngineImpl implements RunEngine {
     return body;
   }
 
+  private buildExecutionMetadata(
+    draft: { text: string; executionMode?: RuntimeExecutionMode },
+  ): Record<string, string> {
+    const mode = draft.executionMode;
+    if (!mode) return {};
+    const capability = this.config.runtimeCapabilityMatrix?.[mode];
+    if (!capability?.supported || capability.mode === 'unavailable') return {};
+    if (mode === 'plan') return { collaboration_mode: 'plan' };
+    if (mode === 'goal') {
+      const objective = draft.text.trim();
+      return objective
+        ? { collaboration_mode: 'default', goal_objective: objective }
+        : {};
+    }
+    return {};
+  }
+
+  /**
+   * Consume an AgentKernel run: the receipt proved the durable enqueue; the
+   * run output arrives on SubscribeSessionEvents as raw kernel frames which
+   * are translated to legacy SessionEventRecords (dispatcher handles the
+   * message merge + interaction ingestion). Reconnects resume from the last
+   * observed kernel seq.
+   */
+  private async consumeKernelRunEvents(
+    sessionId: string,
+    invocationId: string,
+    receipt: import('../stream/kernel-events.js').KernelRunReceipt,
+    assistantMessageId: string,
+  ): Promise<StreamConsumeResult> {
+    if (receipt.status === 'rejected' || receipt.status === 'unsupported') {
+      this.setStage('error');
+      this.emit({
+        type: 'error',
+        error: new Error(receipt.error?.message || `运行提交被拒绝（${receipt.status}）`),
+      });
+      return { terminalStatus: 'failed' };
+    }
+    if (receipt.status === 'queue_full') {
+      this.setStage('error');
+      this.emit({ type: 'rate_limited', message: '运行队列已满，请稍后重试' });
+      return { terminalStatus: 'failed' };
+    }
+    // accepted / duplicate / persistence_uncertain: the run is (very likely)
+    // durable on the kernel; watch the event stream for its outcome.
+    if (receipt.status === 'persistence_uncertain') {
+      this.emit({
+        type: 'system_message',
+        content: '提交结果未知，正在从事件流确认运行状态…',
+      });
+    }
+
+    this.emit({ type: 'assistant_message_created', messageId: assistantMessageId, invocationId });
+    this.emit({ type: 'activity', phase: '已提交运行，订阅事件流', status: 'running', countEvent: false });
+
+    const translator = new KernelRunEventTranslator(sessionId);
+    let terminalStatus: string | undefined;
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 6;
+
+    while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
+      try {
+        const afterSeq = useStreamingStore.getState().lastSeqId || 0;
+        const stream = await this.api.subscribeSessionEvents(
+          sessionId,
+          afterSeq,
+          { signal: this.abortController?.signal },
+        );
+        consecutiveErrors = 0;
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (terminalStatus === undefined) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const split = splitSseBuffer(buffer);
+          buffer = split.remainder;
+          for (const chunk of split.chunks) {
+            if (!chunk.trim()) continue;
+            for (const transportEvent of parseSseChunk(chunk)) {
+              const frame = transportEvent.data as Record<string, unknown> | undefined;
+              if (!frame || typeof frame !== 'object') continue;
+              const record = translator.translate(frame);
+              const seq = Number(frame.seq);
+              if (Number.isFinite(seq) && seq > 0) {
+                useStreamingStore.getState().setLastSeqId(seq);
+              }
+              if (!record) continue;
+              this.emit({ type: 'stream_event', event: record as SessionEventRecord, sessionId });
+              if (record.EventType === 'run_status') {
+                const status = String(
+                  (record.Content as { status?: unknown } | undefined)?.status || '',
+                ).toLowerCase();
+                // Kernel runs pause as `interrupted` while an interaction
+                // (approval) is pending; that is not terminal — keep streaming
+                // until completed/failed/cancelled.
+                if (status !== 'interrupted' && TERMINAL_RUN_STATUSES.has(status)) {
+                  terminalStatus = status;
+                }
+              }
+            }
+          }
+        }
+        if (terminalStatus === undefined) {
+          // Kernel subscriptions replay the backlog and close; poll until the
+          // run reaches a terminal state (it may wait on an interaction).
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return { terminalStatus: 'cancelled' };
+        }
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= maxConsecutiveErrors) break;
+        await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveErrors));
+      }
+    }
+    if (terminalStatus === undefined) terminalStatus = 'interrupted';
+    return { terminalStatus };
+  }
+
   private async consumeStream(
     stream: ReadableStream<Uint8Array>,
     protocol: StreamProtocol,
@@ -776,15 +983,12 @@ export class RunEngineImpl implements RunEngine {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let receivedData = false;
     let messageCreated = false;
 
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        receivedData = true;
-
         if (!messageCreated) {
           messageCreated = true;
           this.emit({ type: 'assistant_message_created', messageId, invocationId });
@@ -838,7 +1042,7 @@ export class RunEngineImpl implements RunEngine {
 
           if (shouldStop) {
             reader.cancel().catch(() => {});
-            return { receivedData, terminalStatus };
+            return { terminalStatus };
           }
         }
       }
@@ -848,7 +1052,7 @@ export class RunEngineImpl implements RunEngine {
       }
     }
 
-    return { receivedData };
+    return {};
   }
 
   private isCompactionChunk(chunk: string): boolean {
@@ -878,9 +1082,9 @@ export class RunEngineImpl implements RunEngine {
           messageId,
           approvalRequestId: action.approvalRequestId,
           protocol: 'responses',
-          name: '人工确认',
-          args: '',
-          message: '本次运行需要人工审批后才能继续。',
+          name: action.name || '人工确认',
+          args: action.args || '',
+          message: action.message || '本次运行需要人工审批后才能继续。',
         });
         break;
       case 'incomplete':

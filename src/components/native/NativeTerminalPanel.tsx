@@ -172,6 +172,26 @@ export function NativeTerminalPanel({
     }
   }, [capability.Enabled, open]);
 
+  // When the control-plane sessionId changes, the terminal sessions bound to
+  // the previous sessionId are stale (their pty processes keep running and
+  // leak). Close them server-side before refreshing for the new sessionId.
+  const prevSessionIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (prevSessionIdRef.current !== undefined && prevSessionIdRef.current !== sessionId) {
+      const stale = terminalSessionsRef.current;
+      setTerminalSessions([]);
+      setActiveTerminalSessionId(null);
+      void Promise.all(
+        stale.map((session) =>
+          fetch(`${TERMINAL_SESSIONS_ENDPOINT}/${session.terminal_session_id}`, {
+            method: 'DELETE',
+          }).catch(() => {}),
+        ),
+      );
+    }
+    prevSessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   const attachTerminalSession = useCallback(async (session: TerminalSession) => {
     if (!containerRef.current) {
       return () => {};

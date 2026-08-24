@@ -36,6 +36,16 @@ type CreateSessionResponse = {
   Session: SessionPayload;
 };
 
+export type DeleteSessionResult = {
+  /**
+   * `false` means the Server deliberately kept the session because its
+   * runtime-side deletion has not completed.  Older Servers omit this field;
+   * their successful response retains the historical "deleted" behaviour.
+   */
+  Deleted?: boolean;
+  RuntimeSync?: string;
+};
+
 export type { SessionPayload };
 
 export type ListSessionsOptions = {
@@ -70,8 +80,11 @@ export async function createSession(agentId: string, opts?: { signal?: AbortSign
   return data.Session;
 }
 
-export async function deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void> {
-  await postJsonAction<unknown>('DeleteSession', { SessionId: sessionId }, opts);
+export async function deleteSession(
+  sessionId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<DeleteSessionResult> {
+  return postJsonAction<DeleteSessionResult>('DeleteSession', { SessionId: sessionId }, opts);
 }
 
 export async function getSession(

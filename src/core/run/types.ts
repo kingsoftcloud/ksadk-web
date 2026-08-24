@@ -1,6 +1,8 @@
 import type { RuntimeApiFormat } from '../../types/api.js';
+import type { AgentControlError, AgentControlReceipt } from '../../types/agent-control.js';
 import type { HostedChatTransport } from '../../types/api.js';
 import type { ModelCatalogItem } from '../../components/chat/types.js';
+import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
 
 export type RunStage =
   | 'idle' | 'creating-session' | 'uploading-files'
@@ -10,6 +12,13 @@ export type RunStage =
 
 /** Default approval policy applied to a newly started conversation run. */
 export type PermissionMode = 'ask' | 'risk' | 'full';
+/**
+ * User-selectable execution controls.
+ *
+ * A runtime's agent loop is its internal execution machinery, not a turn mode.
+ * Only Plan and Goal have distinct public request semantics.
+ */
+export type RuntimeExecutionMode = 'plan' | 'goal';
 
 export type RunEvent =
   | { type: 'stage_changed'; stage: RunStage; sessionId?: string | null }
@@ -73,6 +82,7 @@ export type RunEngineConfig = {
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
   permissionMode?: PermissionMode;
+  runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;
 };
@@ -84,6 +94,7 @@ export interface RunEngine {
     attachments: File[];
     responsesInput?: unknown;
     previousResponseId?: string;
+    executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
@@ -113,5 +124,31 @@ export interface RunEngine {
     onSettled?: (sessionId: string | null) => void;
   }): boolean;
   readonly stage: RunStage;
+  readonly controlState: RunControlState;
+  submitControl(command: SubmitControlCommand): Promise<RunControlState>;
+  retryControl(): Promise<RunControlState>;
   subscribe(listener: (event: RunEvent) => void): () => void;
 }
+
+/**
+ * agent-kernel/v1 control surface state. `accepted`/`duplicate` receipts move
+ * the run to queued — they never imply completion.
+ */
+export type RunControlPhase =
+  | 'idle' | 'queued' | 'retryable' | 'unsupported' | 'confirming'
+  | 'contract_mismatch' | 'rejected';
+
+export type RunControlState = {
+  phase: RunControlPhase;
+  /** Idempotency key to reuse when retrying (queue_full/confirming). */
+  retryKey?: string;
+  /** Populated for unsupported/rejected receipts. */
+  error?: AgentControlError | null;
+  receipt?: AgentControlReceipt | null;
+};
+
+export type SubmitControlCommand = {
+  command_type: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
+  idempotency_key: string;
+  payload: Record<string, unknown>;
+};

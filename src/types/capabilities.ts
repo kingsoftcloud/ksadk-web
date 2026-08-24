@@ -3,6 +3,7 @@ import type {
   HostedChatTransportProtocol,
   RuntimeApiFormat,
 } from './api.js';
+import type { RuntimeCapabilityMatrix } from './agent-control.js';
 
 export type BuiltinToolCapability = {
   name: string;
@@ -58,4 +59,17 @@ export type UiCapabilities = {
   };
   WorkspaceFiles?: boolean;
   BuiltinTools: BuiltinToolCapability[];
+  /** agent-kernel/v1 Interaction capability (bootstrap `interaction_v1`). */
+  InteractionV1?: boolean;
+  /** Canonical agent-kernel/v1 projection. Absent means no execution-mode UI. */
+  RuntimeCapabilityMatrix?: RuntimeCapabilityMatrix;
 };
+
+// agent-kernel/v1 runtime capability matrix, exposed alongside the legacy
+// UI capability projection so consumers gate on canonical contracts.
+export type {
+  RuntimeCapability,
+  RuntimeCapabilityMatrix,
+  RuntimeCapabilityMode,
+} from './agent-control.js';
+export { decodeCapabilityMatrix } from './agent-control.js';

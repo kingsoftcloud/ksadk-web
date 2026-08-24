@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createSessionEventCursor,
   loadCompleteSessionEventHistory,
   resolveOlderSessionEventPage,
 } from '../utils/session-event-history.js';
@@ -92,5 +93,58 @@ describe('session event history loading', () => {
       limit: 6,
     });
     expect(resolveOlderSessionEventPage({ offset: 306, total: 306 }, 50)).toBeNull();
+  });
+});
+
+function kernelEvent(seq: number, extra: Record<string, unknown> = {}) {
+  return {
+    schema_version: 1,
+    event_id: `00000000-0000-4000-8000-${String(seq).padStart(12, '0')}`,
+    session_id: 'session-1',
+    seq,
+    timestamp: '2026-08-17T00:00:01Z',
+    family: 'runtime',
+    family_version: 2,
+    event_type: 'run.message.delta',
+    payload: { seq },
+    ...extra,
+  };
+}
+
+describe('SessionEventCursor (agent-kernel/v1)', () => {
+  it('dedupes and orders strictly by session seq', () => {
+    const cursor = createSessionEventCursor();
+    cursor.accept(kernelEvent(3));
+    cursor.accept(kernelEvent(1));
+    cursor.accept(kernelEvent(2));
+    cursor.accept(kernelEvent(2)); // exact duplicate is ignored
+    expect(cursor.displayableEvents().map((event) => event.seq)).toEqual([1, 2, 3]);
+    expect(cursor.lastSeq).toBe(3);
+  });
+
+  it('keeps unknown event families out of display but advances the cursor', () => {
+    const cursor = createSessionEventCursor();
+    cursor.accept(kernelEvent(1));
+    cursor.accept(kernelEvent(2, { family: 'workflow', event_type: 'step.started' }));
+    cursor.accept(kernelEvent(3));
+    expect(cursor.displayableEvents().map((event) => event.seq)).toEqual([1, 3]);
+    expect(cursor.lastSeq).toBe(3);
+  });
+
+  it('replays refresh results before live events without duplicating seqs', () => {
+    const cursor = createSessionEventCursor();
+    cursor.accept(kernelEvent(1));
+    cursor.accept(kernelEvent(2));
+    // Simulated refresh replay overlapping the live tail.
+    cursor.accept(kernelEvent(2));
+    cursor.accept(kernelEvent(3));
+    expect(cursor.displayableEvents().map((event) => event.seq)).toEqual([1, 2, 3]);
+  });
+
+  it('reconnects from the last session seq', () => {
+    const cursor = createSessionEventCursor();
+    cursor.accept(kernelEvent(41));
+    cursor.accept(kernelEvent(42));
+    expect(cursor.reconnectAfterSeq()).toBe(42);
   });
 });

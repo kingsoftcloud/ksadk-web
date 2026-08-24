@@ -1,6 +1,144 @@
 # Changelog
 
+## 0.3.2 - 2026-08-21
+
+Release candidate for the durable Interaction/v1 web experience. This is the
+reviewed source that replaces the internal beta sequence. Publication remains
+blocked on the current-digest cross-repository preproduction gate and uses the
+protected release workflow only after that gate is green.
+
+- Unify the Hosted UI composer with Studio's compact attachment, approval,
+  model, Goal, and Plan controls. The runtime's ordinary agent loop remains
+  internal rather than appearing as a third user-selectable mode; a future
+  eval-driven improvement loop must advertise its own honest capability.
+- Simplify the session list: completed runs no longer expose raw status text;
+  active sessions use a small activity ring and subtle background, while failed
+  sessions use a restrained error dot.
+- Keep RuntimeCapabilityMatrix decoding executable before the TypeScript build,
+  so the same fail-closed contract projection is covered by both browser tests
+  and the npm publication workflow's Node compatibility gate.
+
+## 0.3.2-beta.5 - 2026-08-21
+
+When the composer Interaction tray owns a pending approval, its tool-history
+row is now strictly read-only. This removes the second legacy approve/reject
+entry point while preserving the command arguments and terminal audit result.
+
+## 0.3.2-beta.4 - 2026-08-21
+
+Fixes the legacy Responses approval bridge: a pending approval is retained in
+the read-only tool history and also normalized into the unified Interaction
+tray immediately above the composer.  The submit still uses the compatible
+Responses approval transport when Interaction/v1 is unavailable.
+
+## 0.3.2-beta.3 - 2026-08-20
+
+Adds package-internal release provenance. Hosted UI and the preproduction gate
+can verify the resolved tarball's source basis and Interaction/v1 contract
+digest instead of trusting an external evidence label.
+
+## 0.3.2-beta.2 - 2026-08-20
+
+Rebuilt the immutable beta artifact from the complete Interaction/v1 source.
+This supersedes `0.3.2-beta.1`, whose vendored Hosted UI tarball predated the
+two fixes below.
+
+- Treat a successful `SubmitInteraction` receipt as durable acceptance, not as
+  proof that the framework execution has already completed its resolution.
+- Add the queue tray and read-only historical interaction anchors to the
+  published artifact, rather than leaving them only on the Web source branch.
+
+## 0.3.2-beta.1 - 2026-08-19
+
+> Unifies durable human-in-the-loop decisions behind one `Interaction/v1`
+> client. Counterpart of the agent-kernel Interaction/v1 contract: pending
+> approvals, structured inputs, and AG-UI interrupts normalize to a single
+> Interaction shape with one submit path (`SubmitInteraction`) with
+> revision CAS, idempotency keys, and first-wins terminal semantics.
+
+### Interaction/v1 (headless core)
+
+- New `src/core/interaction/` module: `InteractionClientImpl` + shared
+  `InteractionStore` with strict first-wins semantics (a terminal record
+  never regresses to pending), revision-based optimistic concurrency, and
+  an idempotency-key double-submit guard.
+- Transport adapters normalize three sources into the same Interaction:
+  Interaction/v1 SessionEvents (`interaction.requested` / `.resolved`,
+  rejection is `resolved.outcome="rejected"`, not a fifth event type),
+  Responses `mcp_approval_request`, and AG-UI interrupts. Components never
+  branch on the approval protocol.
+- New public API: `POST /agentengine/api/v1/SubmitInteraction`
+  (`submitInteraction` on `ApiFacade`), receipt decoded with the canonical
+  agent-kernel/v1 strict decoder. Pure `/v1/responses` clients keep the
+  official `mcp_approval_response` path.
+- Refresh/replay: session load replays recent durable SessionEvents into
+  the store so a pending Interaction is restored without creating a second
+  request; a double click, a stale tab, or a replayed history can never
+  duplicate a decision.
+
+### UI
+
+- `InteractionTray` renders above the composer with the current pending
+  item, pending count, and queue navigation; the composer input is
+  visually subordinated while a decision is pending.
+- `InteractionHistoryAnchor` replaces interactive historical approval
+  buttons with a read-only status retaining actor, decision time,
+  outcome, and a redacted response summary.
+- A2UI production wire locked to `0.9.1` with catalog digest validation
+  (`validateA2uiPresentation`). Unknown wire versions or catalog
+  mismatches fall back to the canonical JSON schema form, then to plain
+  approve/reject controls. A validation failure is never mapped to an
+  approval.
+- Expiry: interactions with a past `expires_at` disable submission
+  client-side and surface an expired notice.
+
+### Compatibility
+
+- Old servers without the `interaction_v1` capability keep the 0.3.1
+  Responses (`mcp_approval_response`) and AG-UI (`resumeAguiInterrupt`)
+  callbacks; the fallback is isolated in the adapters and the shared UI is
+  unchanged.
+- Public runtime bundle exports `InteractionClientImpl`, `Interaction`,
+  adapters, and `interactionIdempotencyKey`.
+
+### Supply chain
+
+- Refresh the lockfile's production transitive dependencies for the `0.3.2`
+  candidate: Mermaid/DOMPurify and PostCSS/nanoid now resolve to the patched
+  releases verified by `npm audit --omit=dev`.
+
+## 0.3.1 - 2026-08-12
+
+> Identity-aware runtime item reducer. Counterpart of the KsADK `0.8.1`
+> canonical RuntimeEvent(schema_version=2) release. Hosted UI and Studio must
+> ship this version (or later) to keep stream/replay output consistent with the
+> Python canonical pipeline.
+
+### Stream / session reducer
+
+- Introduce `RuntimeItemReducer` (`src/core/stream/runtime-items.ts`) as the
+  single canonical store for streaming output. It reduces identity-addressed
+  item operations into a per-run projection keyed by
+  `runId / scopeId / itemId / partId`, replacing the legacy v1 heuristic dedup
+  (`lastText` / per-agent accumulator / `startswith` / suffix overlap /
+  text hash).
+- Ingress adapters normalize three sources into the same item operations:
+  Responses SSE output item ids, session events `Metadata.RuntimeItem`, and
+  legacy server events (no identity) via synthesized
+  `${invocationId}:legacy-assistant`. `assistant_stream_snapshot` maps to
+  replace, `assistant_message` maps to complete. Nothing inspects body text
+  to decide identity.
+
+### Compatibility
+
+- Consumers tracking the KsADK `0.8.1` canonical RuntimeEvent must use this
+  identity-aware version. `0.3.0` used the v1 heuristic reducer and will
+  duplicate or drop output when paired with canonical v2 producers.
+
 ## 0.3.0 - 2026-07-29
+
+> Published baseline for Hosted runtime transport and the KsADK `0.8.0`
+> web integration.
 
 ### Hosted runtime transport
 

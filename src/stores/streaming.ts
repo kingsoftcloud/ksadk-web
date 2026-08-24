@@ -1,5 +1,11 @@
 import { create } from 'zustand';
 
+import {
+  RuntimeItemReducer,
+  type RuntimeItemOperation,
+  type RuntimeItemSnapshot,
+} from '../core/stream/runtime-items.js';
+
 export type RunActivityStatus = 'connecting' | 'running' | 'waiting' | 'stopped' | 'completed' | 'failed';
 
 export type StatusBannerKind = 'rate_limited' | 'network' | 'error';
@@ -35,6 +41,8 @@ export type StreamingState = {
   lastSeqId: number;
   /** 当前 run 的 invocationId(afterSeqId 续订需要)。 */
   activeInvocationId: string;
+  /** 当前 run 的 identity-aware item 投影(schema v2),替代 v1 启发式去重。 */
+  runtimeItems: RuntimeItemSnapshot;
 };
 
 export type StreamingActions = {
@@ -66,12 +74,25 @@ export type StreamingActions = {
   stopSessionActivity: (sessionId?: string | null, detail?: string) => void;
   clearActivity: () => void;
   clearSessionActivity: (sessionId?: string | null) => void;
+  /**
+   * 应用 identity-aware item 操作到当前 run 的 RuntimeItemReducer。
+   * 操作按 runId/scopeId/itemId/partId 归并;eventId 重放是幂等 no-op。
+   */
+  applyRuntimeItemOperations: (operations: RuntimeItemOperation[]) => void;
   resetRun: () => void;
 };
 
 export type StreamingStore = StreamingState & StreamingActions;
 
 const hasStreamingSession = (sessions: Record<string, true>): boolean => Object.keys(sessions).length > 0;
+
+const EMPTY_RUNTIME_ITEMS: RuntimeItemSnapshot = { runId: null, status: null, items: [] };
+
+/**
+ * 当前 run 的 canonical reducer 实例。放在 store state 外(reducer 自身是可变
+ * accumulator),state 里只暴露只读 snapshot,保证 React 依赖 snapshot 引用变化重渲染。
+ */
+let runtimeItemReducer = new RuntimeItemReducer();
 
 const withoutStreamingSession = (sessions: Record<string, true>, key: string): Record<string, true> => {
   const next = { ...sessions };
@@ -89,6 +110,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   banner: null,
   lastSeqId: 0,
   activeInvocationId: '',
+  runtimeItems: EMPTY_RUNTIME_ITEMS,
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setBanner: (banner) => set({
     banner: banner ? { ...banner, createdAt: Date.now() } : null,
@@ -217,7 +239,13 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
       activity: state.activity === _removed ? null : state.activity,
     };
   }),
-  resetRun: () => set({
+  applyRuntimeItemOperations: (operations) => {
+    runtimeItemReducer.applyAll(operations);
+    set({ runtimeItems: runtimeItemReducer.snapshot() });
+  },
+  resetRun: () => {
+    runtimeItemReducer = new RuntimeItemReducer();
+    set({
     isStreaming: false,
     currentRunId: '',
     stopRequested: false,
@@ -226,5 +254,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
     sessionStreaming: {},
     lastSeqId: 0,
     activeInvocationId: '',
-  }),
+    runtimeItems: EMPTY_RUNTIME_ITEMS,
+    });
+  },
 }));

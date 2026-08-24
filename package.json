@@ -1,6 +1,6 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -8,10 +8,12 @@
     "build:hosted": "VITE_BASE_PATH=/chat/ vite build --outDir dist-hosted",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "build:all": "npm run build:ksadk && npm run build:hosted && npm run build:lib",
+    "prepack": "npm run build:lib && npm run build:ksadk",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
     "test:watch": "vitest src",
+    "test:e2e:interaction": "playwright test --config playwright.interaction.config.mjs",
     "test:e2e:agui": "playwright test --config playwright.agui.config.mjs",
     "test:e2e:reconnect": "playwright test --config playwright.reconnect.config.mjs",
     "build:ksadk": "VITE_BASE_PATH=./ vite build --outDir dist-ksadk"
@@ -44,6 +46,7 @@
     "dist-ksadk",
     "README.md",
     "CHANGELOG.md",
+    "RELEASE_PROVENANCE.json",
     "LICENSE",
     "package.json"
   ],

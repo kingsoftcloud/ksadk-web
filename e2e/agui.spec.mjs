@@ -45,7 +45,10 @@ function bootstrap() {
       Approval: true,
       Thinking: true,
       StopRun: true,
-      ResumeRun: true,
+      ResumeRun: false,
+      // The direct AG-UI HTTP stream is browser-attached: it is only
+      // selected when the agent does not require resumable runs.
+      RunLifecycle: { Enabled: false },
     },
     HostedChat: {
       PreferredTransport: 'ag-ui',
@@ -182,12 +185,19 @@ test('projects AG-UI activity, resumes approval, and replays terminal state', as
   await page.goto('/');
 
   await expect(page.getByText('AG-UI Fixture')).toBeVisible();
-  const composer = page.getByPlaceholder('发送消息...');
+  const composer = page.locator('textarea[placeholder^="发送消息"]');
   await composer.fill('请写入 demo.txt');
   await composer.press('Enter');
 
   await expect(page.getByText('E2E 状态卡')).toBeVisible();
-  await expect(page.locator('summary').filter({ hasText: '等待审批' })).toBeVisible();
+  // 0.3.2: the AG-UI interrupt is normalized into one durable
+  // Interaction — the tray carries the decision UI, the history anchor
+  // is read-only.
+  await expect(page.getByTestId('interaction-tray')).toBeVisible();
+  await expect(page.getByTestId('interaction-history-anchor')).toHaveAttribute(
+    'data-interaction-status',
+    'pending',
+  );
   await expect(page.getByRole('button', { name: '批准并继续' })).toBeVisible();
   await page.getByRole('button', { name: '批准并继续' }).click();
 
@@ -200,7 +210,10 @@ test('projects AG-UI activity, resumes approval, and replays terminal state', as
     },
   ]);
   await expect(page.getByText('审批已完成。')).toBeVisible();
-  await expect(page.locator('summary').filter({ hasText: '已批准' })).toBeVisible();
+  await expect(page.getByTestId('interaction-history-anchor')).toHaveAttribute(
+    'data-interaction-status',
+    'resolved',
+  );
 
   fixture.approved = true;
   await page.reload();

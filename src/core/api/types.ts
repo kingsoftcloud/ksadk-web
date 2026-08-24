@@ -7,7 +7,10 @@ export interface ApiFacade {
     PageSize?: number;
   }>;
   createSession(agentId: string, opts?: { signal?: AbortSignal }): Promise<{ SessionId: string }>;
-  deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
+  deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{
+    Deleted?: boolean;
+    RuntimeSync?: string;
+  }>;
   getSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<{
     SessionId: string;
     AgentId?: string;
@@ -58,6 +61,24 @@ export interface ApiFacade {
   resumeRun(params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string; invocationId?: string }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   subscribeRunEvents(params: { sessionId: string; invocationId: string; afterSeqId: number }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
+  // agent-kernel/v1 control surface
+  submitControl(command: {
+    command_type: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
+    idempotency_key: string;
+    payload: Record<string, unknown>;
+  }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
+  submitInteraction(params: {
+    AgentId: string;
+    SessionId: string;
+    RunId: string;
+    InteractionId: string;
+    ExpectedRevision: number;
+    Action: 'approve' | 'reject' | 'submit' | 'cancel';
+    Response: Record<string, unknown>;
+    IdempotencyKey: string;
+  }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
+  getAgentStatus(opts?: { signal?: AbortSignal }): Promise<unknown>;
+  subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
 
   // Feedback
   getResponseFeedback(payload: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<unknown>;

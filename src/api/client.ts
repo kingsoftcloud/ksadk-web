@@ -32,10 +32,34 @@ export class CancelledError extends Error {
 const API_BASE = '/agentengine/api/v1';
 
 async function parseActionResponse<T>(response: Response): Promise<T> {
-  let data: Record<string, unknown>;
+  const raw = await response.text();
+  let data: Record<string, unknown> = {};
   try {
-    data = await response.json();
+    data = raw ? JSON.parse(raw) as Record<string, unknown> : {};
   } catch {
+    // Hosted Agent domains deliberately return an HTML 401/403 page when a
+    // user opens the raw URL without the short-lived Dashboard session. This
+    // is an authentication boundary, not a malformed AgentEngine response.
+    const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+    const isHostedHtmlAuthPage =
+      (response.status === 401 || response.status === 403)
+      && (contentType.includes('text/html') || raw.trimStart().startsWith('<'));
+    if (isHostedHtmlAuthPage) {
+      throw new ApiError(
+        response.status,
+        '访问会话已失效，请从 Dashboard 或 Studio 的云端会话重新打开 Agent。',
+      );
+    }
+    if (!response.ok) {
+      const plainMessage = raw.trim();
+      throw new ApiError(
+        response.status,
+        plainMessage && plainMessage.length <= 256 && !plainMessage.startsWith('<')
+          ? plainMessage
+          : response.statusText || `HTTP ${response.status}`,
+        raw,
+      );
+    }
     throw new ApiError(-2, '响应格式异常');
   }
 
@@ -153,6 +177,14 @@ export async function streamAction(
 
   if (!response.ok) {
     throw new ApiError(response.status, `流式请求失败: ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  if (contentType.includes('application/json')) {
+    // Action endpoints sometimes carry business failures in an HTTP 200 JSON
+    // envelope. Validate a clone so successful legacy JSON responses keep
+    // their original body while rejected admissions never masquerade as SSE.
+    await parseActionResponse(response.clone());
   }
 
   if (!response.body) {

@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import type { MessageAttachment, PreviewImageSize } from '../components/chat/types.js';
+import type { RuntimeExecutionMode } from '../core/run/types.js';
+
+type QueuedDraft = {
+  text: string;
+  attachments: File[];
+  executionMode?: RuntimeExecutionMode;
+};
 
 type ToastEntry = {
   id: string;
@@ -19,7 +26,7 @@ export type UIState = {
   attachments: File[];
   previewAttachment: MessageAttachment | null;
   previewImageSize: PreviewImageSize | null;
-  queuedDrafts: Array<{ text: string; attachments: File[] }>;
+  queuedDrafts: QueuedDraft[];
   toasts: ToastEntry[];
 };
 
@@ -37,7 +44,7 @@ export type UIActions = {
   setAttachments: (updater: File[] | ((prev: File[]) => File[])) => void;
   setPreviewAttachment: (attachment: MessageAttachment | null) => void;
   setPreviewImageSize: (size: PreviewImageSize | null) => void;
-  setQueuedDrafts: (updater: Array<{ text: string; attachments: File[] }> | ((prev: Array<{ text: string; attachments: File[] }>) => Array<{ text: string; attachments: File[] }>)) => void;
+  setQueuedDrafts: (updater: QueuedDraft[] | ((prev: QueuedDraft[]) => QueuedDraft[])) => void;
   pushToast: (message: string, variant?: 'error' | 'info') => void;
   dismissToast: (id: string) => void;
 };

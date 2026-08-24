@@ -71,6 +71,31 @@ describe('chat message list contracts', () => {
     expect(source).toContain('onLoadMoreSessions()');
   });
 
+  it('keeps each session selection control separate from pin and delete actions', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
+
+    // A role=button wrapper containing real action buttons creates an invalid
+    // interactive nesting tree.  Browsers then route the delete click to the
+    // session selector instead of the delete handler.
+    expect(source).not.toContain('role="button"');
+    expect(source).toContain('onClick={() => onSelectSession(session.SessionId)}');
+    expect(source).toContain('onDeleteSession(session.SessionId, event)');
+    expect(source).toContain('group-focus-within:opacity-100');
+  });
+
+  it('keeps hosted session activity as compact visual state instead of status copy', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
+
+    expect(source).toContain('aria-label="\u8fd0\u884c\u4e2d"');
+    expect(source).toContain('aria-label="\u8fd0\u884c\u5931\u8d25"');
+    expect(source).toContain('h-1.5 w-1.5');
+    expect(source).toContain('border-t-transparent');
+    expect(source).toContain('bg-primary/[0.035]');
+    expect(source).not.toContain('bg-primary/8');
+    expect(source).not.toContain('\u6b63\u5728\u8fd0\u884c');
+    expect(source).not.toContain('completed');
+  });
+
   it('keeps reasoning panels scrollable and lightweight', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 
@@ -145,7 +170,18 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
     expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
-    expect(lifecycleSource).not.toContain('api.listSessionEvents(sessionId');
+    // Raw event history must not be loaded for the transcript. The only
+    // allowed listSessionEvents call is the Interaction/v1 pending
+    // replay (0.3.2), which ingests durable interaction facts only and
+    // never issues a submit.
+    const listSessionEventsCalls = lifecycleSource
+      .split('\n')
+      .filter((line) => line.includes('api.listSessionEvents(sessionId'));
+    expect(listSessionEventsCalls).toHaveLength(1);
+    expect(listSessionEventsCalls[0]).toContain('limit: 50');
+    expect(
+      lifecycleSource.indexOf('api.listSessionEvents(sessionId'),
+    ).toBeGreaterThan(lifecycleSource.indexOf('Interaction/v1'));
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
   });

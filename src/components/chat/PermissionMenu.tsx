@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Hand, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -49,8 +49,16 @@ export function PermissionMenu({ approvalPolicy }: PermissionMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const permissionMode = usePermissionStore((state) => state.permissionMode);
   const setPermissionMode = usePermissionStore((state) => state.setPermissionMode);
-  const visibleOptions = options.filter(
-    (option) => !approvalPolicy || approvalPolicy.Modes.includes(option.value),
+  const TriggerIcon = permissionMode === 'ask'
+    ? Hand
+    : permissionMode === 'full'
+      ? ShieldAlert
+      : ShieldCheck;
+  const visibleOptions = useMemo(
+    () => options.filter(
+      (option) => !approvalPolicy || approvalPolicy.Modes.includes(option.value),
+    ),
+    [approvalPolicy],
   );
 
   useEffect(() => {
@@ -81,12 +89,15 @@ export function PermissionMenu({ approvalPolicy }: PermissionMenuProps) {
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex h-8 items-center gap-1 rounded-full px-2 text-[13px] text-text-secondary transition hover:bg-muted hover:text-text-primary"
+        className={cn(
+          'flex h-8 items-center gap-1.5 rounded-xl px-2.5 text-[13px] transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25',
+          permissionMode === 'full' ? 'text-amber-600 dark:text-amber-400' : 'text-text-secondary hover:text-text-primary',
+        )}
         aria-expanded={open}
         aria-haspopup="menu"
         title="设置本次会话的工具审批规则"
       >
-        <ShieldCheck className="h-3.5 w-3.5" />
+        <TriggerIcon className="h-3.5 w-3.5" />
         <span>{triggerLabels[permissionMode]}</span>
         <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
       </button>

@@ -18,7 +18,15 @@ export type StreamAction =
   | { type: 'reasoning_delta'; text: string }
   | { type: 'tool_upsert'; name: string; args: string; status: 'running' | 'completed' | 'error' | 'paused'; extra?: Record<string, unknown> }
   | { type: 'tool_result'; name: string; output: string }
-  | { type: 'approval_request'; approvalRequestId: string; previousResponseId?: string }
+  | {
+      type: 'approval_request';
+      approvalRequestId: string;
+      previousResponseId?: string;
+      /** Optional legacy transport detail for the unified composer tray. */
+      name?: string;
+      args?: string;
+      message?: string;
+    }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: A2UISurface }
   | { type: 'a2ui_surface_update'; surfaceId: string; surface: A2UISurface }
   | { type: 'a2ui_surface_end'; surfaceId: string }

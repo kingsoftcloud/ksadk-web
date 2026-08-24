@@ -4,12 +4,29 @@ import {
   createResponsesStreamState,
   normalizeResponsesStreamEvent,
 } from '../../utils/responses-stream.js';
+import {
+  responsesEventToItemOperations,
+  type RuntimeItemOperation,
+} from './runtime-items.js';
 
 export class ResponsesProtocol implements StreamProtocol {
   readonly id = 'responses';
 
   createState(): Record<string, unknown> {
     return createResponsesStreamState() as Record<string, unknown>;
+  }
+
+  /**
+   * Identity-aware item operations for one transport event, keyed by the
+   * Responses output item id. This is the schema-v2 path; `parse` remains the
+   * legacy action projection for the existing dispatcher.
+   */
+  parseItemOperations(
+    event: TransportEvent,
+    runId: string,
+    scopeId: string,
+  ): RuntimeItemOperation[] {
+    return responsesEventToItemOperations(event.eventName, event.data as Record<string, unknown>, runId, scopeId);
   }
 
   parse(event: TransportEvent, state: Record<string, unknown>): StreamAction[] {

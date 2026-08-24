@@ -11,11 +11,12 @@ import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
-import type { PermissionMode } from '../core/run/types.js';
+import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
 
 type QueuedDraft = {
   text: string;
   attachments: File[];
+  executionMode?: RuntimeExecutionMode;
 };
 
 type RunAgentContext = {
@@ -32,7 +33,7 @@ type RunAgentContext = {
   api: ApiFacade;
   currentSessionIdRef: React.MutableRefObject<string | null>;
   agentIdRef: React.MutableRefObject<string>;
-  queuedDraftRef: React.MutableRefObject<Array<{ text: string; attachments: File[] }>>;
+  queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
   onRunSettled?: (sessionId: string | null) => void;
 };
 
@@ -61,8 +62,9 @@ export function useRunAgent(ctx: RunAgentContext) {
       agentFramework,
       selectedModel,
       selectedModelMetadata,
-      thinkingMode,
+      thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto',
       permissionMode,
+      runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
       hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
         requireResumableRun: Boolean(
           uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume,
@@ -135,6 +137,7 @@ export function useRunAgent(ctx: RunAgentContext) {
         attachments: draft.attachments,
         responsesInput: draft.responsesInput,
         previousResponseId: draft.previousResponseId,
+        executionMode: draft.executionMode,
         sessionId: targetSessionId,
         onSessionCreated: (sessionId: string) => {
           useSessionStore.getState().upsertSessions([{ SessionId: sessionId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
@@ -183,24 +186,26 @@ export function useRunAgent(ctx: RunAgentContext) {
       draftAttachments: File[],
       responsesInput?: unknown,
       previousResponseId?: string,
+      executionMode?: RuntimeExecutionMode,
     ) => {
       const draft = {
         text: draftText,
         attachments: draftAttachments,
         responsesInput,
         previousResponseId,
+        executionMode,
       };
 
       const engine = getEngine(currentSessionIdRef.current);
       if (engine.stage !== 'idle' && useStreamingStore.getState().isSessionStreaming(currentSessionIdRef.current)) {
         if (responsesInput === undefined) {
-          enqueueDraft({ text: draftText, attachments: draftAttachments });
+          enqueueDraft({ text: draftText, attachments: draftAttachments, executionMode });
         }
         return;
       }
 
       if (!startDraft(draft) && responsesInput === undefined) {
-        enqueueDraft({ text: draftText, attachments: draftAttachments });
+        enqueueDraft({ text: draftText, attachments: draftAttachments, executionMode });
       }
     },
     [currentSessionIdRef, enqueueDraft, getEngine, startDraft],

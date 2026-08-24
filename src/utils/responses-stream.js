@@ -1,3 +1,11 @@
+// Identity-aware (schema v2) item operations live in the canonical core reducer.
+// Re-exported here so the Responses ingress and its tests share one source of truth.
+export {
+  RuntimeItemReducer,
+  responsesEventToItemOperations,
+  projectRuntimeItems,
+} from '../core/stream/runtime-items.ts';
+
 export function createResponsesStreamState() {
   return {
     toolNames: new Map(),
@@ -162,15 +170,28 @@ function normalizeOutputItem({ data, state, status }) {
 
   if (type === 'mcp_approval_request') {
     const name = String(item.name || 'approval');
+    const args = stringifyPayload(item.arguments ?? item.args);
+    const approvalRequestId = String(item.id || item.approval_request_id || '');
     return [
       {
         type: 'tool_upsert',
         name,
-        args: stringifyPayload(item.arguments ?? item.args),
+        args,
         status: 'paused',
-        approvalRequestId: String(item.id || item.approval_request_id || ''),
+        approvalRequestId,
         previousResponseId: String(data?.response_id || state.currentResponseId || ''),
         serverLabel: String(item.server_label || ''),
+      },
+      // The transcript retains its immutable tool row, while the same
+      // pending decision is normalized into the composer-adjacent
+      // Interaction queue. This is essential for 0.3.1 Responses servers
+      // which have not yet enabled durable Interaction/v1 events.
+      {
+        type: 'approval_request',
+        approvalRequestId,
+        previousResponseId: String(data?.response_id || state.currentResponseId || ''),
+        name,
+        args,
       },
     ];
   }
@@ -310,7 +331,7 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
       : interruptInfo;
     const actionRequests = Array.isArray(ar.action_requests) ? ar.action_requests : [];
     if (actionRequests.length > 0) {
-      return actionRequests.map((req) => ({
+      const tools = actionRequests.map((req) => ({
         type: 'tool_upsert',
         name: String(req?.name || 'tool'),
         args: JSON.stringify(req?.args ?? {}),
@@ -318,6 +339,17 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
         approvalRequestId,
         previousResponseId,
       }));
+      const first = actionRequests[0] || {};
+      return [
+        ...tools,
+        {
+          type: 'approval_request',
+          approvalRequestId,
+          previousResponseId,
+          name: String(first?.name || '人工确认'),
+          args: JSON.stringify(first?.args ?? {}),
+        },
+      ];
     }
     return [
       {

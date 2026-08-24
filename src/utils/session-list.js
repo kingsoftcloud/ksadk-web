@@ -1,4 +1,23 @@
-const ACTIVE_RUN_STATUSES = new Set(['in_progress', 'running', 'queued', 'pending']);
+const ACTIVE_RUN_STATUSES = new Set([
+  'in_progress',
+  'running',
+  'resuming',
+  'starting',
+  'streaming',
+  'queued',
+  'pending',
+  'accepted',
+]);
+const FAILED_RUN_STATUSES = new Set([
+  'failed',
+  'error',
+  'resume_failed',
+  'interrupted',
+  'cancelled',
+  'canceled',
+  'aborted',
+  'expired',
+]);
 const DEFAULT_ACTIVE_STALE_AFTER_MS = 5 * 60 * 1000;
 
 function sessionUpdatedAtValue(session) {
@@ -115,8 +134,10 @@ export function formatSessionContextLabel(session) {
 
 export function resolveCompactSessionMeta(session, options = {}) {
   const running = isSessionRunningWithOptions(session, options);
+  const failed = FAILED_RUN_STATUSES.has(normalizeText(session?.ActiveRunStatus));
   return {
     running,
-    label: running ? '' : formatCompactUpdatedAt(session?.UpdatedAt ?? session?.updated_at),
+    failed,
+    label: running || failed ? '' : formatCompactUpdatedAt(session?.UpdatedAt ?? session?.updated_at),
   };
 }

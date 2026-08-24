@@ -3,6 +3,37 @@ import {
   normalizeResponsesStreamEvent,
 } from './responses-stream.js';
 import { isFailedToolOutput } from './tool-display.js';
+import {
+  RuntimeItemReducer,
+  sessionEventToItemOperation,
+} from '../core/stream/runtime-items.ts';
+
+// Identity-aware (schema v2) ingress. Canonical events carry Metadata.RuntimeItem;
+// legacy assistant events use the synthesized `${invocationId}:legacy-assistant`
+// identity. No identity is inferred from previous messages or body text.
+export {
+  RuntimeItemReducer,
+  sessionEventToItemOperation,
+  legacyAssistantIdentity,
+  projectRuntimeItems,
+} from '../core/stream/runtime-items.ts';
+
+/**
+ * Reduce a list of session events into an identity-aware item snapshot.
+ * Canonical `Metadata.RuntimeItem` events keep their full identity; legacy
+ * `assistant_stream_snapshot`/`assistant_message` collapse onto the synthesized
+ * per-invocation assistant item (snapshot -> replace, message -> complete).
+ */
+export function buildRuntimeItemsFromSessionEvents(events = []) {
+  const reducer = new RuntimeItemReducer();
+  for (const event of Array.isArray(events) ? events : []) {
+    const operation = sessionEventToItemOperation(event);
+    if (operation) {
+      reducer.apply(operation);
+    }
+  }
+  return reducer.snapshot();
+}
 
 /**
  * @typedef {import('../components/chat/types.js').Message} Message

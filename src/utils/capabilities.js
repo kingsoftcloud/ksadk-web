@@ -1,3 +1,5 @@
+import { decodeCapabilityMatrixValue } from '../types/runtime-capability-matrix.js';
+
 const DEFAULT_API_FORMATS = ['responses', 'chat_completions'];
 const NATIVE_DASHBOARD_FRAMEWORKS = new Map([
   ['openclaw', 'OpenClaw'],
@@ -74,6 +76,16 @@ function normalizeApprovalPolicy(value) {
   };
 }
 
+function normalizeRuntimeCapabilityMatrix(value) {
+  if (value === undefined || value === null) return undefined;
+  try {
+    return decodeCapabilityMatrixValue(value);
+  } catch {
+    // A malformed or legacy-shaped capability must never enable controls.
+    return undefined;
+  }
+}
+
 function normalizeHostedChatTransports(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -137,9 +149,20 @@ export function normalizeCapabilities(bootstrap) {
   );
   const nativeTerminalEnabled = normalizeEnabled(nativeTerminal.Enabled, defaultNativeTerminal);
   const runLifecycleEnabled = normalizeEnabled(runLifecycle.Enabled, hostedChatEnabled);
+  const interactionV1 = Boolean(
+    rawCapabilities.interaction_v1?.enabled
+    ?? rawCapabilities.Interaction?.V1
+    ?? rawCapabilities.InteractionV1
+    ?? false,
+  );
+  const runtimeCapabilityMatrix = normalizeRuntimeCapabilityMatrix(
+    rawCapabilities.RuntimeCapabilityMatrix ?? data.RuntimeCapabilityMatrix,
+  );
 
   return {
     ...rawCapabilities,
+    RuntimeCapabilityMatrix: runtimeCapabilityMatrix,
+    InteractionV1: interactionV1,
     HostedChat: {
       Enabled: hostedChatEnabled,
       ApiFormats: normalizeApiFormats(hostedChat.ApiFormats || apiFormats),

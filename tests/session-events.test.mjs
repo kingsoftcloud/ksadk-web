@@ -1519,3 +1519,110 @@ test('session event utils restore accepted memory saves as completed tools', asy
   assert.equal(messages.length, 1);
   assert.equal(messages[0].tools.save_memory.status, 'completed');
 });
+
+test('session event reducer maps canonical Metadata.RuntimeItem by identity', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  assert.equal(typeof sessionEvents.buildRuntimeItemsFromSessionEvents, 'function');
+
+  const snapshot = sessionEvents.buildRuntimeItemsFromSessionEvents([
+    {
+      EventId: 'evt-1',
+      EventType: 'assistant_stream_delta',
+      InvocationId: 'inv-1',
+      Content: { role: 'model', parts: [{ text: 'hel' }] },
+      Metadata: {
+        RuntimeItem: {
+          RunId: 'run-1',
+          ScopeId: 'scope-1',
+          ItemId: 'item-1',
+          PartId: 'text-0',
+          Operation: 'append',
+          SourceEventId: 'native-1',
+        },
+      },
+    },
+    {
+      EventId: 'evt-2',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-1',
+      Content: { role: 'model', parts: [{ text: 'hello' }] },
+      Metadata: {
+        RuntimeItem: {
+          RunId: 'run-1',
+          ScopeId: 'scope-1',
+          ItemId: 'item-1',
+          PartId: 'text-0',
+          Operation: 'replace',
+          SourceEventId: 'native-2',
+        },
+      },
+    },
+  ]);
+
+  assert.equal(snapshot.items.length, 1);
+  assert.equal(snapshot.items[0].itemId, 'item-1');
+  assert.equal(snapshot.items[0].parts[0].text, 'hello');
+  assert.equal(snapshot.items[0].status, 'completed');
+});
+
+test('session event reducer preserves identical text from distinct RuntimeItem ids', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+
+  const makeItem = (itemId, eventId) => ({
+    EventId: eventId,
+    EventType: 'assistant_message',
+    InvocationId: 'inv-1',
+    Content: { role: 'model', parts: [{ text: 'same' }] },
+    Metadata: {
+      RuntimeItem: {
+        RunId: 'run-1',
+        ScopeId: 'scope-1',
+        ItemId: itemId,
+        PartId: 'text-0',
+        Operation: 'replace',
+        SourceEventId: eventId,
+      },
+    },
+  });
+  const snapshot = sessionEvents.buildRuntimeItemsFromSessionEvents([
+    makeItem('item-1', 'evt-1'),
+    makeItem('item-2', 'evt-2'),
+  ]);
+  assert.deepEqual(
+    snapshot.items.map((item) => item.parts[0].text),
+    ['same', 'same'],
+  );
+});
+
+test('session event reducer collapses legacy snapshot then final onto one synthesized item', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+
+  const snapshot = sessionEvents.buildRuntimeItemsFromSessionEvents([
+    {
+      EventId: 'evt-snap-1',
+      EventType: 'assistant_stream_snapshot',
+      InvocationId: 'inv-1',
+      Content: { role: 'model', parts: [{ text: 'hel' }] },
+    },
+    {
+      EventId: 'evt-snap-2',
+      EventType: 'assistant_stream_snapshot',
+      InvocationId: 'inv-1',
+      Content: { role: 'model', parts: [{ text: 'hello' }] },
+    },
+    {
+      EventId: 'evt-final',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-1',
+      Content: { role: 'model', parts: [{ text: 'hello' }] },
+    },
+  ]);
+
+  assert.equal(snapshot.items.length, 1);
+  assert.equal(snapshot.items[0].itemId, 'inv-1:legacy-assistant');
+  assert.equal(snapshot.items[0].parts[0].text, 'hello');
+  assert.equal(snapshot.items[0].status, 'completed');
+});

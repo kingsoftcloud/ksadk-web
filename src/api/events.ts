@@ -29,3 +29,21 @@ export async function listSessionEvents(
     Limit: Number.isFinite(Number(data.Limit)) ? Number(data.Limit) : opts?.limit ?? data.Events?.length ?? 0,
   };
 }
+
+import { streamGetAction } from './client.js';
+
+/**
+ * agent-kernel/v1 session event subscription. `afterSeq` is the unified
+ * Session seq cursor; reconnects resume from the last observed seq.
+ */
+export async function subscribeSessionEvents(
+  sessionId: string,
+  afterSeq: number,
+  options?: { signal?: AbortSignal },
+): Promise<ReadableStream<Uint8Array>> {
+  return streamGetAction(
+    'SubscribeSessionEvents',
+    { SessionId: sessionId, after_seq: String(afterSeq) },
+    options,
+  );
+}

@@ -3,6 +3,8 @@ import { normalizeCapabilities } from '../utils/capabilities.js';
 import type { RuntimeApiFormat } from '../types/api.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 
+export type BootstrapStatus = 'loading' | 'ready' | 'auth-required' | 'error';
+
 export type BootstrapState = {
   agentId: string;
   agentName: string;
@@ -11,6 +13,8 @@ export type BootstrapState = {
   apiFormats: RuntimeApiFormat[];
   accessMode: string;
   workspaceFiles: Record<string, unknown> | null;
+  status: BootstrapStatus;
+  errorMessage: string;
 };
 
 export type BootstrapActions = {
@@ -21,6 +25,7 @@ export type BootstrapActions = {
   setApiFormats: (formats: RuntimeApiFormat[]) => void;
   setAccessMode: (mode: string) => void;
   setWorkspaceFiles: (files: Record<string, unknown> | null) => void;
+  setStatus: (status: BootstrapStatus, errorMessage?: string) => void;
 };
 
 export type BootstrapStore = BootstrapState & BootstrapActions;
@@ -33,6 +38,8 @@ export const useBootstrapStore = create<BootstrapStore>()((set) => ({
   apiFormats: ['responses', 'chat_completions'],
   accessMode: 'Owner',
   workspaceFiles: null,
+  status: 'loading',
+  errorMessage: '',
   setAgentId: (id) => set({ agentId: id }),
   setAgentName: (name) => set({ agentName: name }),
   setAgentFramework: (framework) => set({ agentFramework: framework }),
@@ -40,4 +47,5 @@ export const useBootstrapStore = create<BootstrapStore>()((set) => ({
   setApiFormats: (formats) => set({ apiFormats: formats }),
   setAccessMode: (mode) => set({ accessMode: mode }),
   setWorkspaceFiles: (files) => set({ workspaceFiles: files }),
+  setStatus: (status, errorMessage = '') => set({ status, errorMessage }),
 }));

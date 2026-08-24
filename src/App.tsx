@@ -26,6 +26,7 @@ import { useResponsiveViewport } from './hooks/useResponsiveViewport';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useRunAgent } from './hooks/useRunAgent';
 import { useFeedback } from './hooks/useFeedback';
+import { useInteractions } from './hooks/useInteractions.js';
 import { useSessionLifecycle } from './hooks/useSessionLifecycle';
 import { ConnectedSidebar } from './components/chat/ConnectedSidebar';
 import { ConnectedMessageList } from './components/chat/ConnectedMessageList';
@@ -35,6 +36,7 @@ import { NativeRuntimeLauncher } from './components/native/NativeRuntimeLauncher
 import { WorkspacePanelContainer } from './components/workspace/WorkspacePanelContainer';
 import { ApiFacadeImpl } from './core/api/facade.js';
 import type { UiCapabilities } from './types/capabilities.js';
+import type { RuntimeExecutionMode } from './core/run/types.js';
 import type { BootstrapWorkspaceFiles } from './types/bootstrap.js';
 import type { RuntimeApiFormat } from './types/api.js';
 import type { ThinkingMode } from './stores/model.js';
@@ -85,13 +87,19 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   const agentFramework = useBootstrapStore((s: BootstrapStore) => s.agentFramework);
   const workspaceFiles = useBootstrapStore((s: BootstrapStore) => s.workspaceFiles) as BootstrapWorkspaceFiles | null;
   const accessMode = useBootstrapStore((s: BootstrapStore) => s.accessMode);
+  const bootstrapStatus = useBootstrapStore((s: BootstrapStore) => s.status);
+  const bootstrapErrorMessage = useBootstrapStore((s: BootstrapStore) => s.errorMessage);
   const workspacePanelOpen = useUIStore((s: UIStore) => s.workspacePanelOpen);
   const workspacePanelWidth = useUIStore((s: UIStore) => s.workspacePanelWidth);
   const workspacePanelFullscreen = useUIStore((s: UIStore) => s.workspacePanelFullscreen);
   const apiFormats = useBootstrapStore((s: BootstrapStore) => s.apiFormats) as RuntimeApiFormat[];
   const uiCapabilities = useBootstrapStore((s: BootstrapStore) => s.capabilities) as UiCapabilities;
   const artifactVisible = useArtifactStore((s: ArtifactStore) => s.visible && Boolean(s.content));
-  const queuedDraftRef = useRef<Array<{ text: string; attachments: File[] }>>([]);
+  const queuedDraftRef = useRef<Array<{
+    text: string;
+    attachments: File[];
+    executionMode?: RuntimeExecutionMode;
+  }>>([]);
   const disconnectRunRef = useRef<(() => void) | null>(null);
 
   const { isMobile, viewportHeight } = useResponsiveViewport();
@@ -161,6 +169,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     onRunSettled: refreshSettledRun,
   });
 
+
   useEffect(() => {
     disconnectRunRef.current = disconnectRun;
   }, [disconnectRun]);
@@ -204,6 +213,41 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     isStreaming,
     api,
     submitDraft,
+  });
+  // The 0.3.1 fallback callbacks are captured once inside useInteractions'
+  // useState initializer; route them through refs so they always invoke the
+  // latest engine/approval closures instead of the first render's.
+  const respondToApprovalRef = useRef(respondToApproval);
+  const respondToAguiApprovalRef = useRef(respondToAguiApproval);
+  useEffect(() => {
+    respondToApprovalRef.current = respondToApproval;
+    respondToAguiApprovalRef.current = respondToAguiApproval;
+  }, [respondToApproval, respondToAguiApproval]);
+
+
+  const {
+    pending: pendingInteractions,
+    records: interactionRecords,
+    respond: respondInteraction,
+    localCatalog,
+  } = useInteractions({
+    agentId,
+    getAgentId: () => agentIdRef.current,
+    currentSessionId,
+    api,
+    interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
+    legacyResponsesApproval: (approvalRequestId, approve) => {
+      respondToApprovalRef.current({ approvalRequestId, approve });
+    },
+    legacyAguiResume: (interruptId, status, payload) => {
+      const engineAccepted = respondToAguiApprovalRef.current({
+        interruptId,
+        approve: status === 'resolved',
+      });
+      void engineAccepted;
+      void payload;
+      return engineAccepted;
+    },
   });
 
   useBootstrap({ fetchSessions });
@@ -276,6 +320,44 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     useUIStore.getState().setWorkspacePanelFullscreen(false);
     useUIStore.getState().setWorkspacePanelOpen(false);
   };
+
+  if (bootstrapStatus !== 'ready') {
+    const authRequired = bootstrapStatus === 'auth-required';
+    const bootstrapContent = (
+      <div className="flex h-[var(--app-height)] min-h-[var(--app-height)] items-center justify-center bg-slate-50 px-6 font-sans text-slate-800 dark:bg-slate-950 dark:text-slate-100">
+        <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-blue-600 dark:bg-blue-950/50">
+            {bootstrapStatus === 'loading' ? '…' : '↗'}
+          </div>
+          <h1 className="text-xl font-semibold">
+            {bootstrapStatus === 'loading'
+              ? '正在连接 Agent'
+              : authRequired
+                ? '需要有效的访问链接'
+                : 'Agent 暂时无法连接'}
+          </h1>
+          {bootstrapStatus !== 'loading' ? (
+            <>
+              <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                {bootstrapErrorMessage}
+                {authRequired
+                  ? ' 请从 AgentEngine 控制台重新打开 Dashboard，或使用 agentengine dashboard open 获取临时链接。'
+                  : ''}
+              </p>
+              <button
+                type="button"
+                className="mt-6 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
+                onClick={() => window.location.reload()}
+              >
+                重新加载
+              </button>
+            </>
+          ) : null}
+        </div>
+      </div>
+    );
+    return RouteShell ? <RouteShell>{bootstrapContent}</RouteShell> : bootstrapContent;
+  }
   const handleWorkspacePanelResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
     if (workspacePanelFullscreen || isMobile) return;
     event.preventDefault();
@@ -379,6 +461,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
               }
               onResumeCheckpoint={resumeCheckpoint}
               onLoadOlderSessionMessages={loadOlderSessionMessages}
+              interactionRecords={interactionRecords}
             />
         <ConnectedComposer
           composerMaxHeight={composerMaxHeight}
@@ -386,8 +469,16 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           stopGeneration={handleStopGeneration}
           cancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
           isMobile={isMobile}
+          attachmentsEnabled={uiCapabilities.Attachments !== false}
           approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
           approvalPolicy={uiCapabilities.ApprovalPolicy}
+          thinkingEnabled={thinkingEnabled}
+          runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}
+          pendingInteractions={pendingInteractions}
+          onRespondInteraction={(input) => {
+            void respondInteraction(input);
+          }}
+          localCatalog={localCatalog}
         />
           </>
         )}

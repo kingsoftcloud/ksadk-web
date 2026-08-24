@@ -20,6 +20,8 @@ import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
+import { createSessionEventCursor } from '../utils/session-event-history.js';
+import { ingestSessionEventRecord } from '../core/interaction/index.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
@@ -104,6 +106,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const currentSessionIdRef = useRef<string | null>(ctx.currentSessionId);
   const agentIdRef = useRef(ctx.agentId);
   const runSubscriptionAbortRef = useRef<AbortController | null>(null);
+  // agent-kernel/v1 unified cursor: only the Session seq dedupes/orders and
+  // drives reconnects; Responses/AG-UI/A2A internal event ids are ignored.
+  const sessionEventCursorRef = useRef(createSessionEventCursor());
   const loadSessionGenerationRef = useRef(0);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
@@ -246,6 +251,35 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                   if (!isCurrentSubscription()) break;
                   if (event.InvocationId && event.InvocationId !== options.invocationId) continue;
 
+                  const kernelSeq = (event as { seq?: unknown }).seq;
+                  if (typeof kernelSeq === 'number') {
+                    // agent-kernel/v1 envelope: fold into the unified cursor.
+                    try {
+                      sessionEventCursorRef.current.accept(event);
+                    } catch (cursorError) {
+                      console.error('[SessionLifecycle] session event cursor conflict:', cursorError);
+                    }
+                    afterSeqId = Math.max(afterSeqId, sessionEventCursorRef.current.reconnectAfterSeq());
+                    dispatchRunEventToStores({
+                      type: 'stream_event',
+                      sessionId: options.sessionId,
+                      event,
+                    });
+                    terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
+                    shouldReloadSession = shouldReloadSession || terminalStatusSeen;
+                    const kernelTerminal = terminalActivityForRunEvent(event);
+                    if (kernelTerminal) {
+                      useStreamingStore.getState().updateActivity({
+                        sessionId: options.sessionId,
+                        status: kernelTerminal.status,
+                        phase: kernelTerminal.phase,
+                        detail: options.invocationId,
+                        countEvent: false,
+                      });
+                    }
+                    continue;
+                  }
+
                   const seqId = Number(event.SeqId || 0);
                   if (Number.isFinite(seqId)) {
                     afterSeqId = Math.max(afterSeqId, seqId);
@@ -365,6 +399,19 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
         const lastSeqId = messagesData.LatestSeqId || 0;
 
+        // Replay recent durable SessionEvents to restore pending
+        // Interaction/v1 records (refresh / replay never re-submits).
+        try {
+          const eventsData = await api.listSessionEvents(sessionId, { limit: 50 });
+          if (isStillCurrentSession()) {
+            for (const record of (eventsData.Events || []) as unknown[]) {
+              ingestSessionEventRecord(record, sessionId);
+            }
+          }
+        } catch (error) {
+          console.warn('[SessionLifecycle] interaction history replay failed:', error);
+        }
+
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
           void api.listSessionCheckpoints({
@@ -434,7 +481,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     },
     [
       api,
-      disconnectRun,
       isMobile,
       loadFeedbackForMessages,
       resetCompaction,
@@ -571,7 +617,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const deleteSession = useCallback(
     async (sessionId: string) => {
       try {
-        await api.deleteSession(sessionId);
+        const result = await api.deleteSession(sessionId);
+        if (result.Deleted === false) {
+          useUIStore.getState().pushToast(
+            '会话暂未删除，云端运行时仍在同步，请稍后重试。',
+            'error',
+          );
+          void fetchSessions(agentId, currentSessionIdRef.current ?? undefined);
+          return;
+        }
         useSessionStore.getState().removeSession(sessionId);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
         if (currentSessionIdRef.current === sessionId) {
@@ -589,6 +643,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       } catch (error) {
         if (error instanceof CancelledError) return;
         console.error('Failed to delete session', error);
+        useUIStore.getState().pushToast('删除会话失败，请稍后重试。', 'error');
       }
     },
     [agentId, api, disconnectRun, fetchSessions],
