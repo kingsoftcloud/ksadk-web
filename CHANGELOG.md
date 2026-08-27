@@ -18,6 +18,15 @@
 - Keep canonical approvals without a durable `revision` read-only. Consumers
   must not guess a revision or submit them through the revision-CAS Interaction
   API until the server supplies an authoritative value.
+- Make attachment upload and model selection first-class canonical inputs in
+  Hosted UI. Unsupported inputs and oversized files fail before upload or turn
+  submission instead of silently degrading to legacy `RunAgent` behavior.
+- Prove the headless entrypoint from a minimal independent consumer across two
+  turns, cursor reconnect, text/tool/approval/unknown-item rendering, and
+  revision-CAS approval submission.
+- Add a repeatable release preflight that runs unit, Node contract, lint, all
+  production builds, canonical Conversation browser E2E, provenance checks,
+  npm packing, and a clean tarball-install public API smoke test.
 
 ## 0.3.2 - 2026-08-21
 

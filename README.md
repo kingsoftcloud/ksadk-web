@@ -141,11 +141,32 @@ Before creating a release or dispatching the workflow, verify the payload:
 
 ```bash
 npm ci
-npm test
-node --test tests/*.test.mjs
-npm run build:all
-npm pack --dry-run --access public
+npx playwright install chromium
+npm run release:preflight
 ```
+
+The preflight is intentionally stricter than a development build: it requires
+a clean worktree, checks the frozen Git source recorded in
+`RELEASE_PROVENANCE.json`, rejects content changes under an already tagged
+version, runs the canonical Conversation browser flow, creates the real npm
+tarball, installs it into a disposable consumer, and imports the public
+`@kingsoftcloud/ksadk-web/conversation` API. During development only, use
+`npm run release:preflight -- --allow-unreleased --allow-dirty` to rehearse the
+same tests without claiming the current commit is a releasable source.
+
+After the next version is set and all code is committed, freeze its provenance
+from that clean commit before the final attestation commit:
+
+```bash
+npm run release:provenance -- generate
+git add RELEASE_PROVENANCE.json
+git commit -m "chore(release): attest ksadk-web source"
+npm run release:preflight
+```
+
+The generator refuses dirty worktrees and versions whose `vX.Y.Z` tag already
+exists. Never edit `source_commit` by hand or regenerate provenance for an
+already published version.
 
 The publish workflow checks whether `package.json`'s exact version is already
 present on npm. Existing versions are skipped because npm packages are
