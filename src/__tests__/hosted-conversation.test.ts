@@ -208,7 +208,10 @@ describe('Hosted UI canonical ConversationItem projection', () => {
     });
   });
 
-  it('keeps an approval without a durable revision read-only', async () => {
+  it.each([
+    { label: 'missing', revision: {} },
+    { label: 'zero', revision: { revision: 0 } },
+  ])('keeps an approval with a $label durable revision read-only', async ({ revision }) => {
     const client = new HttpConversationClient({
       fetch: vi.fn(async () => stream([
         frame(1, item(
@@ -220,6 +223,7 @@ describe('Hosted UI canonical ConversationItem projection', () => {
             interactionId: 'approval-without-revision',
             kind: 'command',
             prompt: 'Allow command?',
+            ...revision,
           },
           { lifecycle: 'pending' },
         )),

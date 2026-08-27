@@ -139,7 +139,7 @@ function interactionFromItem(item: ConversationItem): Interaction | null {
   const revision = item.payload.revision;
   // SubmitInteraction is revision-CAS. Missing revisions are intentionally
   // read-only; inventing revision 0 could approve the wrong durable request.
-  if (!interactionId || !Number.isInteger(revision) || Number(revision) < 0) {
+  if (!interactionId || !Number.isInteger(revision) || Number(revision) < 1) {
     return null;
   }
   const detail = displayValue(item.payload.detail);
