@@ -74,14 +74,14 @@ test('published JSON schema describes the executable provenance contract', async
   assert.match(DIGEST, new RegExp(schema.properties.interaction_contract_digest.pattern));
 });
 
-test('the unreleased branch preserves the immutable tagged provenance', async () => {
+test('the 0.3.3 candidate remains untagged until the protected release', async () => {
   const result = await checkReleaseProvenance({
     repoRoot: resolve(import.meta.dirname, '..'),
     allowUnreleased: true,
   });
-  assert.equal(result.tag, 'v0.3.2');
-  assert.equal(result.tagExists, true);
-  assert.equal(result.currentAheadOfPublishedTag, true);
+  assert.equal(result.tag, 'v0.3.3');
+  assert.equal(result.tagExists, false);
+  assert.equal(result.currentAheadOfPublishedTag, false);
 });
 
 test('formal provenance generation uses a clean frozen commit and cannot re-sign a tag', async () => {
