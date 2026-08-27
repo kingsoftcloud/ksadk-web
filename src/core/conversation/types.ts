@@ -214,3 +214,13 @@ export type ConversationStreamTurnOptions = ConversationStreamObserver & {
   input: ConversationInput;
   signal?: AbortSignal;
 };
+
+/** Minimal injectable transport used by Hosted UI and custom frontends. */
+export interface ConversationClient {
+  getSurface(
+    agentId: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ConversationSurfaceBootstrap>;
+  streamTurn(options: ConversationStreamTurnOptions): Promise<ConversationStreamResult>;
+}

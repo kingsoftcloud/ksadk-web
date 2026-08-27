@@ -83,6 +83,12 @@ event endpoint. It does not accept tokens, cookies, credential modes, or
 provider-specific request fields; applications keep authentication at their
 same-origin server boundary or in an injected transport.
 
+The bundled Hosted UI uses this same client and reducer when the server returns
+a valid `ConversationSurface`. HTTP 404 is the compatibility signal for the
+existing Responses / AG-UI / legacy path. A declared but invalid or unavailable
+surface fails closed, and unknown item kinds or schema versions render as
+passive fallback cards rather than provider-specific UI.
+
 ## Release Contract
 
 Consumers should record the resolved KSADK Web package version and lockfile

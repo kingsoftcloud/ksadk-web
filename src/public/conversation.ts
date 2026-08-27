@@ -25,6 +25,7 @@ export type {
   ConversationCapabilityMode,
   ConversationClientErrorCode,
   ConversationClientErrorDetails,
+  ConversationClient,
   ConversationClientOptions,
   ConversationFetch,
   ConversationFallbackCard,

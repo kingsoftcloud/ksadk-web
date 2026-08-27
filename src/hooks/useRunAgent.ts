@@ -12,6 +12,11 @@ import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
+import { HttpConversationClient } from '../core/conversation/index.js';
+
+// Same-origin, credential-free canonical transport. It is Node/SSR safe: the
+// client resolves global fetch lazily only when a browser turn starts.
+const hostedConversationClient = new HttpConversationClient();
 
 type QueuedDraft = {
   text: string;
@@ -71,6 +76,7 @@ export function useRunAgent(ctx: RunAgentContext) {
         ),
       }),
       checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
+      conversationClient: hostedConversationClient,
     });
   }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities]);
 

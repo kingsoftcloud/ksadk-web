@@ -23,6 +23,17 @@ import { KernelRunEventTranslator, peekKernelReceipt } from '../stream/kernel-ev
 import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
+import {
+  ConversationClientError,
+  buildConversationInput,
+  preflightConversationInput,
+  surfacePermitsInput,
+} from '../conversation/index.js';
+import type {
+  ConversationInput,
+  ConversationInputPart,
+  ConversationSurfaceBootstrap,
+} from '../conversation/types.js';
 
 type StreamConsumeResult = { terminalStatus?: string };
 
@@ -268,6 +279,72 @@ export class RunEngineImpl implements RunEngine {
         }
         this.activeSessionId = sessionId;
 
+        const invocationId = createInvocationId();
+        useStreamingStore.getState().setCurrentRunId(invocationId);
+        useStreamingStore.getState().setActiveInvocationId(invocationId);
+        useStreamingStore.getState().setLastSeqId(0);
+
+        const conversationBootstrap = !isResponsesResume
+          ? await this.getConversationBootstrap(sessionId)
+          : null;
+        if (conversationBootstrap && this.config.conversationClient) {
+          const input = await this.buildCanonicalConversationInput(
+            conversationBootstrap,
+            sessionId,
+            invocationId,
+            draft,
+          );
+          this.setStage('connecting');
+          this.emit({
+            type: 'activity',
+            phase: '连接会话运行时',
+            status: 'connecting',
+            countEvent: false,
+          });
+          this.setStage('streaming');
+          this.emit({
+            type: 'activity',
+            phase: '等待会话输出',
+            status: 'waiting',
+            countEvent: false,
+          });
+          const result = await this.config.conversationClient.streamTurn({
+            bootstrap: conversationBootstrap,
+            input,
+            signal: this.abortController?.signal,
+            onUpdate: (snapshot) => {
+              if (snapshot.runId) {
+                useStreamingStore.getState().setCurrentRunId(snapshot.runId);
+                useStreamingStore.getState().setActiveInvocationId(snapshot.runId);
+              }
+              this.emit({
+                type: 'conversation_snapshot',
+                result: snapshot,
+                sessionId,
+              });
+            },
+          });
+          if (result.presentation.terminalStatus === 'failed') {
+            this.setStage('error');
+            this.emit({
+              type: 'activity',
+              phase: '运行失败',
+              status: 'failed',
+              countEvent: false,
+            });
+            return;
+          }
+          this.setStage('completing');
+          this.emit({
+            type: 'activity',
+            phase: '运行完成',
+            status: 'completed',
+            countEvent: false,
+          });
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
+
         const fileParts = await this.uploadFiles(draft, isResponsesResume);
 
         this.setStage('connecting');
@@ -278,11 +355,6 @@ export class RunEngineImpl implements RunEngine {
 
         const protocol = createProtocol(apiFormat);
         const protocolState = protocol.createState();
-
-        const invocationId = createInvocationId();
-        useStreamingStore.getState().setCurrentRunId(invocationId);
-        useStreamingStore.getState().setActiveInvocationId(invocationId);
-        useStreamingStore.getState().setLastSeqId(0);
 
         const hostedTransport = this.config.hostedChatTransport;
         const useAgui = !isResponsesResume
@@ -373,7 +445,8 @@ export class RunEngineImpl implements RunEngine {
         this.emit({ type: 'stream_ended' });
       } catch (error) {
         this.failCompaction();
-        const isAbort = error instanceof DOMException && error.name === 'AbortError';
+        const isAbort = (error instanceof DOMException && error.name === 'AbortError')
+          || (error instanceof ConversationClientError && error.code === 'conversation_aborted');
         if (!isAbort) {
           console.error('[RunEngine] start() error:', error);
           const isNetwork = error instanceof TypeError && error.message.includes('fetch');
@@ -752,6 +825,135 @@ export class RunEngineImpl implements RunEngine {
       }
       return null;
     }
+  }
+
+  private async getConversationBootstrap(
+    sessionId: string,
+  ): Promise<ConversationSurfaceBootstrap | null> {
+    const client = this.config.conversationClient;
+    if (!client) return null;
+    try {
+      return await client.getSurface(this.config.agentId, sessionId, {
+        signal: this.abortController?.signal,
+      });
+    } catch (error) {
+      // Absence is the only compatibility signal. A malformed contract,
+      // network failure or server error must not silently bypass admission by
+      // falling through to a different protocol.
+      if (error instanceof ConversationClientError
+        && error.code === 'conversation_http_error'
+        && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async buildCanonicalConversationInput(
+    bootstrap: ConversationSurfaceBootstrap,
+    sessionId: string,
+    invocationId: string,
+    draft: {
+      text: string;
+      attachments: File[];
+      executionMode?: RuntimeExecutionMode;
+    },
+  ): Promise<ConversationInput> {
+    const parts: ConversationInputPart[] = [];
+    const text = draft.text.trim();
+    if (text) parts.push({ kind: 'text', text });
+
+    for (const file of draft.attachments) {
+      const capability = file.type.startsWith('image/')
+        ? 'attachment.image'
+        : 'attachment.file';
+      if (!surfacePermitsInput(bootstrap.surface, capability)) {
+        throw new ConversationClientError(
+          'conversation_input_unsupported',
+          'Conversation attachment is not declared by the active surface.',
+          { capability },
+        );
+      }
+    }
+    if (draft.attachments.length > 0) {
+      parts.push(...await this.uploadCanonicalAttachments(draft.attachments));
+    }
+
+    const thinkingMode = normalizeThinkingMode(this.config.thinkingMode);
+    const input = buildConversationInput({
+      inputId: `input:${invocationId}`,
+      sessionId,
+      idempotencyKey: `conversation:${invocationId}`,
+      parts,
+      ...(this.config.selectedModel
+        && surfacePermitsInput(bootstrap.surface, 'model.select')
+        ? { modelRef: this.config.selectedModel }
+        : {}),
+      ...(thinkingMode !== 'auto'
+        && surfacePermitsInput(bootstrap.surface, 'reasoning.effort')
+        ? { reasoning: thinkingMode }
+        : {}),
+      ...(this.config.permissionMode
+        && surfacePermitsInput(bootstrap.surface, 'approval')
+        ? { approvalMode: this.config.permissionMode }
+        : {}),
+      ...(draft.executionMode === 'plan'
+        ? { collaborationMode: 'plan' as const }
+        : {}),
+      ...(draft.executionMode === 'goal' && text
+        ? { goalObjective: text }
+        : {}),
+    });
+    return preflightConversationInput(bootstrap.surface, input);
+  }
+
+  private async uploadCanonicalAttachments(
+    attachments: File[],
+  ): Promise<ConversationInputPart[]> {
+    this.setStage('uploading-files');
+    const parts: ConversationInputPart[] = [];
+    for (const file of attachments) {
+      if (file.size > 100 * 1024 * 1024) {
+        throw new ConversationClientError(
+          'conversation_input_unsupported',
+          'Conversation attachment exceeds the Hosted UI upload limit.',
+          {
+            capability: file.type.startsWith('image/')
+              ? 'attachment.image'
+              : 'attachment.file',
+          },
+        );
+      }
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('AgentId', this.config.agentId);
+      let uploadData;
+      try {
+        uploadData = await this.api.uploadFile(formData, {
+          signal: this.abortController?.signal,
+        });
+      } catch (cause) {
+        throw new ConversationClientError(
+          'conversation_http_error',
+          'Conversation attachment upload failed.',
+          { cause },
+        );
+      }
+      const attachmentRef = uploadData?.FileData?.fileUri;
+      if (!attachmentRef) {
+        throw new ConversationClientError(
+          'conversation_contract_mismatch',
+          'Conversation attachment upload did not return an attachment reference.',
+        );
+      }
+      parts.push({
+        kind: 'attachment',
+        attachmentRef,
+        mediaType: uploadData.FileData.mimeType || file.type || 'application/octet-stream',
+        name: uploadData.FileData.displayName || file.name,
+      });
+    }
+    return parts;
   }
 
   private async uploadFiles(draft: { attachments: File[] }, isResponsesResume: boolean): Promise<Array<Record<string, unknown>>> {
