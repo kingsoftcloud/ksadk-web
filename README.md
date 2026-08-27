@@ -75,19 +75,33 @@ const result = await client.streamTurn({
     idempotencyKey: 'turn-id',
     parts: [{ kind: 'text', text: 'Hello' }],
   }),
+  onUpdate(snapshot) {
+    // Render snapshot.presentation. It is already reduced by canonical item
+    // identity and is safe to replace after a reconnect or replay.
+    renderConversation(snapshot.presentation)
+  },
 })
 ```
 
 The client submits a turn once and only reconnects through the canonical Run
-event endpoint. It does not accept tokens, cookies, credential modes, or
-provider-specific request fields; applications keep authentication at their
-same-origin server boundary or in an injected transport.
+event endpoint. `onUpdate` and the final result use the same reducer: equal text
+from different item identities is retained, replayed `(itemId, sourceEventId)`
+pairs are idempotent, and a terminal item never regresses. It does not accept
+tokens, cookies, credential modes, or provider-specific request fields;
+applications keep authentication at their same-origin server boundary or in
+an injected transport.
 
 The bundled Hosted UI uses this same client and reducer when the server returns
 a valid `ConversationSurface`. HTTP 404 is the compatibility signal for the
 existing Responses / AG-UI / legacy path. A declared but invalid or unavailable
 surface fails closed, and unknown item kinds or schema versions render as
 passive fallback cards rather than provider-specific UI.
+
+Approval and structured-input items are actionable only when their canonical
+payload carries the server's durable, non-negative `revision`. Without that
+value the shared Hosted UI intentionally renders the item read-only: it never
+guesses revision `0` or bypasses the Interaction API's revision-CAS contract.
+Likewise, unknown payloads and unsafe artifact URIs remain passive content.
 
 ## Release Contract
 

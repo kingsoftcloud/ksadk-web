@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Headless conversation surface
+
+- Add the Node/SSR-safe `@kingsoftcloud/ksadk-web/conversation` entrypoint with
+  strict ConversationSurface/Input/Item v1 decoders, input preflight, bounded
+  HTTP/SSE reconnect, passive renderer data, and the shared identity reducer.
+- Route the bundled Hosted UI through the same conversation client and reducer
+  when a valid Surface is advertised. A Surface HTTP 404 keeps the existing
+  Responses / AG-UI / legacy path; malformed surfaces and server failures do
+  not silently bypass the declared contract.
+- Preserve different item identities even when their text is equal, ignore
+  replayed `(itemId, sourceEventId)` pairs, keep terminal items monotonic, and
+  safely downgrade unknown item kinds or schema versions to passive fallback
+  content.
+- Keep canonical approvals without a durable `revision` read-only. Consumers
+  must not guess a revision or submit them through the revision-CAS Interaction
+  API until the server supplies an authoritative value.
+
 ## 0.3.2 - 2026-08-21
 
 Release candidate for the durable Interaction/v1 web experience. This is the
