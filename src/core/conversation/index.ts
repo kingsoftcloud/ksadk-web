@@ -1,8 +1,13 @@
 export {
+  buildConversationInput,
   decodeConversationItem,
+  decodeConversationInput,
   decodeConversationSurface,
+  preflightConversationInput,
   surfacePermitsInput,
 } from './contracts.js';
+export { HttpConversationClient } from './client.js';
+export { ConversationClientError } from './errors.js';
 export {
   ConversationItemReducer,
   createConversationItemState,
@@ -13,7 +18,15 @@ export type {
   ConversationArtifact,
   ConversationCapability,
   ConversationCapabilityMode,
+  ConversationClientErrorCode,
+  ConversationClientErrorDetails,
+  ConversationClientOptions,
+  ConversationFetch,
   ConversationFallbackCard,
+  ConversationInput,
+  ConversationInputDraft,
+  ConversationInputPart,
+  ConversationAttachmentPart,
   ConversationItem,
   ConversationItemKind,
   ConversationItemLifecycle,
@@ -23,5 +36,10 @@ export type {
   ConversationPresentation,
   ConversationProjectionOptions,
   ConversationSurface,
+  ConversationSurfaceBootstrap,
+  ConversationStreamObserver,
+  ConversationStreamResult,
+  ConversationStreamTurnOptions,
+  ConversationTextPart,
   ConversationTextPresentation,
 } from './types.js';

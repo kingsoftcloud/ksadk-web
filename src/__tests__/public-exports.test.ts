@@ -27,9 +27,13 @@ describe('public package entrypoints', () => {
   });
 
   it('exports the headless conversation contract as a dedicated entrypoint', () => {
+    expect(typeof conversation.buildConversationInput).toBe('function');
+    expect(typeof conversation.decodeConversationInput).toBe('function');
     expect(typeof conversation.decodeConversationSurface).toBe('function');
     expect(typeof conversation.decodeConversationItem).toBe('function');
     expect(typeof conversation.ConversationItemReducer).toBe('function');
+    expect(typeof conversation.HttpConversationClient).toBe('function');
+    expect(typeof conversation.ConversationClientError).toBe('function');
     expect(typeof conversation.projectConversationItems).toBe('function');
   });
 });

@@ -2,13 +2,19 @@
  * Headless ConversationSurface/ConversationItem v1 entrypoint.
  *
  * This module is safe to import in Node/SSR environments: it intentionally
- * has no React, DOM, transport, or application-shell dependency.
+ * has no React, DOM, or application-shell dependency. Its optional reference
+ * transport uses only injected/global Fetch, Web Streams, and TextDecoder.
  */
 export {
   ConversationItemReducer,
+  ConversationClientError,
+  HttpConversationClient,
+  buildConversationInput,
   createConversationItemState,
   decodeConversationItem,
+  decodeConversationInput,
   decodeConversationSurface,
+  preflightConversationInput,
   projectConversationItems,
   reduceConversationItem,
   surfacePermitsInput,
@@ -17,7 +23,15 @@ export type {
   ConversationArtifact,
   ConversationCapability,
   ConversationCapabilityMode,
+  ConversationClientErrorCode,
+  ConversationClientErrorDetails,
+  ConversationClientOptions,
+  ConversationFetch,
   ConversationFallbackCard,
+  ConversationInput,
+  ConversationInputDraft,
+  ConversationInputPart,
+  ConversationAttachmentPart,
   ConversationItem,
   ConversationItemKind,
   ConversationItemLifecycle,
@@ -27,5 +41,10 @@ export type {
   ConversationPresentation,
   ConversationProjectionOptions,
   ConversationSurface,
+  ConversationSurfaceBootstrap,
+  ConversationStreamObserver,
+  ConversationStreamResult,
+  ConversationStreamTurnOptions,
+  ConversationTextPart,
   ConversationTextPresentation,
 } from '../core/conversation/index.js';

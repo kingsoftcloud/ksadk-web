@@ -52,6 +52,37 @@ The npm package exposes these stable entrypoints:
 Hosted UI should import the shared shell from the package and keep private
 auth, routing, feature flags, Docker, nginx, and Helm logic in its own repo.
 
+### Headless conversation client
+
+`@kingsoftcloud/ksadk-web/conversation` provides strict
+`ConversationSurface/Input/Item` decoders, the identity reducer, passive
+renderer data, and a small HTTP/SSE reference client. It has no React or DOM
+runtime dependency and can be imported by Node/SSR applications.
+
+```ts
+import {
+  HttpConversationClient,
+  buildConversationInput,
+} from '@kingsoftcloud/ksadk-web/conversation'
+
+const client = new HttpConversationClient()
+const bootstrap = await client.getSurface('agent-id', 'session-id')
+const result = await client.streamTurn({
+  bootstrap,
+  input: buildConversationInput({
+    inputId: 'input-id',
+    sessionId: 'session-id',
+    idempotencyKey: 'turn-id',
+    parts: [{ kind: 'text', text: 'Hello' }],
+  }),
+})
+```
+
+The client submits a turn once and only reconnects through the canonical Run
+event endpoint. It does not accept tokens, cookies, credential modes, or
+provider-specific request fields; applications keep authentication at their
+same-origin server boundary or in an injected transport.
+
 ## Release Contract
 
 Consumers should record the resolved KSADK Web package version and lockfile

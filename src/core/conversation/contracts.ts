@@ -7,7 +7,11 @@ import type {
   ConversationItemOperation,
   ConversationItemVisibility,
   ConversationSurface,
+  ConversationInput,
+  ConversationInputDraft,
+  ConversationInputPart,
 } from './types.js';
+import { ConversationClientError } from './errors.js';
 
 const API_VERSION = 'conversation.ksadk.io/v1';
 const CAPABILITY_NAME = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -48,6 +52,29 @@ const VISIBILITIES: ReadonlySet<ConversationItemVisibility> = new Set([
   'internal',
   'hidden',
 ]);
+const INPUT_KEYS = new Set([
+  'apiVersion',
+  'kind',
+  'inputId',
+  'sessionId',
+  'idempotencyKey',
+  'parts',
+  'modelRef',
+  'reasoning',
+  'approvalMode',
+  'collaborationMode',
+  'goalObjective',
+  'extensions',
+]);
+const TEXT_PART_KEYS = new Set(['kind', 'text']);
+const ATTACHMENT_PART_KEYS = new Set([
+  'kind',
+  'attachmentRef',
+  'mediaType',
+  'name',
+]);
+const APPROVAL_MODES = new Set(['ask', 'risk', 'full']);
+const COLLABORATION_MODES = new Set(['default', 'plan']);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -69,6 +96,151 @@ function optionalBoundedString(
     || (typeof value === 'string'
       && value.length <= maxLength
       && (allowEmpty || value.length > 0));
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: Set<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function decodeInputPart(value: unknown): ConversationInputPart | null {
+  const part = record(value);
+  if (!part || typeof part.kind !== 'string') return null;
+  if (part.kind === 'text') {
+    if (!hasOnlyKeys(part, TEXT_PART_KEYS) || !boundedString(part.text, 131_072)) {
+      return null;
+    }
+    return { kind: 'text', text: part.text };
+  }
+  if (part.kind === 'attachment') {
+    if (!hasOnlyKeys(part, ATTACHMENT_PART_KEYS)
+      || !boundedString(part.attachmentRef, 2_048)
+      || !boundedString(part.mediaType, 256)
+      || !optionalBoundedString(part.name, 1_024, true)) {
+      return null;
+    }
+    return {
+      kind: 'attachment',
+      attachmentRef: part.attachmentRef,
+      mediaType: part.mediaType,
+      ...(part.name === undefined ? {} : { name: part.name as string | null }),
+    };
+  }
+  return null;
+}
+
+function decodeExtensions(value: unknown): Record<string, unknown> | null {
+  if (value === undefined) return {};
+  const extensions = record(value);
+  if (!extensions || Object.keys(extensions).some((key) => (
+    !CAPABILITY_NAME.test(key) || !key.includes('.')
+  ))) {
+    return null;
+  }
+  return { ...extensions };
+}
+
+/** Decode the strict, provider-neutral ConversationInput/v1 contract. */
+export function decodeConversationInput(value: unknown): ConversationInput | null {
+  const raw = record(value);
+  if (!raw
+    || !hasOnlyKeys(raw, INPUT_KEYS)
+    || raw.apiVersion !== API_VERSION
+    || raw.kind !== 'ConversationInput'
+    || !boundedString(raw.inputId, 256)
+    || !boundedString(raw.sessionId, 256)
+    || !boundedString(raw.idempotencyKey, 512)
+    || !Array.isArray(raw.parts)
+    || raw.parts.length === 0
+    || !optionalBoundedString(raw.modelRef, 256)
+    || !optionalBoundedString(raw.reasoning, 64)
+    || (raw.approvalMode !== undefined
+      && raw.approvalMode !== null
+      && !APPROVAL_MODES.has(String(raw.approvalMode)))
+    || (raw.collaborationMode !== undefined
+      && raw.collaborationMode !== null
+      && !COLLABORATION_MODES.has(String(raw.collaborationMode)))
+    || !optionalBoundedString(raw.goalObjective, 4_096)) {
+    return null;
+  }
+  const parts = raw.parts.map(decodeInputPart);
+  const extensions = decodeExtensions(raw.extensions);
+  if (parts.some((part) => part === null) || extensions === null) return null;
+  return {
+    apiVersion: API_VERSION,
+    kind: 'ConversationInput',
+    inputId: raw.inputId,
+    sessionId: raw.sessionId,
+    idempotencyKey: raw.idempotencyKey,
+    parts: parts as ConversationInputPart[],
+    ...(raw.modelRef === undefined ? {} : { modelRef: raw.modelRef as string | null }),
+    ...(raw.reasoning === undefined ? {} : { reasoning: raw.reasoning as string | null }),
+    ...(raw.approvalMode === undefined
+      ? {}
+      : { approvalMode: raw.approvalMode as ConversationInput['approvalMode'] }),
+    ...(raw.collaborationMode === undefined
+      ? {}
+      : { collaborationMode: raw.collaborationMode as ConversationInput['collaborationMode'] }),
+    ...(raw.goalObjective === undefined
+      ? {}
+      : { goalObjective: raw.goalObjective as string | null }),
+    ...(raw.extensions === undefined ? {} : { extensions }),
+  };
+}
+
+/** Build only the frozen contract fields; callers must supply all identities. */
+export function buildConversationInput(draft: ConversationInputDraft): ConversationInput {
+  const decoded = decodeConversationInput({
+    ...draft,
+    apiVersion: draft.apiVersion || API_VERSION,
+    kind: draft.kind || 'ConversationInput',
+  });
+  if (!decoded) {
+    throw new ConversationClientError(
+      'conversation_contract_mismatch',
+      'Conversation input does not match conversation.ksadk.io/v1.',
+    );
+  }
+  return decoded;
+}
+
+function requiredInputCapabilities(input: ConversationInput): string[] {
+  const capabilities: string[] = input.parts.map((part) => (
+    part.kind === 'text'
+      ? 'text'
+      : part.mediaType.toLowerCase().startsWith('image/')
+        ? 'attachment.image'
+        : 'attachment.file'
+  ));
+  if (input.modelRef) capabilities.push('model.select');
+  if (input.reasoning) capabilities.push('reasoning.effort');
+  if (input.approvalMode) capabilities.push('approval');
+  if (input.collaborationMode === 'plan') capabilities.push('plan');
+  if (input.goalObjective) capabilities.push('goal');
+  capabilities.push(...Object.keys(input.extensions || {}));
+  return [...new Set(capabilities)];
+}
+
+/** Enforce the active Surface before any network request is created. */
+export function preflightConversationInput(
+  surface: ConversationSurface,
+  input: ConversationInput,
+): ConversationInput {
+  if (surface.sessionId !== input.sessionId) {
+    throw new ConversationClientError(
+      'conversation_session_mismatch',
+      'Conversation input session does not match the active surface.',
+    );
+  }
+  for (const capability of requiredInputCapabilities(input)) {
+    if (!surfacePermitsInput(surface, capability)) {
+      throw new ConversationClientError(
+        'conversation_input_unsupported',
+        'Conversation input is not declared by the active surface.',
+        { capability },
+      );
+    }
+  }
+  return input;
 }
 
 function decodeCapability(value: unknown): ConversationCapability | null {
