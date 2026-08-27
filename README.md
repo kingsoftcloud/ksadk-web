@@ -43,6 +43,7 @@ package entrypoints under `dist-lib`.
 The npm package exposes these stable entrypoints:
 
 - `@kingsoftcloud/ksadk-web/components`
+- `@kingsoftcloud/ksadk-web/conversation` (headless, Node/SSR-safe)
 - `@kingsoftcloud/ksadk-web/runtime`
 - `@kingsoftcloud/ksadk-web/capabilities`
 - `@kingsoftcloud/ksadk-web/styles`

@@ -27,6 +27,10 @@
       "types": "./dist-lib/public/components.d.ts",
       "import": "./dist-lib/components.js"
     },
+    "./conversation": {
+      "types": "./dist-lib/public/conversation.d.ts",
+      "import": "./dist-lib/conversation.js"
+    },
     "./runtime": {
       "types": "./dist-lib/public/runtime.d.ts",
       "import": "./dist-lib/runtime.js"

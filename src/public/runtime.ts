@@ -49,3 +49,28 @@ export {
   A2UI_WIRE_VERSION,
   validateA2uiPresentation,
 } from '../core/interaction/index.js';
+export {
+  ConversationItemReducer,
+  createConversationItemState,
+  decodeConversationItem,
+  decodeConversationSurface,
+  projectConversationItems,
+  reduceConversationItem,
+  surfacePermitsInput,
+} from '../core/conversation/index.js';
+export type {
+  ConversationArtifact,
+  ConversationCapability,
+  ConversationCapabilityMode,
+  ConversationFallbackCard,
+  ConversationItem,
+  ConversationItemKind,
+  ConversationItemLifecycle,
+  ConversationItemOperation,
+  ConversationItemReducerState,
+  ConversationItemVisibility,
+  ConversationPresentation,
+  ConversationProjectionOptions,
+  ConversationSurface,
+  ConversationTextPresentation,
+} from '../core/conversation/index.js';

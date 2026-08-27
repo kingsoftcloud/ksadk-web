@@ -17,6 +17,7 @@ export default defineConfig({
       entry: {
         capabilities: path.resolve(__dirname, "src/public/capabilities.ts"),
         components: path.resolve(__dirname, "src/public/components.ts"),
+        conversation: path.resolve(__dirname, "src/public/conversation.ts"),
         runtime: path.resolve(__dirname, "src/public/runtime.ts"),
         styles: path.resolve(__dirname, "src/public/styles.ts"),
         types: path.resolve(__dirname, "src/public/types.ts"),

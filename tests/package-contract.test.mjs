@@ -16,6 +16,7 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
     '.',
     './capabilities',
     './components',
+    './conversation',
     './runtime',
     './styles',
     './types',
@@ -23,6 +24,8 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.equal(packageJson.exports['./runtime'].types, './dist-lib/public/runtime.d.ts');
   assert.equal(packageJson.exports['./runtime'].import, './dist-lib/runtime.js');
   assert.equal(packageJson.exports['./components'].types, './dist-lib/public/components.d.ts');
+  assert.equal(packageJson.exports['./conversation'].types, './dist-lib/public/conversation.d.ts');
+  assert.equal(packageJson.exports['./conversation'].import, './dist-lib/conversation.js');
   assert.equal(packageJson.exports['./capabilities'].types, './dist-lib/public/capabilities.d.ts');
   assert.equal(packageJson.exports['./types'].types, './dist-lib/public/types.d.ts');
   assert.equal(packageJson.exports['./styles'], './dist-lib/styles.css');
