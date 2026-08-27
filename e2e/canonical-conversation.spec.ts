@@ -1,11 +1,20 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const FIXTURE_ORIGIN = 'http://127.0.0.1:4182';
 const APPROVAL_ID = 'approval-shell-1';
 const APPROVAL_REVISION = 7;
 
 type FixtureState = {
+  config: { attachmentInputs: boolean };
   inputs: Array<Record<string, unknown>>;
+  uploads: Array<{
+    filename: string;
+    mediaType: string;
+    agentId: string;
+    contentType: string;
+    bodyBytes: number;
+    attachmentRef: string;
+  }>;
   streamPosts: number;
   legacyRunAgentCalls: number;
   reconnects: Array<{ after: number; lastEventId: string | null }>;
@@ -17,6 +26,33 @@ async function fixtureState(request: APIRequestContext): Promise<FixtureState> {
   const response = await request.get(`${FIXTURE_ORIGIN}/__fixture/state`);
   expect(response.ok()).toBe(true);
   return response.json();
+}
+
+async function setFixtureConfig(
+  request: APIRequestContext,
+  config: Partial<FixtureState['config']>,
+): Promise<void> {
+  const response = await request.post(`${FIXTURE_ORIGIN}/__fixture/config`, { data: config });
+  expect(response.ok()).toBe(true);
+}
+
+async function openCanonicalHostedUi(page: Page): Promise<void> {
+  await page.goto('/');
+  await expect(
+    page.getByRole('main').getByText('Canonical Fixture', { exact: true }),
+  ).toBeVisible();
+}
+
+async function attachThroughComposer(
+  page: Page,
+  file: { name: string; mimeType: string; buffer: Buffer },
+): Promise<void> {
+  await page.getByRole('button', { name: '添加附件或选择执行模式' }).click();
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /上传附件/ }).click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles(file);
+  await expect(page.getByText(file.name, { exact: true })).toBeVisible();
 }
 
 test.beforeEach(async ({ request }) => {
@@ -31,10 +67,7 @@ test('canonical Hosted UI survives replay and renders every durable item safely'
       a2uiReplayErrors.push(message.text());
     }
   });
-  await page.goto('/');
-  await expect(
-    page.getByRole('main').getByText('Canonical Fixture', { exact: true }),
-  ).toBeVisible();
+  await openCanonicalHostedUi(page);
 
   const composer = page.locator('textarea[placeholder^="发送消息"]');
   await composer.fill('执行第一轮 canonical 会话');
@@ -135,4 +168,169 @@ test('canonical Hosted UI survives replay and renders every durable item safely'
     revision: APPROVAL_REVISION,
   });
   expect(a2uiReplayErrors).toEqual([]);
+});
+
+test('Hosted UI sends an allowed attachment and selected model only through canonical input', async ({ page, request }) => {
+  await openCanonicalHostedUi(page);
+
+  const modelButton = page.getByRole('button', { name: /模型 Fixture Model/ });
+  await expect(modelButton).toBeVisible();
+  await modelButton.click();
+  await page.getByRole('menuitemradio', { name: 'Fixture Model Alt' }).click();
+  await expect(page.getByRole('button', { name: /模型 Fixture Model Alt/ })).toBeVisible();
+
+  await attachThroughComposer(page, {
+    name: 'canonical-notes.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('canonical attachment payload', 'utf8'),
+  });
+  const composer = page.locator('textarea[placeholder^="发送消息"]');
+  await composer.fill('带附件并切换模型');
+  await composer.press('Enter');
+
+  await expect.poll(async () => (await fixtureState(request)).inputs.length).toBe(1);
+  const current = await fixtureState(request);
+  expect(current.uploads).toHaveLength(1);
+  expect(current.uploads[0]).toMatchObject({
+    filename: 'canonical-notes.txt',
+    mediaType: 'text/plain',
+    agentId: 'canonical-fixture-agent',
+    attachmentRef: 'attachment://canonical/1/canonical-notes.txt',
+  });
+  expect(current.uploads[0].contentType).toContain('multipart/form-data');
+  expect(current.uploads[0].bodyBytes).toBeGreaterThan('canonical attachment payload'.length);
+
+  const input = current.inputs[0];
+  expect(input).toEqual({
+    apiVersion: 'conversation.ksadk.io/v1',
+    kind: 'ConversationInput',
+    inputId: expect.stringMatching(/^input:run_/),
+    sessionId: 'canonical-fixture-session',
+    idempotencyKey: expect.stringMatching(/^conversation:run_/),
+    parts: [
+      { kind: 'text', text: '带附件并切换模型' },
+      {
+        kind: 'attachment',
+        attachmentRef: 'attachment://canonical/1/canonical-notes.txt',
+        mediaType: 'text/plain',
+        name: 'canonical-notes.txt',
+      },
+    ],
+    modelRef: 'fixture-model-alt',
+    approvalMode: 'risk',
+  });
+  expect(input.idempotencyKey).toBe(
+    `conversation:${String(input.inputId).replace(/^input:/, '')}`,
+  );
+  expect(current.streamPosts).toBe(1);
+  expect(current.legacyRunAgentCalls).toBe(0);
+});
+
+test('Hosted UI fails closed before upload when attachment capability is absent', async ({ page, request }) => {
+  await setFixtureConfig(request, { attachmentInputs: false });
+  await openCanonicalHostedUi(page);
+  await attachThroughComposer(page, {
+    name: 'not-admitted.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('must not be uploaded', 'utf8'),
+  });
+  const composer = page.locator('textarea[placeholder^="发送消息"]');
+  await composer.fill('禁止附件必须 fail closed');
+  await composer.press('Enter');
+
+  await expect(page.getByText('连接断开或生成出错，请重试', { exact: true })).toBeVisible();
+  const current = await fixtureState(request);
+  expect(current.uploads).toEqual([]);
+  expect(current.inputs).toEqual([]);
+  expect(current.streamPosts).toBe(0);
+  expect(current.legacyRunAgentCalls).toBe(0);
+});
+
+test('Hosted UI rejects an oversized attachment before upload or canonical submit', async ({ page, request }) => {
+  await openCanonicalHostedUi(page);
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error('attachment input missing');
+    // Reuse one immutable Blob as 101 parts. This proves the browser File is
+    // over 100 MiB without allocating 101 independent payload buffers.
+    const oneMiB = new Blob([new Uint8Array(1024 * 1024)]);
+    const file = new File(Array.from({ length: 101 }, () => oneMiB), 'oversized.bin', {
+      type: 'application/octet-stream',
+    });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.getByText('oversized.bin', { exact: true })).toBeVisible();
+
+  const composer = page.locator('textarea[placeholder^="发送消息"]');
+  await composer.fill('超大附件必须 fail closed');
+  await composer.press('Enter');
+  await expect(page.getByText('连接断开或生成出错，请重试', { exact: true })).toBeVisible();
+
+  const current = await fixtureState(request);
+  expect(current.uploads).toEqual([]);
+  expect(current.inputs).toEqual([]);
+  expect(current.streamPosts).toBe(0);
+  expect(current.legacyRunAgentCalls).toBe(0);
+});
+
+test('independent custom frontend consumes the public conversation API across replay and two turns', async ({ page, request }) => {
+  await page.goto('/e2e/fixtures/custom-conversation-consumer.html');
+  await expect(page.getByRole('heading', { name: 'Independent Conversation Consumer' })).toBeVisible();
+
+  const message = page.getByLabel('Message');
+  await message.fill('独立前端第一轮');
+  await page.getByRole('button', { name: 'Send' }).click();
+
+  await expect.poll(async () => (await fixtureState(request)).reconnects).toEqual([
+    { after: 3, lastEventId: '3' },
+  ]);
+  await expect(page.locator('[data-kind="tool"]')).toHaveText('read_config');
+  await expect(page.locator('[data-kind="tool"]')).toHaveCount(1);
+  await expect(page.locator('[data-kind="approval"]')).toContainText('执行安全检查');
+  await expect(page.locator('[data-kind="fallback"]')).toContainText(
+    'Unsupported content: This content type is not supported',
+  );
+
+  await page.getByRole('button', { name: 'Approve' }).click();
+  await expect(page.getByRole('status')).toHaveText('completed-1');
+  await expect(page.locator('[data-kind="assistant_text"]')).toContainText('第一轮完成。');
+
+  await message.fill('独立前端第二轮');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByRole('status')).toHaveText('completed-2');
+  await expect(page.locator('[data-run-id="canonical-run-1"]')).toContainText('第一轮完成。');
+  await expect(page.locator('[data-run-id="canonical-run-2"]')).toContainText('第二轮也正常。');
+
+  const current = await fixtureState(request);
+  expect(current.inputs).toEqual([
+    {
+      apiVersion: 'conversation.ksadk.io/v1',
+      kind: 'ConversationInput',
+      inputId: 'custom-input-1',
+      sessionId: 'canonical-fixture-session',
+      idempotencyKey: 'custom-turn-1',
+      parts: [{ kind: 'text', text: '独立前端第一轮' }],
+      modelRef: 'fixture-model',
+    },
+    {
+      apiVersion: 'conversation.ksadk.io/v1',
+      kind: 'ConversationInput',
+      inputId: 'custom-input-2',
+      sessionId: 'canonical-fixture-session',
+      idempotencyKey: 'custom-turn-2',
+      parts: [{ kind: 'text', text: '独立前端第二轮' }],
+      modelRef: 'fixture-model',
+    },
+  ]);
+  expect(current.streamPosts).toBe(2);
+  expect(current.legacyRunAgentCalls).toBe(0);
+  expect(current.submits).toEqual([{
+    InteractionId: APPROVAL_ID,
+    ExpectedRevision: APPROVAL_REVISION,
+    Action: 'approve',
+    IdempotencyKey: `interaction:${APPROVAL_ID}:revision-${APPROVAL_REVISION}`,
+  }]);
 });

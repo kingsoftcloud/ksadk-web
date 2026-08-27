@@ -15,7 +15,11 @@ const delay = (milliseconds) => new Promise((resolve) => {
 
 function createState() {
   return {
+    config: {
+      attachmentInputs: true,
+    },
     inputs: [],
+    uploads: [],
     streamPosts: 0,
     legacyRunAgentCalls: 0,
     reconnects: [],
@@ -39,6 +43,12 @@ function sendJson(response, value, status = 200) {
   response.end(JSON.stringify(value));
 }
 
+async function readBody(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
 function receipt(status, commandId, error = null) {
   return envelope({
     schema_version: 1,
@@ -52,10 +62,36 @@ function receipt(status, commandId, error = null) {
 }
 
 async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const body = await readBody(request);
+  if (body.length === 0) return {};
+  return JSON.parse(body.toString('utf8'));
+}
+
+async function handleUpload(request, response) {
+  const contentType = request.headers['content-type'] || '';
+  const body = await readBody(request);
+  const text = body.toString('latin1');
+  const filename = /name="file"; filename="([^"]+)"/i.exec(text)?.[1] || 'attachment.bin';
+  const mediaType = /name="file"; filename="[^"]+"\r?\nContent-Type: ([^\r\n]+)/i.exec(text)?.[1]
+    || 'application/octet-stream';
+  const agentId = /name="AgentId"\r?\n\r?\n([^\r\n]+)/i.exec(text)?.[1] || '';
+  const uploadNumber = state.uploads.length + 1;
+  const attachmentRef = `attachment://canonical/${uploadNumber}/${encodeURIComponent(filename)}`;
+  state.uploads.push({
+    filename,
+    mediaType,
+    agentId,
+    contentType,
+    bodyBytes: body.length,
+    attachmentRef,
+  });
+  sendJson(response, envelope({
+    FileData: {
+      fileUri: attachmentRef,
+      displayName: filename,
+      mimeType: mediaType,
+    },
+  }));
 }
 
 function bootstrap() {
@@ -63,7 +99,7 @@ function bootstrap() {
     Agent: { AgentId: AGENT_ID, Name: 'Canonical Fixture', Framework: 'codex' },
     ApiFormats: ['responses'],
     Capabilities: {
-      Attachments: false,
+      Attachments: true,
       WorkspaceFiles: false,
       Approval: true,
       Thinking: true,
@@ -97,6 +133,10 @@ function surface() {
       { name: 'text', mode: 'native' },
       { name: 'model.select', mode: 'native' },
       { name: 'approval', mode: 'native' },
+      ...(state.config.attachmentInputs ? [
+        { name: 'attachment.file', mode: 'native' },
+        { name: 'attachment.image', mode: 'native' },
+      ] : []),
     ],
     outputs: [
       { name: 'text', mode: 'native' },
@@ -371,6 +411,10 @@ async function streamSecondTurn(response) {
 
 async function handleAgentApi(request, response, requestUrl) {
   const action = requestUrl.pathname.split('/').pop();
+  if (action === 'UploadFile' && request.method === 'POST') {
+    await handleUpload(request, response);
+    return;
+  }
   const body = request.method === 'POST' ? await readJson(request) : {};
 
   if (action === 'SubmitInteraction') {
@@ -422,7 +466,14 @@ async function handleAgentApi(request, response, requestUrl) {
       Page: 1,
       PageSize: 30,
     },
-    ListAgentModels: { Models: [{ id: 'fixture-model', display_name: 'Fixture Model' }] },
+    ListAgentModels: {
+      Models: [
+        { id: 'fixture-model', display_name: 'Fixture Model' },
+        { id: 'fixture-model-alt', display_name: 'Fixture Model Alt' },
+      ],
+      Current: 'fixture-model',
+      Source: 'fixture',
+    },
     GetSession: { Session: { SessionId: SESSION_ID, AgentId: AGENT_ID, ActiveRunStatus: '' } },
     ListSessionMessages: { Messages: [], LatestSeqId: 0, HasMore: false, NextCursor: null },
     ListSessionEvents: { Events: [], Total: 0 },
@@ -446,9 +497,22 @@ const server = createServer(async (request, response) => {
       sendJson(response, { ok: true });
       return;
     }
+    if (requestUrl.pathname === '/__fixture/config' && request.method === 'POST') {
+      const body = await readJson(request);
+      state.config = {
+        ...state.config,
+        ...(typeof body.attachmentInputs === 'boolean'
+          ? { attachmentInputs: body.attachmentInputs }
+          : {}),
+      };
+      sendJson(response, { ok: true, config: state.config });
+      return;
+    }
     if (requestUrl.pathname === '/__fixture/state') {
       sendJson(response, {
+        config: state.config,
         inputs: state.inputs,
+        uploads: state.uploads,
         streamPosts: state.streamPosts,
         legacyRunAgentCalls: state.legacyRunAgentCalls,
         reconnects: state.reconnects,
