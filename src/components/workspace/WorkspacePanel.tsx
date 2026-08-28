@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useUIStore } from '../../stores/ui.js';
 import { FileEditor } from './FileEditor.js';
 import { FilePreview } from './FilePreview.js';
 import { HtmlPreview } from './HtmlPreview.js';
@@ -252,8 +253,10 @@ export function WorkspacePanel({
         });
       } catch (loadError) {
         console.error('Failed to load workspace entries:', loadError);
+        const detail = loadError instanceof Error ? loadError.message : String(loadError);
         if (!background) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(detail);
+          useUIStore.getState().pushToast(`加载工作区文件失败：${detail || '请稍后重试'}`, 'error');
         }
       } finally {
         if (background) {
@@ -422,7 +425,9 @@ export function WorkspacePanel({
       await loadEntries(currentPath);
     } catch (uploadError) {
       console.error('Failed to upload workspace files:', uploadError);
-      setError(uploadError instanceof Error ? uploadError.message : String(uploadError));
+      const detail = uploadError instanceof Error ? uploadError.message : String(uploadError);
+      setError(detail);
+      useUIStore.getState().pushToast(`上传失败：${detail || '请稍后重试'}`, 'error');
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -455,7 +460,9 @@ export function WorkspacePanel({
       await loadEntries(nextPath);
     } catch (deleteError) {
       console.error('Failed to delete workspace file:', deleteError);
-      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+      const detail = deleteError instanceof Error ? deleteError.message : String(deleteError);
+      setError(detail);
+      useUIStore.getState().pushToast(`删除失败：${detail || '请稍后重试'}`, 'error');
     }
   };
 
@@ -536,7 +543,9 @@ export function WorkspacePanel({
       await loadEntries(currentPath, { background: true });
     } catch (saveError) {
       console.error('Failed to save workspace file:', saveError);
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      const detail = saveError instanceof Error ? saveError.message : String(saveError);
+      setError(detail);
+      useUIStore.getState().pushToast(`保存失败：${detail || '请稍后重试'}`, 'error');
     } finally {
       setSaving(false);
     }

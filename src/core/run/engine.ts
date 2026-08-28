@@ -24,7 +24,7 @@ import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
 
-type StreamConsumeResult = { terminalStatus?: string };
+type StreamConsumeResult = { terminalStatus?: string; receivedData?: boolean };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -342,6 +342,10 @@ export class RunEngineImpl implements RunEngine {
           );
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
+          // 空流直接报错: 历史上这里曾"重建会话重试", 恰是重复建 session 的根源。
+          if (!streamResult.receivedData) {
+            throw new Error('运行时在返回任何事件前关闭了响应流');
+          }
         }
 
         if (streamResult.terminalStatus === 'cancelled') {
@@ -984,11 +988,13 @@ export class RunEngineImpl implements RunEngine {
     const decoder = new TextDecoder();
     let buffer = '';
     let messageCreated = false;
+    let receivedData = false;
 
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        receivedData = true;
         if (!messageCreated) {
           messageCreated = true;
           this.emit({ type: 'assistant_message_created', messageId, invocationId });
@@ -1042,7 +1048,7 @@ export class RunEngineImpl implements RunEngine {
 
           if (shouldStop) {
             reader.cancel().catch(() => {});
-            return { terminalStatus };
+            return { terminalStatus, receivedData };
           }
         }
       }
@@ -1052,7 +1058,7 @@ export class RunEngineImpl implements RunEngine {
       }
     }
 
-    return {};
+    return { receivedData };
   }
 
   private isCompactionChunk(chunk: string): boolean {
