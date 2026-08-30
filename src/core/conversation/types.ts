@@ -146,10 +146,23 @@ export type ConversationArtifact = {
 };
 
 /**
+ * One ordered renderer node. `key` is a presentation identity only: raw
+ * RuntimeEvent-derived items remain represented by `sourceItemIds` for replay
+ * and audit. A tool result may enrich the earlier tool-call node by callId.
+ */
+export type ConversationTimelineEntry = {
+  key: string;
+  item: ConversationItem;
+  sourceItemIds: string[];
+};
+
+/**
  * Headless, renderer-ready data. This projection never executes item payloads
  * and deliberately retains item identities for text and reasoning content.
  */
 export type ConversationPresentation = {
+  /** Canonical visible order; renderers must not reconstruct it from groups. */
+  timeline: ConversationTimelineEntry[];
   textItems: ConversationTextPresentation[];
   toolItems: ConversationItem[];
   approvalItems: ConversationItem[];

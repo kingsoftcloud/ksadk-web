@@ -15,6 +15,12 @@
   replayed `(itemId, sourceEventId)` pairs, keep terminal items monotonic, and
   safely downgrade unknown item kinds or schema versions to passive fallback
   content.
+- Preserve the canonical item timeline for renderers: a separate native tool
+  result enriches its original `callId` tool card rather than rendering a
+  duplicate card, while reasoning, tools and answers keep their original
+  interleaving. Add an immutable exact `kind + payloadSchemaRef` trusted
+  renderer catalog; providers cannot supply executable UI code in event
+  payloads or claim a future schema version.
 - Keep canonical approvals without a durable `revision` read-only. Consumers
   must not guess a revision or submit them through the revision-CAS Interaction
   API until the server supplies an authoritative value.

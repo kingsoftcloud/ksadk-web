@@ -17,6 +17,7 @@ export {
   preflightConversationInput,
   projectConversationItems,
   reduceConversationItem,
+  createTrustedRendererCatalog,
   surfacePermitsInput,
 } from '../core/conversation/index.js';
 export type {
@@ -48,4 +49,7 @@ export type {
   ConversationStreamTurnOptions,
   ConversationTextPart,
   ConversationTextPresentation,
+  ConversationTimelineEntry,
+  TrustedConversationRenderer,
+  TrustedRendererCatalog,
 } from '../core/conversation/index.js';

@@ -275,7 +275,10 @@ export function projectConversationStreamForHostedUi(
   const messages: Message[] = [];
   const interactions: Interaction[] = [];
 
-  for (const item of result.state.items) {
+  // The shared presentation is the only place allowed to combine related
+  // native items (for example tool_call and tool_result by callId). Iterating
+  // raw state here would reintroduce duplicate cards in Hosted UI.
+  for (const { item } of presentation.timeline) {
     if (textById.has(item.itemId)) {
       messages.push(textMessage(item));
       continue;

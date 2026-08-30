@@ -160,6 +160,56 @@ describe('ConversationItem/v1 identity reducer', () => {
 });
 
 describe('ConversationItem/v1 renderer projection', () => {
+  it('keeps stream order and enriches a tool call with a separate result item', () => {
+    let state = createConversationItemState();
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'reasoning-1',
+      sourceEventIds: ['reasoning-event'],
+      kind: 'reasoning',
+      payloadSchemaRef: 'conversation.item.reasoning/v1',
+      payload: { text: 'inspect workspace' },
+    }));
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'tool-call-item',
+      sourceEventIds: ['tool-call-event'],
+      kind: 'tool_call',
+      payloadSchemaRef: 'conversation.item.tool-call/v1',
+      payload: { callId: 'call-1', tool: 'shell', args: { command: 'pwd' } },
+    }));
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'tool-result-item',
+      sourceEventIds: ['tool-result-event'],
+      kind: 'tool_call',
+      operation: 'completed',
+      lifecycle: 'completed',
+      payloadSchemaRef: 'conversation.item.tool-call/v1',
+      payload: { callId: 'call-1', output: { stdout: '/workspace' } },
+    }));
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'answer-1',
+      sourceEventIds: ['answer-event'],
+      payload: { text: 'Workspace inspected.' },
+    }));
+
+    const presentation = projectConversationItems(state);
+    expect(presentation.timeline.map((entry) => entry.key)).toEqual([
+      'item:reasoning-1',
+      'tool:call-1',
+      'item:answer-1',
+    ]);
+    expect(presentation.timeline[1]).toMatchObject({
+      sourceItemIds: ['tool-call-item', 'tool-result-item'],
+      item: {
+        itemId: 'tool-call-item',
+        lifecycle: 'completed',
+        payload: {
+          tool: 'shell',
+          output: { stdout: '/workspace' },
+        },
+      },
+    });
+  });
+
   it('degrades future kinds and payload schemas without executing their payload', () => {
     const unknownKind = decodedItem({
       itemId: 'future-kind',

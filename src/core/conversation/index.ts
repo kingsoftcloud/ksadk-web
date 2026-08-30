@@ -14,6 +14,11 @@ export {
   reduceConversationItem,
 } from './reducer.js';
 export { projectConversationItems } from './presentation.js';
+export {
+  createTrustedRendererCatalog,
+  type TrustedConversationRenderer,
+  type TrustedRendererCatalog,
+} from './renderer-registry.js';
 export type {
   ConversationArtifact,
   ConversationCapability,
@@ -41,5 +46,6 @@ export type {
   ConversationStreamResult,
   ConversationStreamTurnOptions,
   ConversationTextPart,
+  ConversationTimelineEntry,
   ConversationTextPresentation,
 } from './types.js';

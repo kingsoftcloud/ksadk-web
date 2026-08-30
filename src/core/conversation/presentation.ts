@@ -6,6 +6,7 @@ import type {
   ConversationPresentation,
   ConversationProjectionOptions,
   ConversationTextPresentation,
+  ConversationTimelineEntry,
 } from './types.js';
 
 const SUPPORTED_SCHEMAS: Partial<Record<ConversationItemKind, string>> = {
@@ -67,6 +68,65 @@ function projectArtifact(item: ConversationItem): ConversationArtifact {
   };
 }
 
+function payloadString(item: ConversationItem, field: string): string | null {
+  const value = item.payload[field];
+  return typeof value === 'string' && value ? value : null;
+}
+
+function presentationKey(item: ConversationItem): string {
+  if (item.kind === 'tool_call') {
+    const callId = payloadString(item, 'callId');
+    if (callId) return `tool:${callId}`;
+  }
+  if (item.kind === 'approval') {
+    const interactionId = payloadString(item, 'interactionId');
+    if (interactionId) return `approval:${interactionId}`;
+  }
+  if (item.kind === 'a2ui') {
+    const surfaceId = payloadString(item, 'surfaceId');
+    if (surfaceId) return `a2ui:${surfaceId}`;
+  }
+  return `item:${item.itemId}`;
+}
+
+function mergeTimelineItem(
+  previous: ConversationItem,
+  incoming: ConversationItem,
+): ConversationItem {
+  const preserveTerminal = terminal(previous) && !terminal(incoming);
+  return {
+    ...previous,
+    ...incoming,
+    itemId: previous.itemId,
+    parentItemId: previous.parentItemId,
+    sourceEventIds: [...new Set([...previous.sourceEventIds, ...incoming.sourceEventIds])],
+    payload: { ...previous.payload, ...incoming.payload },
+    nativeRef: { ...previous.nativeRef, ...incoming.nativeRef },
+    ...(preserveTerminal ? { lifecycle: previous.lifecycle, operation: previous.operation } : {}),
+  };
+}
+
+function projectTimeline(items: ConversationItem[]): ConversationTimelineEntry[] {
+  const entries: ConversationTimelineEntry[] = [];
+  const indices = new Map<string, number>();
+  for (const item of items) {
+    const key = presentationKey(item);
+    const index = indices.get(key);
+    if (index === undefined) {
+      indices.set(key, entries.length);
+      entries.push({ key, item, sourceItemIds: [item.itemId] });
+      continue;
+    }
+    const previous = entries[index];
+    entries[index] = {
+      key,
+      item: mergeTimelineItem(previous.item, item),
+      sourceItemIds: [...new Set([...previous.sourceItemIds, item.itemId])],
+    };
+  }
+  return entries;
+}
+
 /**
  * Produce passive renderer data. Unknown kinds or payload schema versions are
  * converted to fallback cards; A2UI and approvals remain typed data and are
@@ -100,6 +160,7 @@ export function projectConversationItems(
   ));
 
   return {
+    timeline: projectTimeline(supported.filter((item) => item.kind !== 'progress')),
     textItems,
     toolItems: supported.filter((item) => item.kind === 'tool_call'),
     approvalItems: supported.filter((item) => item.kind === 'approval'),

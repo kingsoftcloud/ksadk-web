@@ -107,12 +107,22 @@ describe('Hosted UI canonical ConversationItem projection', () => {
               callId: 'call-1',
               tool: 'read_file',
               args: { path: 'README.md' },
-              output: { ok: true },
             },
           )),
           frame(5, item(
-            'approval-item-1',
+            'tool-result-1',
             'event-5',
+            'tool_call',
+            'conversation.item.tool-call/v1',
+            {
+              callId: 'call-1',
+              output: { ok: true },
+            },
+            { operation: 'completed', lifecycle: 'completed' },
+          )),
+          frame(6, item(
+            'approval-item-1',
+            'event-6',
             'approval',
             'conversation.item.approval/v1',
             {
@@ -124,23 +134,23 @@ describe('Hosted UI canonical ConversationItem projection', () => {
             },
             { lifecycle: 'pending' },
           )),
-          frame(6, item(
+          frame(7, item(
             'a2ui-1',
-            'event-6',
+            'event-7',
             'a2ui',
             'conversation.item.a2ui/v1',
             { data: operations },
           )),
-          frame(7, item(
+          frame(8, item(
             'future-1',
-            'event-7',
+            'event-8',
             'game_board',
             'vendor.game-board/v7',
             { html: '<script>unsafe()</script>' },
           )),
-          frame(8, item(
+          frame(9, item(
             'run-terminal',
-            'event-8',
+            'event-9',
             'progress',
             'conversation.item.progress/v1',
             {},
@@ -180,6 +190,7 @@ describe('Hosted UI canonical ConversationItem projection', () => {
       'answer-2',
       'reasoning-1',
       'tool-1',
+      'tool-result-1',
       'approval-item-1',
       'a2ui-1',
       'future-1',
@@ -192,7 +203,14 @@ describe('Hosted UI canonical ConversationItem projection', () => {
     expect(messages.find((message) => message.itemId === 'reasoning-1')?.blocks)
       .toEqual([expect.objectContaining({ type: 'thinking', content: 'inspect the workspace' })]);
     expect(messages.find((message) => message.itemId === 'tool-1')?.blocks)
-      .toEqual([expect.objectContaining({ type: 'tool', toolName: 'read_file' })]);
+      .toEqual([expect.objectContaining({
+        type: 'tool',
+        toolName: 'read_file',
+        output: expect.stringContaining('"ok": true'),
+      })]);
+    expect(messages.filter((message) => (
+      message.itemId === 'tool-1' || message.itemId === 'tool-result-1'
+    ))).toHaveLength(1);
     expect(messages.find((message) => message.itemId === 'a2ui-1')?.aguiActivity)
       .toEqual({ surfaceId: 'profile-form', messages: operations });
     expect(messages.find((message) => message.itemId === 'future-1')).toMatchObject({
