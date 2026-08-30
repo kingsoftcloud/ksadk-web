@@ -13,8 +13,9 @@
   not silently bypass the declared contract.
 - Preserve different item identities even when their text is equal, ignore
   replayed `(itemId, sourceEventId)` pairs, keep terminal items monotonic, and
-  safely downgrade unknown item kinds or schema versions to passive fallback
-  content.
+  retain additive unknown item kinds for replay/audit without rendering a
+  repeated transcript card; newer schemas on known kinds safely downgrade to
+  one passive fallback card.
 - Preserve the canonical item timeline for renderers: a separate native tool
   result enriches its original `callId` tool card rather than rendering a
   duplicate card, while reasoning, tools and answers keep their original

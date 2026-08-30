@@ -213,7 +213,7 @@ describe('ConversationItem/v1 renderer projection', () => {
     });
   });
 
-  it('degrades future kinds and payload schemas without executing their payload', () => {
+  it('hides future kinds and degrades payload schemas without executing their payload', () => {
     const unknownKind = decodedItem({
       itemId: 'future-kind',
       sourceEventIds: ['future-event'],
@@ -232,10 +232,10 @@ describe('ConversationItem/v1 renderer projection', () => {
     const presentation = projectConversationItems(state);
 
     expect(presentation.textItems).toEqual([]);
-    expect(presentation.fallbacks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'future-kind', title: 'Unsupported content' }),
+    expect(unknownKind.visibility).toBe('hidden');
+    expect(presentation.fallbacks).toEqual([
       expect.objectContaining({ id: 'future-schema', title: 'Unsupported content' }),
-    ]));
+    ]);
     expect(unknownKind.payload).not.toHaveProperty('html');
   });
 

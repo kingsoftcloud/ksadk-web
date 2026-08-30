@@ -301,9 +301,11 @@ export function decodeConversationSurface(value: unknown): ConversationSurface |
 }
 
 /**
- * Decode ConversationItem/v1. Future item kinds are retained as a passive
- * `unknown` card; an unknown contract version or unsafe structural field is
- * rejected instead of being guessed.
+ * Decode ConversationItem/v1. Future item kinds remain inspectable in the
+ * canonical stream but are hidden from the default transcript.  A client must
+ * never turn an additive provider event into a repeating user-facing fallback
+ * card. Unknown contract versions or unsafe structural fields are rejected
+ * instead of being guessed.
  */
 export function decodeConversationItem(value: unknown): ConversationItem | null {
   const raw = record(value);
@@ -357,7 +359,13 @@ export function decodeConversationItem(value: unknown): ConversationItem | null 
     kind,
     operation,
     lifecycle,
-    visibility: (raw.visibility || 'public') as ConversationItemVisibility,
+    // Keep the raw source item for replay/audit while matching the backend
+    // projector: an additive, unregistered kind is not a chat card. Known
+    // kinds with a newer payload schema remain visible as a single passive
+    // fallback, so a schema upgrade is diagnosable without executing it.
+    visibility: kind === 'unknown' && originalKind !== 'unknown'
+      ? 'hidden'
+      : (raw.visibility || 'public') as ConversationItemVisibility,
     payloadSchemaRef: raw.payloadSchemaRef,
     payload: kind === 'unknown' && originalKind !== 'unknown'
       ? {
