@@ -21,6 +21,9 @@
   interleaving. Add an immutable exact `kind + payloadSchemaRef` trusted
   renderer catalog; providers cannot supply executable UI code in event
   payloads or claim a future schema version.
+- Keep `output` and `reasoning` summaries as a compatibility view beside the
+  canonical timeline, so Studio can adopt the shared reducer without a second
+  text aggregation implementation during the 0.8.3 transition.
 - Keep canonical approvals without a durable `revision` read-only. Consumers
   must not guess a revision or submit them through the revision-CAS Interaction
   API until the server supplies an authoritative value.

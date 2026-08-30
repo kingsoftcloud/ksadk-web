@@ -108,8 +108,11 @@ describe('ConversationItem/v1 identity reducer', () => {
       sourceEventIds: ['event-2'],
       payload: { text: ' world' },
     }))).toBe(true);
-    expect(projectConversationItems(reducer.snapshot()).textItems[0]?.text)
+    const presentation = projectConversationItems(reducer.snapshot());
+    expect(presentation.textItems[0]?.text)
       .toBe('hello world');
+    expect(presentation.output).toBe('hello world');
+    expect(presentation.reasoning).toBe('');
   });
 
   it('keeps a terminal snapshot monotonic when an older delta reconnects late', () => {

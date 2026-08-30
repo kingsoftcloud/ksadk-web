@@ -150,6 +150,10 @@ export function projectConversationItems(
   const textItems = supported
     .filter((item) => textKinds.has(item.kind))
     .map(projectTextItem);
+  const textSummary = (kind: ConversationItemKind): string => supported
+    .filter((item) => item.kind === kind)
+    .map((item) => typeof item.payload.text === 'string' ? item.payload.text : '')
+    .join('');
   const fallbackItems = [
     ...supported.filter((item) => item.kind === 'unknown'),
     ...unsupported,
@@ -161,6 +165,8 @@ export function projectConversationItems(
 
   return {
     timeline: projectTimeline(supported.filter((item) => item.kind !== 'progress')),
+    output: textSummary('assistant_text'),
+    reasoning: textSummary('reasoning'),
     textItems,
     toolItems: supported.filter((item) => item.kind === 'tool_call'),
     approvalItems: supported.filter((item) => item.kind === 'approval'),

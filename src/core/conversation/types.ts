@@ -163,6 +163,12 @@ export type ConversationTimelineEntry = {
 export type ConversationPresentation = {
   /** Canonical visible order; renderers must not reconstruct it from groups. */
   timeline: ConversationTimelineEntry[];
+  /**
+   * Compatibility summaries for consumers that have not yet moved to
+   * `timeline` / `textItems`. They never participate in identity reduction.
+   */
+  output: string;
+  reasoning: string;
   textItems: ConversationTextPresentation[];
   toolItems: ConversationItem[];
   approvalItems: ConversationItem[];
