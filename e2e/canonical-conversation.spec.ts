@@ -60,7 +60,7 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBe(true);
 });
 
-test('canonical Hosted UI survives replay and renders every durable item safely', async ({ page, request }) => {
+test('canonical Hosted UI survives replay and hides additive events safely', async ({ page, request }) => {
   const a2uiReplayErrors: string[] = [];
   page.on('console', (message) => {
     if (message.text().includes('[A2UI] processMessages error')) {
@@ -80,10 +80,11 @@ test('canonical Hosted UI survives replay and renders every durable item safely'
   ]);
   await expect(page.getByText('read_config', { exact: true })).toHaveCount(1);
 
-  // Reasoning, tool, passive A2UI and future/unknown payload fallback all
-  // travel through the same canonical stream and real renderer.
+  // Reasoning, tool and passive A2UI travel through the same canonical stream
+  // and real renderer. Additive unknown events remain in replay/audit but are
+  // deliberately not turned into transcript noise.
   await expect(page.getByText('Canonical A2UI 卡片')).toBeVisible();
-  await expect(page.getByText(/Unsupported content: This content type is not supported/)).toBeVisible();
+  await expect(page.getByText(/Unsupported content: This content type is not supported/)).toHaveCount(0);
   await expect(page.getByText('<script>never execute</script>', { exact: true })).toHaveCount(0);
 
   const tray = page.getByTestId('interaction-tray');
@@ -290,9 +291,7 @@ test('independent custom frontend consumes the public conversation API across re
   await expect(page.locator('[data-kind="tool"]')).toHaveText('read_config');
   await expect(page.locator('[data-kind="tool"]')).toHaveCount(1);
   await expect(page.locator('[data-kind="approval"]')).toContainText('执行安全检查');
-  await expect(page.locator('[data-kind="fallback"]')).toContainText(
-    'Unsupported content: This content type is not supported',
-  );
+  await expect(page.locator('[data-kind="fallback"]')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByRole('status')).toHaveText('completed-1');
