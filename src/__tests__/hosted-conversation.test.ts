@@ -63,7 +63,7 @@ function stream(body: string): Response {
 }
 
 describe('Hosted UI canonical ConversationItem projection', () => {
-  it('uses one identity reducer across reconnect for text, reasoning, tool, approval, A2UI and fallback', async () => {
+  it('uses one identity reducer across reconnect for text, reasoning, tool, approval and A2UI', async () => {
     const operations = [{
       version: 'v0.9',
       createSurface: { surfaceId: 'profile-form', catalogId: 'basic' },
@@ -213,10 +213,9 @@ describe('Hosted UI canonical ConversationItem projection', () => {
     ))).toHaveLength(1);
     expect(messages.find((message) => message.itemId === 'a2ui-1')?.aguiActivity)
       .toEqual({ surfaceId: 'profile-form', messages: operations });
-    expect(messages.find((message) => message.itemId === 'future-1')).toMatchObject({
-      role: 'system',
-      content: expect.stringContaining('Unsupported content'),
-    });
+    // Additive kinds remain in the canonical reducer state for audit/replay,
+    // but do not add a noisy unsupported-content transcript card.
+    expect(messages.find((message) => message.itemId === 'future-1')).toBeUndefined();
     expect(messages.some((message) => message.content.includes('<script>'))).toBe(false);
     expect(sharedInteractionStore.get('session-hosted', 'approval-1')).toMatchObject({
       source: 'interaction_v1',
