@@ -6,6 +6,13 @@
   arrives. Completed user messages, tools, approvals, usage reports, and
   provider notifications no longer unlock the composer or trigger duplicate
   submissions while the agent is still running.
+- Make active reasoning visibly animated with a motion-safe text shimmer,
+  matching WeWork's low-noise thinking treatment while preserving the compact,
+  collapsible completed state.
+- Publish a dedicated interactive GitHub Pages demo that exercises the shared
+  reasoning, tool, Markdown, and composer components entirely in the browser.
+  It is explicitly labelled as local sample data instead of attempting to
+  connect to a nonexistent Agent backend.
 
 ## 0.3.3 - 2026-08-28
 

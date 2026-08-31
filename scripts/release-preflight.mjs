@@ -15,6 +15,7 @@ export const RELEASE_COMMANDS = Object.freeze([
   ['npm', ['run', 'lint']],
   ['npm', ['run', 'build:all']],
   ['npm', ['run', 'test:e2e:conversation']],
+  ['npm', ['run', 'test:e2e:demo']],
 ]);
 
 function run(command, args, options = {}) {

@@ -25,11 +25,11 @@ jobs:
 
       - run: npm ci
       - run: npm test
-      - run: npm run build:ksadk
+      - run: npm run build:demo
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist-ksadk
+          path: dist-demo
 
   deploy:
     environment:
