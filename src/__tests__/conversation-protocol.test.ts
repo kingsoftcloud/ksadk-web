@@ -163,6 +163,42 @@ describe('ConversationItem/v1 identity reducer', () => {
 });
 
 describe('ConversationItem/v1 renderer projection', () => {
+  it('only derives run terminal state from an explicit run status', () => {
+    let state = createConversationItemState();
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'notification-1',
+      sourceEventIds: ['notification-event'],
+      kind: 'progress',
+      operation: 'completed',
+      lifecycle: 'completed',
+      payloadSchemaRef: 'conversation.item.progress/v1',
+      payload: { message: 'autoApprovalReview' },
+    }));
+    expect(projectConversationItems(state).terminalStatus).toBeUndefined();
+
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'tool-error',
+      sourceEventIds: ['tool-error-event'],
+      kind: 'error',
+      operation: 'completed',
+      lifecycle: 'failed',
+      payloadSchemaRef: 'conversation.item.error/v1',
+      payload: { error: 'one tool failed' },
+    }));
+    expect(projectConversationItems(state).terminalStatus).toBeUndefined();
+
+    state = reduceConversationItem(state, decodedItem({
+      itemId: 'run-end',
+      sourceEventIds: ['run-end-event'],
+      kind: 'progress',
+      operation: 'completed',
+      lifecycle: 'completed',
+      payloadSchemaRef: 'conversation.item.progress/v1',
+      payload: { status: 'completed' },
+    }));
+    expect(projectConversationItems(state).terminalStatus).toBe('completed');
+  });
+
   it('keeps stream order and enriches a tool call with a separate result item', () => {
     let state = createConversationItemState();
     state = reduceConversationItem(state, decodedItem({

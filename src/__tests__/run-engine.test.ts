@@ -143,7 +143,7 @@ function canonicalResult(): ConversationStreamResult {
       lifecycle: 'completed',
       visibility: 'public',
       payloadSchemaRef: 'conversation.item.progress/v1',
-      payload: {},
+      payload: { status: 'completed' },
       nativeRef: {},
     },
   ];

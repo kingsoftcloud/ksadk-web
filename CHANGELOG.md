@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4 - 2026-08-31
+
+- Keep a conversation turn active until an explicit run-level terminal status
+  arrives. Completed user messages, tools, approvals, usage reports, and
+  provider notifications no longer unlock the composer or trigger duplicate
+  submissions while the agent is still running.
+
 ## 0.3.3 - 2026-08-28
 
 ### Headless conversation surface

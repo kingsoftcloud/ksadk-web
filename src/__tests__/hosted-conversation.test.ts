@@ -153,7 +153,7 @@ describe('Hosted UI canonical ConversationItem projection', () => {
             'event-9',
             'progress',
             'conversation.item.progress/v1',
-            {},
+            { status: 'completed' },
             { operation: 'completed', lifecycle: 'completed' },
           )),
         ].join(''));
@@ -249,7 +249,7 @@ describe('Hosted UI canonical ConversationItem projection', () => {
           'terminal-event-readonly',
           'progress',
           'conversation.item.progress/v1',
-          {},
+          { status: 'completed' },
           { operation: 'completed', lifecycle: 'completed' },
         )),
       ].join(''))),
