@@ -1335,6 +1335,10 @@ describe('RunEngineImpl', () => {
       },
     });
     const settledSessionIds: Array<string | null> = [];
+    const events: Array<{ type: string; error?: Error }> = [];
+    engine.subscribe((event) => {
+      events.push(event);
+    });
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -1362,6 +1366,8 @@ describe('RunEngineImpl', () => {
     expect(calls[0]).toMatchObject({ SessionId: 'session-history' });
     expect(createdSessions).toEqual([]);
     expect(settledSessionIds).toEqual(['session-history']);
+    expect(events.some((event) => event.type === 'activity' && 'phase' in event && event.phase === '运行完成')).toBe(false);
+    expect(events.find((event) => event.type === 'error')?.error?.message).toContain('空响应流');
   });
 
   it('does not create a second session or replay a prompt after an empty first stream', async () => {
@@ -1383,6 +1389,10 @@ describe('RunEngineImpl', () => {
         });
       },
     });
+    const events: Array<{ type: string; error?: Error }> = [];
+    engine.subscribe((event) => {
+      events.push(event);
+    });
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -1399,6 +1409,8 @@ describe('RunEngineImpl', () => {
     expect(createdSessions).toEqual(['session-1']);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ SessionId: 'session-1' });
+    expect(events.some((event) => event.type === 'activity' && 'phase' in event && event.phase === '运行完成')).toBe(false);
+    expect(events.find((event) => event.type === 'error')?.error?.message).toContain('空响应流');
   });
 
   it('keeps response.failed as failed instead of overwriting it as completed', async () => {
