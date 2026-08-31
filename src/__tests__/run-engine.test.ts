@@ -224,6 +224,51 @@ describe('RunEngineImpl', () => {
     }));
   });
 
+  it('keeps one transcript owner when canonical and durable run projections overlap', () => {
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+    const result = canonicalResult();
+
+    dispatchRunEventToStores({
+      type: 'stream_event',
+      sessionId: 'session-canonical',
+      event: {
+        EventId: 'legacy-final-before-canonical',
+        EventType: 'assistant_message',
+        SessionId: 'session-canonical',
+        InvocationId: 'run-canonical',
+        SeqId: 10,
+        Content: { parts: [{ text: 'canonical answer' }] },
+      },
+    });
+    dispatchRunEventToStores({
+      type: 'conversation_snapshot',
+      sessionId: 'session-canonical',
+      result,
+    });
+    dispatchRunEventToStores({
+      type: 'stream_event',
+      sessionId: 'session-canonical',
+      event: {
+        EventId: 'legacy-final-after-canonical',
+        EventType: 'assistant_message',
+        SessionId: 'session-canonical',
+        InvocationId: 'run-canonical',
+        SeqId: 11,
+        Content: { parts: [{ text: 'canonical answer' }] },
+      },
+    });
+
+    const answers = useMessageStore.getState().messages.filter(
+      (message) => message.role === 'model' && message.content === 'canonical answer',
+    );
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({
+      eventType: 'conversation_item_v1',
+      runId: 'run-canonical',
+      itemId: 'canonical-answer',
+    });
+  });
+
   it('keeps the existing Responses path only when the conversation surface endpoint is absent', async () => {
     const calls: Record<string, unknown>[] = [];
     const conversationClient: ConversationClient = {

@@ -808,6 +808,8 @@ function ChatMessage({
     );
   }
 
+  const reasoningStreaming = isStreaming && isLastMessage && !message.content;
+
   return (
     <div className="group mx-auto mb-3 w-full max-w-3xl px-6">
       <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
@@ -837,15 +839,21 @@ function ChatMessage({
         <details className="group/details mb-3 overflow-hidden rounded-md border border-slate-200/80 bg-slate-50/60 text-sm text-slate-600 transition-colors open:bg-white dark:border-slate-700/80 dark:bg-slate-900/40 dark:text-slate-300 dark:open:bg-slate-950/30">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-medium outline-none marker:hidden">
             <div className="flex min-w-0 items-center gap-2">
-              {isStreaming && isLastMessage && !message.content ? (
-                <RefreshCcw className="h-4 w-4 animate-spin text-slate-500" />
-              ) : (
+              {!reasoningStreaming ? (
                 <Check className="h-4 w-4 text-slate-400" />
-              )}
-              <span className="truncate">思考过程</span>
-              <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                {isStreaming && isLastMessage && !message.content ? '生成中' : '已完成'}
+              ) : null}
+              <span
+                className={cn('truncate', reasoningStreaming && 'waiting-thinking-text')}
+                data-testid={reasoningStreaming ? 'legacy-thinking-indicator' : undefined}
+                role={reasoningStreaming ? 'status' : undefined}
+              >
+                {reasoningStreaming ? '正在思考…' : '思考过程'}
               </span>
+              {!reasoningStreaming ? (
+                <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  已完成
+                </span>
+              ) : null}
             </div>
             <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform group-open/details:rotate-180" />
           </summary>

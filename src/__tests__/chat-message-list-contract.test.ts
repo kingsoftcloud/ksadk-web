@@ -103,8 +103,20 @@ describe('chat message list contracts', () => {
     expect(source).toContain('max-h-[min(46vh,28rem)]');
     expect(source).toContain('custom-scrollbar');
     expect(source).toContain('border-slate-200/80');
-    expect(source).toContain('生成中');
+    expect(source).toContain('正在思考…');
     expect(source).toContain('leading-7');
+  });
+
+  it('uses the same non-spinning shimmer for legacy reasoning rows', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain("className={cn('truncate', reasoningStreaming && 'waiting-thinking-text')}");
+    expect(source).toContain("reasoningStreaming ? '正在思考…' : '思考过程'");
+    const reasoningSection = source.slice(
+      source.indexOf('{message.reasoning ? ('),
+      source.indexOf('{message.tools', source.indexOf('{message.reasoning ? (')),
+    );
+    expect(reasoningSection).not.toContain('animate-spin');
   });
 
   it('remeasures virtual rows when expandable content changes height', () => {

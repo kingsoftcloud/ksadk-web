@@ -48,10 +48,19 @@ function frameNativeKind(frame: KernelSessionEventFrame): string {
   return String(metadata?.native_item_kind || '');
 }
 
-function frameParts(frame: KernelSessionEventFrame, key: 'initial' | 'snapshot'): unknown[] {
+function frameParts(
+  frame: KernelSessionEventFrame,
+  key: 'initial' | 'update' | 'snapshot',
+): unknown[] {
   const holder = asRecord(frame[key]);
+  if (!holder) return [];
   const parts = holder?.parts;
-  return Array.isArray(parts) ? parts : [];
+  if (Array.isArray(parts)) return parts;
+  // RuntimeEvent/v2 ContentUpdate is one named part, while initial/completed
+  // values are ContentSnapshot objects. Keeping this compatibility branch
+  // local to the wire translator prevents a real delta from being mistaken
+  // for an empty terminal snapshot.
+  return key === 'update' ? [holder] : [];
 }
 
 function partText(part: unknown): string {
@@ -88,6 +97,23 @@ function toolPayload(parts: unknown[]): unknown {
   }
   const text = partsText(parts);
   return text || null;
+}
+
+function runtimeItemMetadata(
+  frame: KernelSessionEventFrame,
+  operation: 'append' | 'replace' | 'completed',
+  partId?: string,
+): Record<string, unknown> {
+  return {
+    RuntimeItem: {
+      RunId: String(frame.run_id || ''),
+      ScopeId: String(frame.scope_id || frame.run_id || ''),
+      ItemId: String(frame.item_id || ''),
+      ...(partId ? { PartId: partId } : {}),
+      Operation: operation,
+      SourceEventId: String(frame.event_id || ''),
+    },
+  };
 }
 
 /**
@@ -151,11 +177,13 @@ export class KernelRunEventTranslator {
     if (eventType === 'item.started') {
       const parts = frameParts(frame, 'initial');
       if (nativeKind === 'userMessage' || looksLikeUserMessage(parts)) return null;
+      if (nativeKind === 'reasoning' || frame.item_kind === 'reasoning') return null;
       if (nativeKind === 'agentMessage' || (!nativeKind && frame.item_kind === 'message')) {
         return {
           ...base(),
           EventType: 'assistant_stream_snapshot',
           Content: { parts: [{ text: '' }] },
+          Metadata: runtimeItemMetadata(frame, 'replace'),
         };
       }
       if (nativeKind && nativeKind !== 'notification') {
@@ -163,6 +191,7 @@ export class KernelRunEventTranslator {
           ...base(),
           EventType: 'tool_call',
           Metadata: {
+            ...runtimeItemMetadata(frame, 'replace'),
             call_id: String(frame.item_id || ''),
             tool_name: nativeKind,
             run_id: runId,
@@ -174,7 +203,7 @@ export class KernelRunEventTranslator {
     }
 
     if (eventType === 'item.updated') {
-      const parts = frameParts(frame, 'snapshot');
+      const parts = frameParts(frame, 'update');
       const part = asRecord(parts[0]);
       const partId = String(part?.part_id || frame.item_id || seq);
       const op = String(frame.op || 'replace');
@@ -187,13 +216,45 @@ export class KernelRunEventTranslator {
           ...base(),
           EventType: 'assistant_stream_snapshot',
           Content: { parts: [{ text: next }] },
+          // The emitted legacy record is cumulative even when the source was
+          // append, so downstream identity reducers must replace this part.
+          Metadata: runtimeItemMetadata(frame, 'replace', partId),
         };
       }
       if (nativeKind === 'reasoning' || frame.item_kind === 'reasoning') {
         return {
           ...base(),
           EventType: 'reasoning',
-          Content: { text: next },
+          Content: { parts: [{ text: delta }] },
+          Metadata: runtimeItemMetadata(
+            frame,
+            op === 'append' ? 'append' : 'replace',
+            partId,
+          ),
+        };
+      }
+      return null;
+    }
+
+    if (eventType === 'item.snapshot_replaced') {
+      const parts = frameParts(frame, 'snapshot');
+      const partId = String(asRecord(parts[0])?.part_id || frame.item_id || seq);
+      const text = partsText(parts);
+      this.textByPart.set(partId, text);
+      if (nativeKind === 'agentMessage' || (!nativeKind && frame.item_kind === 'message')) {
+        return {
+          ...base(),
+          EventType: 'assistant_stream_snapshot',
+          Content: { parts: [{ text }] },
+          Metadata: runtimeItemMetadata(frame, 'replace', partId),
+        };
+      }
+      if (nativeKind === 'reasoning' || frame.item_kind === 'reasoning') {
+        return {
+          ...base(),
+          EventType: 'reasoning',
+          Content: { parts: [{ text }] },
+          Metadata: runtimeItemMetadata(frame, 'replace', partId),
         };
       }
       return null;
@@ -210,25 +271,51 @@ export class KernelRunEventTranslator {
       }
       if (nativeKind === 'agentMessage' || (!nativeKind && frame.item_kind === 'message')) {
         const text = partsText(parts);
-        this.textByPart.set(String(asRecord(parts[0])?.part_id || frame.item_id || seq), text);
+        const partId = String(asRecord(parts[0])?.part_id || frame.item_id || seq);
+        this.textByPart.set(partId, text);
         return {
           ...base(),
           EventType: 'assistant_message',
           Content: { parts: [{ text }] },
+          Metadata: runtimeItemMetadata(frame, 'completed', partId),
         };
       }
       if (nativeKind === 'reasoning' || frame.item_kind === 'reasoning') {
-        return { ...base(), EventType: 'reasoning', Content: { text: partsText(parts) } };
+        const partId = String(asRecord(parts[0])?.part_id || frame.item_id || seq);
+        return {
+          ...base(),
+          EventType: 'reasoning',
+          Content: { parts: [{ text: partsText(parts) }] },
+          Metadata: runtimeItemMetadata(frame, 'completed', partId),
+        };
       }
       if (nativeKind && nativeKind !== 'notification') {
         return {
           ...base(),
           EventType: 'tool_result',
           Metadata: {
+            ...runtimeItemMetadata(frame, 'completed'),
             call_id: String(frame.item_id || ''),
             tool_name: nativeKind,
             run_id: runId,
             tool_output: toolPayload(parts),
+          },
+        };
+      }
+      return null;
+    }
+
+    if (eventType === 'item.failed') {
+      if (nativeKind && nativeKind !== 'notification' && nativeKind !== 'agentMessage' && nativeKind !== 'reasoning') {
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed'),
+            call_id: String(frame.item_id || ''),
+            tool_name: nativeKind,
+            run_id: runId,
+            tool_output: { error: asRecord(frame.error) || frame.error || 'item failed' },
           },
         };
       }

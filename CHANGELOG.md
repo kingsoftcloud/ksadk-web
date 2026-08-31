@@ -2,13 +2,26 @@
 
 ## 0.3.4 - 2026-08-31
 
+- Normalize the real RuntimeEvent/v2 wire shape before presentation: consume
+  `item.updated.update` as a named content part, retain stable
+  `run_id / scope_id / item_id / part_id` identity, apply append versus
+  replace semantics, handle atomic `item.snapshot_replaced`, and settle failed
+  tool items instead of leaving them visibly running.
+- Give each canonical run exactly one transcript owner. Live canonical items
+  replace the same run's legacy replay projection, while reconnect rebuilds the
+  complete durable item timeline. Distinct reasoning items, repeated calls to
+  the same tool, commentary messages, and the final answer no longer collapse
+  into one row or render twice.
 - Keep a conversation turn active until an explicit run-level terminal status
   arrives. Completed user messages, tools, approvals, usage reports, and
   provider notifications no longer unlock the composer or trigger duplicate
   submissions while the agent is still running.
 - Make active reasoning visibly animated with a motion-safe text shimmer,
-  matching WeWork's low-noise thinking treatment while preserving the compact,
-  collapsible completed state.
+  matching WeWork's low-noise thinking treatment across both canonical and
+  legacy rows while preserving the compact, collapsible completed state.
+- Follow new output only while the reader remains near the bottom. Replayed
+  snapshots and terminal layout changes preserve an intentionally scrolled-up
+  viewport instead of pulling it back to the latest token.
 - Publish a dedicated interactive GitHub Pages demo that exercises the shared
   reasoning, tool, approval tray, token-by-token Markdown, feedback, and
   composer components entirely in the browser. It is explicitly labelled as

@@ -477,9 +477,19 @@ export function dispatchRunEventToStores(event: RunEvent) {
           [event.event],
         );
         recoveredEventsByRun.set(runKey, recoveredEvents);
-        useMessageStore.getState().patchMessages((prev) =>
-          mergeRecoveredRunMessages(prev, recoveredEvents, invocationId),
-        );
+        useMessageStore.getState().patchMessages((prev) => {
+          // ConversationItem/v1 is the single presentation owner for a
+          // canonical run. SubscribeSessionEvents remains useful for durable
+          // interactions, checkpoints and lifecycle, but projecting the same
+          // output through the legacy read model creates a second live answer.
+          const canonicalOwnsRun = prev.some((message) => (
+            message.eventType === 'conversation_item_v1'
+            && message.runId === invocationId
+          ));
+          return canonicalOwnsRun
+            ? prev
+            : mergeRecoveredRunMessages(prev, recoveredEvents, invocationId);
+        });
         if (eventHasTerminalRunStatus(event.event)) {
           recoveredEventsByRun.delete(runKey);
         }

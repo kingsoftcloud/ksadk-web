@@ -3,58 +3,49 @@ import { buildBlocksFromHistory } from '../core/run/blocks.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import { buildMessagesFromSessionEvents } from './session-events.js';
 
-function mergeRecoveredText(existing: string | undefined, recovered: string | undefined): string {
-  const previous = String(existing || '');
-  const next = String(recovered || '');
-  if (!previous || !next || previous.endsWith(next)) return previous || next;
-  if (next.startsWith(previous)) return next;
-  return `${previous}${next}`;
-}
-
-function mergeRecoveredTools(
-  existing: Message['tools'] | undefined,
-  recovered: Message['tools'] | undefined,
-): Message['tools'] | undefined {
-  if (!existing) return recovered;
-  if (!recovered) return existing;
-  return Object.fromEntries(
-    [...new Set([...Object.keys(existing), ...Object.keys(recovered)])].map((key) => [
-      key,
-      { ...(existing[key] || {}), ...(recovered[key] || {}) },
-    ]),
-  ) as Message['tools'];
-}
-
 export function mergeRecoveredRunMessages(
   messages: Message[],
   events: SessionEventRecord[],
   invocationId: string,
 ): Message[] {
-  const recovered = (buildMessagesFromSessionEvents(events) as Message[])
-    .filter((message) => message.role === 'model')
-    .at(-1);
-  if (!recovered) return messages;
+  const existingOwned = messages.filter((message) => (
+    message.role === 'model' && message.invocationId === invocationId
+  ));
+  const rawRecovered = (buildMessagesFromSessionEvents(events) as Message[])
+    .filter((message) => message.role === 'model');
+  const recovered = rawRecovered
+    .map((message) => ({
+      ...message,
+      // Old SessionEvent producers have no RuntimeItem identity. Preserve the
+      // existing row id for their single assistant projection so React does
+      // not remount the message on every snapshot.
+      id: !message.itemId && rawRecovered.length === 1
+        ? existingOwned[0]?.id || `${invocationId}:assistant`
+        : message.id,
+      invocationId,
+      blocks: buildBlocksFromHistory({
+        content: message.content,
+        reasoning: message.reasoning,
+        tools: message.tools,
+      }),
+    }));
+  if (recovered.length === 0) return messages;
 
-  const existingIndex = messages.findIndex((message) =>
-    message.role === 'model' && message.invocationId === invocationId,
-  );
-  const existing = existingIndex >= 0 ? messages[existingIndex] : undefined;
-  const content = mergeRecoveredText(existing?.content, recovered.content);
-  const reasoning = mergeRecoveredText(existing?.reasoning, recovered.reasoning);
-  const tools = mergeRecoveredTools(existing?.tools, recovered.tools);
-  const merged: Message = {
-    ...existing,
+  // Re-project the complete durable run snapshot on every event. This is the
+  // same model used by Wework/VeADK: stable item identity owns rows; a terminal
+  // snapshot replaces an item and never concatenates with the previous render.
+  const firstOwnedIndex = messages.findIndex((message) => (
+    message.role === 'model' && message.invocationId === invocationId
+  ));
+  const retained = messages.filter((message) => !(
+    message.role === 'model' && message.invocationId === invocationId
+  ));
+  const insertionIndex = firstOwnedIndex < 0
+    ? retained.length
+    : Math.min(firstOwnedIndex, retained.length);
+  return [
+    ...retained.slice(0, insertionIndex),
     ...recovered,
-    id: existing?.id || recovered.id || `${invocationId}:assistant`,
-    invocationId,
-    content,
-    reasoning,
-    tools,
-    blocks: buildBlocksFromHistory({ content, reasoning, tools }),
-  };
-
-  if (existingIndex < 0) {
-    return [...messages, merged];
-  }
-  return messages.map((message, index) => (index === existingIndex ? merged : message));
+    ...retained.slice(insertionIndex),
+  ];
 }

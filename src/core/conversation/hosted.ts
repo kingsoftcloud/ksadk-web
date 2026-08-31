@@ -345,8 +345,10 @@ export function projectConversationStreamForHostedUi(
 }
 
 /**
- * Replace only this run's canonical projection. Other transports and previous
- * turns remain untouched; equal text from distinct item IDs is never merged.
+ * Replace this run's transcript projection. Once a run has canonical items,
+ * the durable legacy read model for the same run is a replay source, not a
+ * second presentation owner. Other runs/transports remain untouched; equal
+ * text from distinct canonical item IDs is never merged.
  */
 export function mergeConversationRunMessages(
   previous: Message[],
@@ -354,7 +356,8 @@ export function mergeConversationRunMessages(
 ): Message[] {
   const projected = projectConversationStreamForHostedUi(result).messages;
   const belongsToRun = (message: Message) => (
-    message.eventType === EVENT_TYPE && message.runId === result.runId
+    (message.eventType === EVENT_TYPE && message.runId === result.runId)
+    || message.invocationId === result.runId
   );
   const insertionIndex = previous.findIndex(belongsToRun);
   const retained = previous.filter((message) => !belongsToRun(message));
