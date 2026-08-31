@@ -107,6 +107,26 @@ function enrichCanonicalRun(
 }
 
 /**
+ * A RuntimeEvent/v2 run only replaces the compatibility projection once its
+ * terminal assistant output is present. A user item, run transition, or an
+ * open stream snapshot alone proves that the run exists, but does not prove
+ * that replay can render its reply. Treating that partial evidence as
+ * authoritative used to erase a persisted assistant message after refresh.
+ */
+function completedCanonicalRunIds(messages: Message[]): Set<string> {
+  return new Set(
+    messages
+      .filter((message) => (
+        message.role === 'model'
+        && message.eventType === 'assistant_message'
+        && Boolean(String(message.content || '').trim())
+        && Boolean(message.invocationId)
+      ))
+      .map((message) => String(message.invocationId)),
+  );
+}
+
+/**
  * Rebuild the transcript for runs that have canonical RuntimeEvent/v2
  * history. Cumulative ListSessionMessages rows remain only a compatibility
  * fallback for legacy runs; they never co-own a canonical run.
@@ -143,7 +163,6 @@ export function rebuildPersistedSessionHistory(
 
   const projected = (buildMessagesFromSessionEvents(translatedEvents) as Message[])
     .filter((message) => message.invocationId && canonicalRunIds.has(message.invocationId));
-  const projectedRunIds = new Set(projected.map((message) => String(message.invocationId || '')));
   const fallbackByRun = new Map<string, Message[]>();
   for (const message of fallbackMessages) {
     const runId = String(message.invocationId || '');
@@ -151,14 +170,18 @@ export function rebuildPersistedSessionHistory(
     fallbackByRun.set(runId, [...(fallbackByRun.get(runId) || []), message]);
   }
 
-  const canonicalMessages = [...projectedRunIds].flatMap((runId) => enrichCanonicalRun(
+  // A partially persisted canonical run must never make the older Server
+  // projection disappear. This matters during upgrade: a historical runtime
+  // may have written the user item but not a terminal agentMessage item.
+  const completeCanonicalRunIds = completedCanonicalRunIds(projected);
+  const canonicalMessages = [...completeCanonicalRunIds].flatMap((runId) => enrichCanonicalRun(
     projected.filter((message) => message.invocationId === runId),
     fallbackByRun.get(runId) || [],
   ));
   const retainedFallback = fallbackMessages.filter((message) => (
     message.role === 'a2ui'
     || !message.invocationId
-    || !projectedRunIds.has(message.invocationId)
+    || !completeCanonicalRunIds.has(message.invocationId)
   ));
   const messages = [...retainedFallback, ...canonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
@@ -166,7 +189,7 @@ export function rebuildPersistedSessionHistory(
 
   return {
     messages,
-    canonicalRunIds: [...projectedRunIds],
+    canonicalRunIds: [...completeCanonicalRunIds],
     translatedEvents,
   };
 }

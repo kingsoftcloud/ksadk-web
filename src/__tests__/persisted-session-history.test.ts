@@ -38,4 +38,60 @@ describe('rebuildPersistedSessionHistory', () => {
     expect(rebuilt.messages.map((message) => message.content)).toEqual(['先提问', '再回答']);
     expect(rebuilt.messages[1]?.timestamp).toBe(1_700_000_001_000);
   });
+
+  it('keeps the compatibility projection when canonical history contains only a user item', () => {
+    const fallback: Message[] = [
+      {
+        id: 'user-fallback',
+        role: 'user',
+        content: '继续上文',
+        timestamp: 1_700_000_000_000,
+        invocationId: 'run-incomplete',
+      },
+      {
+        id: 'assistant-fallback',
+        role: 'model',
+        content: '这是仍可从兼容投影读取的回复。',
+        timestamp: 1_700_000_001_000,
+        invocationId: 'run-incomplete',
+      },
+    ];
+    const events: PersistedSessionEventRecord[] = [{
+      SeqId: 1,
+      EventId: 'event-user-only',
+      EventType: 'runtime.item.completed',
+      InvocationId: 'run-incomplete',
+      Timestamp: 1_700_000_000 as unknown as string,
+      Content: {
+        runtime_event: {
+          family: 'runtime',
+          event_type: 'item.completed',
+          event_id: 'event-user-only',
+          run_id: 'run-incomplete',
+          scope_id: 'run-incomplete',
+          item_id: 'user-item',
+          item_kind: 'message',
+          snapshot: {
+            parts: [{
+              part_id: 'user-part',
+              content_type: 'data',
+              data: {
+                type: 'userMessage',
+                content: [{ type: 'text', text: '继续上文' }],
+              },
+            }],
+          },
+          source: { metadata: { native_item_kind: 'userMessage' } },
+        },
+      },
+    }];
+
+    const rebuilt = rebuildPersistedSessionHistory(fallback, events, 'session-1');
+
+    expect(rebuilt.messages.map((message) => message.content)).toEqual([
+      '继续上文',
+      '这是仍可从兼容投影读取的回复。',
+    ]);
+    expect(rebuilt.canonicalRunIds).toEqual([]);
+  });
 });
