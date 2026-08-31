@@ -55,6 +55,10 @@ test('npm publishing uses trusted publishing instead of repository tokens', () =
   assert.match(publishWorkflow, /id-token:\s+write/);
   assert.match(publishWorkflow, /npm publish --access public --provenance/);
   assert.doesNotMatch(publishWorkflow, /NODE_AUTH_TOKEN|NPM_TOKEN/);
+  assert.match(
+    publishWorkflow,
+    /actions\/checkout@v4\s+with:\s+fetch-depth:\s+0/,
+  );
   assert.match(publishWorkflow, /playwright install --with-deps chromium/);
   assert.match(publishWorkflow, /npm run release:preflight/);
 });
