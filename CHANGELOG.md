@@ -12,6 +12,11 @@
   complete durable item timeline. Distinct reasoning items, repeated calls to
   the same tool, commentary messages, and the final answer no longer collapse
   into one row or render twice.
+- Rebuild refreshed sessions from the complete persisted RuntimeEvent/v2 log
+  instead of rendering every cumulative `ListSessionMessages` snapshot as a
+  separate answer. Canonical runs retain item identity across reload, while
+  historical runtimes without canonical events continue to use the projected
+  message API as a compatibility fallback.
 - Keep a conversation turn active until an explicit run-level terminal status
   arrives. Completed user messages, tools, approvals, usage reports, and
   provider notifications no longer unlock the composer or trigger duplicate

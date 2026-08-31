@@ -176,24 +176,22 @@ describe('chat message list contracts', () => {
     expect(listSource).toContain('取消运行并保留最近 checkpoint');
   });
 
-  it('uses projected message cursors without duplicating raw event history loads', () => {
+  it('uses canonical event history as the transcript owner with projected messages as fallback', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
     expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
-    // Raw event history must not be loaded for the transcript. The only
-    // allowed listSessionEvents call is the Interaction/v1 pending
-    // replay (0.3.2), which ingests durable interaction facts only and
-    // never issues a submit.
+    // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The durable
+    // message projection is retained only for legacy runs and pagination.
     const listSessionEventsCalls = lifecycleSource
       .split('\n')
       .filter((line) => line.includes('api.listSessionEvents(sessionId'));
-    expect(listSessionEventsCalls).toHaveLength(1);
-    expect(listSessionEventsCalls[0]).toContain('limit: 50');
-    expect(
-      lifecycleSource.indexOf('api.listSessionEvents(sessionId'),
-    ).toBeGreaterThan(lifecycleSource.indexOf('Interaction/v1'));
+    expect(listSessionEventsCalls).toHaveLength(0);
+    expect(lifecycleSource).toContain('loadCompleteSessionEventHistory(');
+    expect(lifecycleSource).toContain('rebuildPersistedSessionHistory(');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 500');
+    expect(lifecycleSource).toContain('canonicalRunIdsBySessionRef');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
   });

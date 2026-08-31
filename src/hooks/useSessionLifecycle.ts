@@ -7,9 +7,11 @@ import { useBootstrapStore } from '../stores/bootstrap.js';
 import { CancelledError } from '../api/client.js';
 import {
   eventHasTerminalRunStatus,
+  maxSeqIdFromEvents,
   sessionEventRunStatus,
 } from '../utils/session-events.js';
 import { mapBackendMessages } from '../utils/messages.js';
+import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
 import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
@@ -20,12 +22,16 @@ import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
-import { createSessionEventCursor } from '../utils/session-event-history.js';
+import {
+  createSessionEventCursor,
+  loadCompleteSessionEventHistory,
+} from '../utils/session-event-history.js';
 import { ingestSessionEventRecord } from '../core/interaction/index.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
+const SESSION_EVENTS_PAGE_SIZE = 500;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 
 function waitForRestoreRetry(signal: AbortSignal): Promise<void> {
@@ -111,6 +117,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const sessionEventCursorRef = useRef(createSessionEventCursor());
   const loadSessionGenerationRef = useRef(0);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
+  const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
   const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
@@ -390,27 +397,51 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (!isStillCurrentSession()) {
           return;
         }
-        const history = mapBackendMessages(messagesData.Messages);
+        const fallbackHistory = mapBackendMessages(messagesData.Messages) as Message[];
+        let history = fallbackHistory;
+        let latestEventSeqId = 0;
+        let canonicalRunIds: string[] = [];
+
+        // RuntimeEvent/v2 is the transcript source of truth. Persisted
+        // ListSessionMessages rows are cumulative snapshots and therefore only
+        // a compatibility fallback for runs without canonical item identity.
+        try {
+          const eventHistory = await loadCompleteSessionEventHistory(
+            sessionId,
+            (targetSessionId, opts) => api.listSessionEvents(targetSessionId, opts),
+            {
+              pageSize: SESSION_EVENTS_PAGE_SIZE,
+              shouldContinue: isStillCurrentSession,
+            },
+          );
+          if (!isStillCurrentSession()) return;
+          if (eventHistory) {
+            latestEventSeqId = maxSeqIdFromEvents(eventHistory.events);
+            const rebuilt = rebuildPersistedSessionHistory(
+              fallbackHistory,
+              eventHistory.events,
+              sessionId,
+            );
+            canonicalRunIds = rebuilt.canonicalRunIds;
+            if (canonicalRunIds.length > 0) {
+              history = rebuilt.messages;
+            }
+            for (const record of eventHistory.events) {
+              ingestSessionEventRecord(record, sessionId);
+            }
+          }
+        } catch (error) {
+          console.warn('[SessionLifecycle] canonical history replay failed:', error);
+        }
+        if (!isStillCurrentSession()) return;
+        canonicalRunIdsBySessionRef.current.set(sessionId, new Set(canonicalRunIds));
         useMessageStore.getState().setMessages(history);
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
           nextCursor: messagesData.NextCursor,
           hasMore: messagesData.HasMore,
         });
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
-        const lastSeqId = messagesData.LatestSeqId || 0;
-
-        // Replay recent durable SessionEvents to restore pending
-        // Interaction/v1 records (refresh / replay never re-submits).
-        try {
-          const eventsData = await api.listSessionEvents(sessionId, { limit: 50 });
-          if (isStillCurrentSession()) {
-            for (const record of (eventsData.Events || []) as unknown[]) {
-              ingestSessionEventRecord(record, sessionId);
-            }
-          }
-        } catch (error) {
-          console.warn('[SessionLifecycle] interaction history replay failed:', error);
-        }
+        const lastSeqId = Math.max(messagesData.LatestSeqId || 0, latestEventSeqId);
 
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
@@ -678,7 +709,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       ) {
         return;
       }
-      const olderMessages = mapBackendMessages(data.Messages);
+      const canonicalRunIds = canonicalRunIdsBySessionRef.current.get(sessionId) || new Set<string>();
+      const olderMessages = (mapBackendMessages(data.Messages) as Message[])
+        .filter((message) => !message.invocationId || !canonicalRunIds.has(message.invocationId));
       const olderIds = new Set(olderMessages.map((message) => message.id));
       const mergedHistory = [
         ...olderMessages,

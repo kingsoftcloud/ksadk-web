@@ -77,6 +77,82 @@ function assistantSnapshot(text, seqId) {
   };
 }
 
+function canonicalRuntimeRecord({
+  seqId,
+  eventType,
+  itemId,
+  itemKind,
+  nativeKind,
+  text = '',
+  operation = 'replace',
+}) {
+  const runtimeEvent = {
+    schema_version: 2,
+    event_id: `canonical-${seqId}`,
+    seq: seqId,
+    timestamp: 1788180974 + seqId,
+    run_id: INVOCATION_ID,
+    scope_id: `scope-${INVOCATION_ID}`,
+    source: {
+      framework: 'codex',
+      metadata: { native_item_kind: nativeKind },
+    },
+    event_type: eventType,
+    item_id: itemId,
+    item_kind: itemKind,
+    ...(eventType === 'item.updated'
+      ? {
+          op: operation,
+          update: {
+            content_type: 'text',
+            part_id: `${itemId}-part`,
+            text,
+          },
+        }
+      : {
+          snapshot: {
+            parts: [{
+              content_type: 'text',
+              part_id: `${itemId}-part`,
+              text,
+              data: nativeKind === 'userMessage'
+                ? { type: 'userMessage', content: [{ text }] }
+                : undefined,
+            }],
+          },
+        }),
+  };
+  const sessionEvent = {
+    schema_version: 1,
+    event_id: `session-${seqId}`,
+    session_id: SESSION_ID,
+    seq: seqId,
+    timestamp: new Date(1788180974000 + seqId * 1000).toISOString(),
+    family: 'runtime',
+    family_version: 2,
+    event_type: eventType,
+    payload: runtimeEvent,
+    run_id: INVOCATION_ID,
+  };
+  return {
+    EventId: `record-${seqId}`,
+    SessionId: SESSION_ID,
+    Author: 'codex',
+    EventType: eventType,
+    Content: { session_event: sessionEvent, runtime_event: runtimeEvent },
+    Metadata: {
+      ksadk_session_event_envelope: true,
+      schema_version: 1,
+      family: 'runtime',
+      family_version: 2,
+      canonical_event_id: sessionEvent.event_id,
+      run_id: INVOCATION_ID,
+    },
+    SeqId: seqId,
+    Timestamp: sessionEvent.timestamp,
+  };
+}
+
 async function installReconnectFixture(page, options = {}) {
   let releaseSubscription;
   const subscriptionGate = options.holdSubscription
@@ -120,8 +196,8 @@ async function installReconnectFixture(page, options = {}) {
             AgentId: 'fixture-agent',
             Title: '正在生成的会话',
             UpdatedAt: updatedAt,
-            ActiveRunStatus: '',
-            ActiveInvocationId: INVOCATION_ID,
+            ActiveRunStatus: options.completedSession ? 'completed' : '',
+            ActiveInvocationId: options.completedSession ? '' : INVOCATION_ID,
           },
           {
             SessionId: OTHER_SESSION_ID,
@@ -144,8 +220,8 @@ async function installReconnectFixture(page, options = {}) {
           ? {
               SessionId: SESSION_ID,
               AgentId: 'fixture-agent',
-              ActiveRunStatus: '',
-              ActiveInvocationId: INVOCATION_ID,
+              ActiveRunStatus: options.completedSession ? 'completed' : '',
+              ActiveInvocationId: options.completedSession ? '' : INVOCATION_ID,
               UpdatedAt: updatedAt,
             }
           : { SessionId: OTHER_SESSION_ID, AgentId: 'fixture-agent', ActiveRunStatus: 'completed' },
@@ -155,7 +231,14 @@ async function installReconnectFixture(page, options = {}) {
       if (options.delayListMessagesMs) {
         await new Promise((resolve) => setTimeout(resolve, options.delayListMessagesMs));
       }
-      payload = body.SessionId === SESSION_ID
+      payload = body.SessionId === SESSION_ID && options.persistedSnapshots
+        ? {
+            Messages: options.persistedSnapshots,
+            LatestSeqId: options.sessionEvents?.at(-1)?.SeqId ?? options.persistedSnapshots.length,
+            HasMore: false,
+            NextCursor: null,
+          }
+        : body.SessionId === SESSION_ID
         ? {
             Messages: [{
               MessageId: 'partial-runtime-message',
@@ -179,6 +262,21 @@ async function installReconnectFixture(page, options = {}) {
             HasMore: false,
             NextCursor: null,
           };
+    }
+    if (action === 'ListSessionEvents') {
+      const sourceEvents = body.SessionId === SESSION_ID
+        ? (options.sessionEvents ?? [])
+        : [];
+      const offset = Number(body.Offset ?? 0);
+      const limit = Number(body.Limit ?? (sourceEvents.length || 1));
+      const end = Math.max(sourceEvents.length - offset, 0);
+      const start = Math.max(end - limit, 0);
+      payload = {
+        Events: sourceEvents.slice(start, end),
+        Total: sourceEvents.length,
+        Offset: offset,
+        Limit: limit,
+      };
     }
     await route.fulfill({
       status: 200,
@@ -251,6 +349,70 @@ test('does not lose restored history when bootstrap state rerenders during a del
   await page.goto('/');
   await expect(page.getByText('刷新后仍应恢复的完整历史。', { exact: true })).toBeVisible();
   fixture.releaseSubscription();
+});
+
+test('rebuilds persisted canonical history once instead of rendering every cumulative message snapshot', async ({ page }) => {
+  const sessionEvents = [
+    canonicalRuntimeRecord({
+      seqId: 1,
+      eventType: 'item.completed',
+      itemId: 'user-1',
+      itemKind: 'message',
+      nativeKind: 'userMessage',
+      text: '请继续。',
+    }),
+    canonicalRuntimeRecord({
+      seqId: 2,
+      eventType: 'item.updated',
+      itemId: 'reasoning-1',
+      itemKind: 'reasoning',
+      nativeKind: 'reasoning',
+      text: '唯一思考过程',
+      operation: 'append',
+    }),
+    canonicalRuntimeRecord({
+      seqId: 3,
+      eventType: 'item.completed',
+      itemId: 'message-1',
+      itemKind: 'message',
+      nativeKind: 'agentMessage',
+      text: '唯一最终答复',
+    }),
+  ];
+  await installReconnectFixture(page, {
+    completedSession: true,
+    sessionEvents,
+    persistedSnapshots: [
+      {
+        MessageId: 'snapshot-1',
+        Role: 'assistant',
+        Content: { text: '唯一最终答复' },
+        InvocationId: INVOCATION_ID,
+        Reasoning: [{ text: '唯一思考过程' }],
+        SeqId: 2,
+      },
+      {
+        MessageId: 'snapshot-2',
+        Role: 'assistant',
+        Content: { text: '唯一最终答复' },
+        InvocationId: INVOCATION_ID,
+        Reasoning: [{ text: '唯一思考过程' }],
+        SeqId: 3,
+      },
+    ],
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByText('唯一最终答复', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /已思考 · 6 字/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /已思考 · 6 字/ }).click();
+  await expect(page.getByText('唯一思考过程', { exact: true })).toHaveCount(1);
+  await page.reload();
+  await expect(page.getByText('唯一最终答复', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /已思考 · 6 字/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /已思考 · 6 字/ }).click();
+  await expect(page.getByText('唯一思考过程', { exact: true })).toHaveCount(1);
 });
 
 test('renders a recovered numbered skill table as GFM instead of raw pipe text', async ({ page }) => {

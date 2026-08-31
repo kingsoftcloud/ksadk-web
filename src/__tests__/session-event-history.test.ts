@@ -42,7 +42,6 @@ describe('session event history loading', () => {
     );
     expect(result?.total).toBe(306);
     expect(calls).toEqual([
-      { offset: 0, limit: 1 },
       { offset: 0, limit: 50 },
       { offset: 50, limit: 50 },
       { offset: 100, limit: 50 },
@@ -75,12 +74,12 @@ describe('session event history loading', () => {
       },
       {
         pageSize: 50,
-        shouldContinue: () => calls < 2,
+        shouldContinue: () => calls < 1,
       },
     );
 
     expect(result).toBeNull();
-    expect(calls).toBe(2);
+    expect(calls).toBe(1);
   });
 
   it('requests the next older page by skipping already loaded latest events', () => {
