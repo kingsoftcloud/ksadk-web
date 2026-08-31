@@ -355,6 +355,12 @@ export function mergeConversationRunMessages(
   result: ConversationStreamResult,
 ): Message[] {
   const projected = projectConversationStreamForHostedUi(result).messages;
+  // A reducer snapshot is allowed to contain only hidden progress or an
+  // extension that this renderer intentionally does not expose.  Such a
+  // snapshot is not a transcript replacement.  Removing the legacy preview
+  // here used to produce the brief blank screen seen during slow/reordered
+  // cloud streams.
+  if (!projected.length) return previous;
   const belongsToRun = (message: Message) => (
     (message.eventType === EVENT_TYPE && message.runId === result.runId)
     || message.invocationId === result.runId

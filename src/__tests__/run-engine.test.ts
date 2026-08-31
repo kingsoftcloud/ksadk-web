@@ -1121,6 +1121,42 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('only finalizes streaming blocks owned by the completed canonical run', () => {
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    useMessageStore.getState().setMessages([
+      {
+        id: 'assistant-run-a',
+        role: 'model',
+        content: '',
+        timestamp: 1,
+        runId: 'run-a',
+        blocks: [
+          { id: 'thinking-a', type: 'thinking', content: 'run a is thinking', status: 'streaming' },
+        ],
+      },
+      {
+        id: 'assistant-run-b',
+        role: 'model',
+        content: '',
+        timestamp: 2,
+        runId: 'run-b',
+        blocks: [
+          { id: 'thinking-b', type: 'thinking', content: 'run b is thinking', status: 'streaming' },
+        ],
+      },
+    ]);
+
+    dispatchRunEventToStores({
+      type: 'stream_ended',
+      sessionId: 'session-live',
+      runId: 'run-a',
+    });
+
+    const [runA, runB] = useMessageStore.getState().messages;
+    expect(runA.blocks?.[0]?.status).toBe('done');
+    expect(runB.blocks?.[0]?.status).toBe('streaming');
+  });
+
   it('settles running tools when a run reaches a terminal status', () => {
     useSessionStore.getState().setCurrentSessionId('session-live');
     dispatchRunEventToStores({

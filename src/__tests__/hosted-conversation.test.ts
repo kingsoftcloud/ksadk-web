@@ -63,6 +63,57 @@ function stream(body: string): Response {
 }
 
 describe('Hosted UI canonical ConversationItem projection', () => {
+  it('keeps the visible fallback when an interim canonical snapshot has no renderable item', async () => {
+    const client = new HttpConversationClient({
+      fetch: vi.fn(async () => stream([
+        frame(1, item(
+          'progress-only',
+          'progress-event',
+          'progress',
+          'conversation.item.progress/v1',
+          { status: 'running' },
+        )),
+        frame(2, item(
+          'progress-terminal',
+          'progress-terminal-event',
+          'progress',
+          'conversation.item.progress/v1',
+          { status: 'completed' },
+          { operation: 'completed', lifecycle: 'completed' },
+        )),
+      ].join(''))),
+      maxReconnects: 0,
+    });
+    useSessionStore.getState().setCurrentSessionId('session-hosted');
+    useMessageStore.getState().setMessages([{
+      id: 'legacy-preview',
+      role: 'model',
+      content: 'foreground preview remains visible',
+      timestamp: 1,
+      invocationId: 'run-hosted',
+    }]);
+
+    await client.streamTurn({
+      bootstrap: { buildId: 'build-hosted', surface: SURFACE },
+      input: buildConversationInput({
+        inputId: 'input-progress-only',
+        sessionId: 'session-hosted',
+        idempotencyKey: 'turn-progress-only',
+        parts: [{ kind: 'text', text: 'hello' }],
+      }),
+      onUpdate: (snapshot) => dispatchRunEventToStores({
+        type: 'conversation_snapshot',
+        result: snapshot,
+        sessionId: 'session-hosted',
+      }),
+    });
+
+    expect(useMessageStore.getState().messages).toContainEqual(expect.objectContaining({
+      id: 'legacy-preview',
+      content: 'foreground preview remains visible',
+    }));
+  });
+
   it('uses one identity reducer across reconnect for text, reasoning, tool, approval and A2UI', async () => {
     const operations = [{
       version: 'v0.9',

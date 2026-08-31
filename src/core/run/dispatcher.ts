@@ -383,7 +383,14 @@ export function dispatchRunEventToStores(event: RunEvent) {
       if (!sessionIsOffscreen) {
         useMessageStore.getState().patchMessages((prev) =>
           prev.map((msg) => {
-            if (msg.role !== 'model' || !msg.blocks?.some((b) => b.status === 'streaming')) {
+            const belongsToEndedRun = !event.runId
+              || msg.runId === event.runId
+              || msg.invocationId === event.runId;
+            if (
+              !belongsToEndedRun
+              || msg.role !== 'model'
+              || !msg.blocks?.some((b) => b.status === 'streaming')
+            ) {
               return msg;
             }
             return {

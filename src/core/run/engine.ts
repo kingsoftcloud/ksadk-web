@@ -341,7 +341,7 @@ export class RunEngineImpl implements RunEngine {
             status: 'completed',
             countEvent: false,
           });
-          this.emit({ type: 'stream_ended' });
+          this.emit({ type: 'stream_ended', sessionId, runId: result.runId });
           return;
         }
 
