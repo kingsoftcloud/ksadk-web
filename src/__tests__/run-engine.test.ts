@@ -188,7 +188,7 @@ describe('RunEngineImpl', () => {
           sessionId: 'session-canonical',
           parts: [{ kind: 'text', text: 'hello canonical' }],
           modelRef: 'model-canonical',
-          approvalMode: 'risk',
+          extensions: { 'ksadk.approval': 'risk' },
         });
         options.onUpdate?.(result);
         return result;

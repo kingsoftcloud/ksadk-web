@@ -61,9 +61,6 @@ const INPUT_KEYS = new Set([
   'parts',
   'modelRef',
   'reasoning',
-  'approvalMode',
-  'collaborationMode',
-  'goalObjective',
   'extensions',
 ]);
 const TEXT_PART_KEYS = new Set(['kind', 'text']);
@@ -73,8 +70,9 @@ const ATTACHMENT_PART_KEYS = new Set([
   'mediaType',
   'name',
 ]);
-const APPROVAL_MODES = new Set(['ask', 'risk', 'full']);
-const COLLABORATION_MODES = new Set(['default', 'plan']);
+const APPROVAL_MODE_EXTENSION = 'ksadk.approval';
+const COLLABORATION_MODE_EXTENSION = 'ksadk.collaboration';
+const GOAL_OBJECTIVE_EXTENSION = 'ksadk.goal';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -136,6 +134,14 @@ function decodeExtensions(value: unknown): Record<string, unknown> | null {
   ))) {
     return null;
   }
+  const approval = extensions[APPROVAL_MODE_EXTENSION];
+  const collaboration = extensions[COLLABORATION_MODE_EXTENSION];
+  const goal = extensions[GOAL_OBJECTIVE_EXTENSION];
+  if ((approval !== undefined && !['ask', 'risk', 'full'].includes(String(approval)))
+    || (collaboration !== undefined && !['default', 'plan'].includes(String(collaboration)))
+    || (goal !== undefined && !boundedString(goal, 4_096))) {
+    return null;
+  }
   return { ...extensions };
 }
 
@@ -152,14 +158,7 @@ export function decodeConversationInput(value: unknown): ConversationInput | nul
     || !Array.isArray(raw.parts)
     || raw.parts.length === 0
     || !optionalBoundedString(raw.modelRef, 256)
-    || !optionalBoundedString(raw.reasoning, 64)
-    || (raw.approvalMode !== undefined
-      && raw.approvalMode !== null
-      && !APPROVAL_MODES.has(String(raw.approvalMode)))
-    || (raw.collaborationMode !== undefined
-      && raw.collaborationMode !== null
-      && !COLLABORATION_MODES.has(String(raw.collaborationMode)))
-    || !optionalBoundedString(raw.goalObjective, 4_096)) {
+    || !optionalBoundedString(raw.reasoning, 64)) {
     return null;
   }
   const parts = raw.parts.map(decodeInputPart);
@@ -174,15 +173,6 @@ export function decodeConversationInput(value: unknown): ConversationInput | nul
     parts: parts as ConversationInputPart[],
     ...(raw.modelRef === undefined ? {} : { modelRef: raw.modelRef as string | null }),
     ...(raw.reasoning === undefined ? {} : { reasoning: raw.reasoning as string | null }),
-    ...(raw.approvalMode === undefined
-      ? {}
-      : { approvalMode: raw.approvalMode as ConversationInput['approvalMode'] }),
-    ...(raw.collaborationMode === undefined
-      ? {}
-      : { collaborationMode: raw.collaborationMode as ConversationInput['collaborationMode'] }),
-    ...(raw.goalObjective === undefined
-      ? {}
-      : { goalObjective: raw.goalObjective as string | null }),
     ...(raw.extensions === undefined ? {} : { extensions }),
   };
 }
@@ -213,10 +203,13 @@ function requiredInputCapabilities(input: ConversationInput): string[] {
   ));
   if (input.modelRef) capabilities.push('model.select');
   if (input.reasoning) capabilities.push('reasoning.effort');
-  if (input.approvalMode) capabilities.push('approval');
-  if (input.collaborationMode === 'plan') capabilities.push('plan');
-  if (input.goalObjective) capabilities.push('goal');
-  capabilities.push(...Object.keys(input.extensions || {}));
+  for (const key of Object.keys(input.extensions || {})) {
+    if (key === APPROVAL_MODE_EXTENSION) capabilities.push('approval');
+    else if (key === COLLABORATION_MODE_EXTENSION) {
+      if (input.extensions?.[key] === 'plan') capabilities.push('plan');
+    } else if (key === GOAL_OBJECTIVE_EXTENSION) capabilities.push('goal');
+    else capabilities.push(key);
+  }
   return [...new Set(capabilities)];
 }
 

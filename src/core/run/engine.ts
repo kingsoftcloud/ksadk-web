@@ -893,16 +893,18 @@ export class RunEngineImpl implements RunEngine {
         && surfacePermitsInput(bootstrap.surface, 'reasoning.effort')
         ? { reasoning: thinkingMode }
         : {}),
-      ...(this.config.permissionMode
-        && surfacePermitsInput(bootstrap.surface, 'approval')
-        ? { approvalMode: this.config.permissionMode }
-        : {}),
-      ...(draft.executionMode === 'plan'
-        ? { collaborationMode: 'plan' as const }
-        : {}),
-      ...(draft.executionMode === 'goal' && text
-        ? { goalObjective: text }
-        : {}),
+      extensions: {
+        ...(this.config.permissionMode
+          && surfacePermitsInput(bootstrap.surface, 'approval')
+          ? { 'ksadk.approval': this.config.permissionMode }
+          : {}),
+        ...(draft.executionMode === 'plan'
+          ? { 'ksadk.collaboration': 'plan' }
+          : {}),
+        ...(draft.executionMode === 'goal' && text
+          ? { 'ksadk.goal': text }
+          : {}),
+      },
     });
     return preflightConversationInput(bootstrap.surface, input);
   }

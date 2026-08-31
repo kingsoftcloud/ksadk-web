@@ -53,9 +53,6 @@ export type ConversationInput = {
   parts: ConversationInputPart[];
   modelRef?: string | null;
   reasoning?: string | null;
-  approvalMode?: 'ask' | 'risk' | 'full' | null;
-  collaborationMode?: 'default' | 'plan' | null;
-  goalObjective?: string | null;
   extensions?: Record<string, unknown>;
 };
 

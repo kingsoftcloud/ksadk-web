@@ -85,10 +85,12 @@ describe('ConversationInput/v1', () => {
       ],
       modelRef: 'model:example',
       reasoning: 'high',
-      approvalMode: 'risk',
-      collaborationMode: 'plan',
-      goalObjective: 'finish the task',
-      extensions: { 'vendor.preview': true },
+      extensions: {
+        'ksadk.approval': 'risk',
+        'ksadk.collaboration': 'plan',
+        'ksadk.goal': 'finish the task',
+        'vendor.preview': true,
+      },
     });
 
     expect(built).toMatchObject({
