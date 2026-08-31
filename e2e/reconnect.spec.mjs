@@ -152,6 +152,9 @@ async function installReconnectFixture(page, options = {}) {
       };
     }
     if (action === 'ListSessionMessages') {
+      if (options.delayListMessagesMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.delayListMessagesMs));
+      }
       payload = body.SessionId === SESSION_ID
         ? {
             Messages: [{
@@ -236,6 +239,18 @@ test('keeps the recovered assistant snapshot visible until the next snapshot arr
   fixture.releaseSubscription();
   await expect(page.getByText('第一段正在生成。第二段继续生成。', { exact: true })).toBeVisible();
   await expect(page.getByText('连接断开或生成出错，请重试')).toHaveCount(0);
+});
+
+test('does not lose restored history when bootstrap state rerenders during a delayed load', async ({ page }) => {
+  const fixture = await installReconnectFixture(page, {
+    holdSubscription: true,
+    delayListMessagesMs: 350,
+    initialAssistantText: '刷新后仍应恢复的完整历史。',
+  });
+
+  await page.goto('/');
+  await expect(page.getByText('刷新后仍应恢复的完整历史。', { exact: true })).toBeVisible();
+  fixture.releaseSubscription();
 });
 
 test('renders a recovered numbered skill table as GFM instead of raw pipe text', async ({ page }) => {

@@ -243,6 +243,11 @@ describe('chat message list contracts', () => {
     const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
 
     expect(appSource).not.toContain('void loadSession(sessionId);');
+    // The lifecycle hook owns this imperative ref. Mirroring a stale React
+    // render back into it can invalidate the in-flight restored-history load:
+    // the header keeps the selected session while the transcript stays empty
+    // until the user clicks the same session again.
+    expect(appSource).not.toContain('currentSessionIdRef.current = currentSessionId;');
     expect(appSource).toContain('clearSessionMessageHistory(sessionId)');
     expect(lifecycleSource).toContain('const isStillCurrentSession = () => (');
     expect(lifecycleSource).toContain('loadSessionGenerationRef.current === generation');
