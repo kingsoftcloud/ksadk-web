@@ -74,14 +74,28 @@ test('published JSON schema describes the executable provenance contract', async
   assert.match(DIGEST, new RegExp(schema.properties.interaction_contract_digest.pattern));
 });
 
-test('the 0.3.3 candidate remains untagged until the protected release', async () => {
-  const result = await checkReleaseProvenance({
-    repoRoot: resolve(import.meta.dirname, '..'),
-    allowUnreleased: true,
+test('candidate tag state is reported from an isolated repository', async () => {
+  await withRepository(async (root) => {
+    await generateReleaseProvenance({
+      repoRoot: root,
+      interactionContractDigest: DIGEST,
+    });
+    git(root, 'add', 'RELEASE_PROVENANCE.json');
+    git(root, 'commit', '--quiet', '-m', 'attest candidate');
+
+    const untagged = await checkReleaseProvenance({
+      repoRoot: root,
+      allowUnreleased: true,
+    });
+    assert.equal(untagged.tag, 'v0.3.3');
+    assert.equal(untagged.tagExists, false);
+    assert.equal(untagged.currentAheadOfPublishedTag, false);
+
+    git(root, 'tag', 'v0.3.3');
+    const tagged = await checkReleaseProvenance({ repoRoot: root });
+    assert.equal(tagged.tagExists, true);
+    assert.equal(tagged.currentAheadOfPublishedTag, false);
   });
-  assert.equal(result.tag, 'v0.3.3');
-  assert.equal(result.tagExists, false);
-  assert.equal(result.currentAheadOfPublishedTag, false);
 });
 
 test('formal provenance generation uses a clean frozen commit and cannot re-sign a tag', async () => {
