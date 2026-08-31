@@ -218,7 +218,9 @@ test('Hosted UI sends an allowed attachment and selected model only through cano
       },
     ],
     modelRef: 'fixture-model-alt',
-    approvalMode: 'risk',
+    extensions: {
+      'ksadk.approval': 'risk',
+    },
   });
   expect(input.idempotencyKey).toBe(
     `conversation:${String(input.inputId).replace(/^input:/, '')}`,
