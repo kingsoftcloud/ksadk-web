@@ -3,6 +3,10 @@ import type { AgentControlError, AgentControlReceipt } from '../../types/agent-c
 import type { HostedChatTransport } from '../../types/api.js';
 import type { ModelCatalogItem } from '../../components/chat/types.js';
 import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
+import type {
+  ConversationClient,
+  ConversationStreamResult,
+} from '../conversation/types.js';
 
 export type RunStage =
   | 'idle' | 'creating-session' | 'uploading-files'
@@ -62,6 +66,7 @@ export type RunEvent =
   | { type: 'rate_limited'; retryAfterSec?: number; message?: string; sessionId?: string | null }
   | { type: 'terminal'; status: string; sessionId?: string | null }
   | { type: 'stream_event'; event: import('../../types/session-events.js').SessionEventRecord; sessionId?: string | null }
+  | { type: 'conversation_snapshot'; result: ConversationStreamResult; sessionId?: string | null }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }
   | { type: 'a2ui_surface_update'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }
   | { type: 'a2ui_surface_end'; surfaceId: string; sessionId?: string | null }
@@ -85,6 +90,8 @@ export type RunEngineConfig = {
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;
+  /** Optional headless ConversationSurface/Input/Item v1 transport. */
+  conversationClient?: ConversationClient;
 };
 
 export interface RunEngine {

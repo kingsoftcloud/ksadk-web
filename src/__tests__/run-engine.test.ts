@@ -7,6 +7,15 @@ import { useSessionStore } from '../stores/session.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { dispatchRunEventToStores, resetDispatcherState } from '../core/run/dispatcher.js';
 import { sharedInteractionStore } from '../core/interaction/index.js';
+import {
+  ConversationClientError,
+  preflightConversationInput,
+  projectConversationItems,
+  type ConversationClient,
+  type ConversationItem,
+  type ConversationStreamResult,
+  type ConversationSurface,
+} from '../public/conversation.js';
 
 function createApiFacade(calls: Record<string, unknown>[], uploadCalls: FormData[] = []): ApiFacade {
   return {
@@ -89,6 +98,70 @@ async function waitForEngineIdle(engine: RunEngineImpl) {
   }
 }
 
+const CANONICAL_SURFACE: ConversationSurface = {
+  apiVersion: 'conversation.ksadk.io/v1',
+  kind: 'ConversationSurface',
+  surfaceId: 'surface-hosted',
+  sessionId: 'session-canonical',
+  providerRef: 'provider:test',
+  inputs: [
+    { name: 'text', mode: 'native' },
+    { name: 'model.select', mode: 'native' },
+    { name: 'approval', mode: 'native' },
+    { name: 'plan', mode: 'native' },
+    { name: 'goal', mode: 'native' },
+  ],
+  outputs: [{ name: 'text', mode: 'native' }],
+};
+
+function canonicalResult(): ConversationStreamResult {
+  const items: ConversationItem[] = [
+    {
+      apiVersion: 'conversation.ksadk.io/v1',
+      kindVersion: 1,
+      itemId: 'canonical-answer',
+      sourceEventIds: ['canonical-event-1'],
+      sessionId: 'session-canonical',
+      runId: 'run-canonical',
+      kind: 'assistant_text',
+      operation: 'completed',
+      lifecycle: 'completed',
+      visibility: 'public',
+      payloadSchemaRef: 'conversation.item.assistant_text/v1',
+      payload: { text: 'canonical answer' },
+      nativeRef: {},
+    },
+    {
+      apiVersion: 'conversation.ksadk.io/v1',
+      kindVersion: 1,
+      itemId: 'canonical-terminal',
+      sourceEventIds: ['canonical-event-2'],
+      sessionId: 'session-canonical',
+      runId: 'run-canonical',
+      kind: 'progress',
+      operation: 'completed',
+      lifecycle: 'completed',
+      visibility: 'public',
+      payloadSchemaRef: 'conversation.item.progress/v1',
+      payload: {},
+      nativeRef: {},
+    },
+  ];
+  const state = {
+    items,
+    appliedSources: [
+      JSON.stringify(['canonical-answer', 'canonical-event-1']),
+      JSON.stringify(['canonical-terminal', 'canonical-event-2']),
+    ],
+  };
+  return {
+    cursor: 2,
+    runId: 'run-canonical',
+    state,
+    presentation: projectConversationItems(state),
+  };
+}
+
 describe('RunEngineImpl', () => {
   afterEach(async () => {
     await Promise.all([...activeEngines].map(waitForEngineIdle));
@@ -99,6 +172,163 @@ describe('RunEngineImpl', () => {
     useCheckpointStore.getState().clearSessionCheckpoints();
     resetDispatcherState();
     vi.unstubAllGlobals();
+  });
+
+  it('uses ConversationSurface as the canonical Hosted UI path without calling legacy RunAgent', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const result = canonicalResult();
+    const conversationClient: ConversationClient = {
+      getSurface: vi.fn(async () => ({
+        buildId: 'build-canonical',
+        surface: CANONICAL_SURFACE,
+      })),
+      streamTurn: vi.fn(async (options) => {
+        expect(options.input).toMatchObject({
+          apiVersion: 'conversation.ksadk.io/v1',
+          sessionId: 'session-canonical',
+          parts: [{ kind: 'text', text: 'hello canonical' }],
+          modelRef: 'model-canonical',
+          extensions: { 'ksadk.approval': 'risk' },
+        });
+        options.onUpdate?.(result);
+        return result;
+      }),
+    };
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({
+      agentId: 'agent-canonical',
+      apiFormats: ['responses'],
+      agentFramework: 'codex',
+      selectedModel: 'model-canonical',
+      thinkingMode: 'auto',
+      permissionMode: 'risk',
+      conversationClient,
+    });
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+
+    expect(engine.start({
+      text: 'hello canonical',
+      attachments: [],
+      sessionId: 'session-canonical',
+    })).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForEngineIdle(engine);
+
+    expect(conversationClient.getSurface).toHaveBeenCalledOnce();
+    expect(conversationClient.streamTurn).toHaveBeenCalledOnce();
+    expect(calls).toEqual([]);
+    expect(useMessageStore.getState().messages).toContainEqual(expect.objectContaining({
+      itemId: 'canonical-answer',
+      content: 'canonical answer',
+    }));
+  });
+
+  it('keeps the existing Responses path only when the conversation surface endpoint is absent', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const conversationClient: ConversationClient = {
+      getSurface: vi.fn(async () => {
+        throw new ConversationClientError(
+          'conversation_http_error',
+          'not found',
+          { status: 404 },
+        );
+      }),
+      streamTurn: vi.fn(),
+    };
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({
+      agentId: 'agent-legacy',
+      apiFormats: ['responses'],
+      agentFramework: 'codex',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      conversationClient,
+    });
+
+    expect(engine.start({
+      text: 'legacy request',
+      attachments: [],
+      sessionId: 'session-canonical',
+    })).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+
+    expect(conversationClient.streamTurn).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ AgentId: 'agent-legacy' });
+  });
+
+  it('fails closed for a declared or unhealthy canonical path instead of bypassing it', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const surface = {
+      ...CANONICAL_SURFACE,
+      inputs: [{ name: 'text', mode: 'native' as const }],
+    };
+    const conversationClient: ConversationClient = {
+      getSurface: vi.fn(async () => ({ buildId: 'build-canonical', surface })),
+      streamTurn: vi.fn(async (options) => {
+        preflightConversationInput(surface, options.input);
+        return canonicalResult();
+      }),
+    };
+    const engine = createRunEngine(createApiFacade(calls));
+    const errors: Error[] = [];
+    engine.updateConfig({
+      agentId: 'agent-canonical',
+      apiFormats: ['responses'],
+      agentFramework: 'codex',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      conversationClient,
+    });
+    engine.subscribe((event) => {
+      if (event.type === 'error') errors.push(event.error);
+    });
+
+    expect(engine.start({
+      text: 'make a plan',
+      attachments: [],
+      executionMode: 'plan',
+      sessionId: 'session-canonical',
+    })).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForEngineIdle(engine);
+
+    expect(calls).toEqual([]);
+    expect(errors).toEqual([expect.objectContaining({
+      code: 'conversation_input_unsupported',
+      capability: 'plan',
+    })]);
+
+    const unhealthy: ConversationClient = {
+      getSurface: vi.fn(async () => {
+        throw new ConversationClientError(
+          'conversation_http_error',
+          'unavailable',
+          { status: 503 },
+        );
+      }),
+      streamTurn: vi.fn(),
+    };
+    const unhealthyEngine = createRunEngine(createApiFacade(calls));
+    unhealthyEngine.updateConfig({
+      agentId: 'agent-canonical',
+      apiFormats: ['responses'],
+      agentFramework: 'codex',
+      selectedModel: '',
+      thinkingMode: 'auto',
+      conversationClient: unhealthy,
+    });
+    expect(unhealthyEngine.start({
+      text: 'must not bypass',
+      attachments: [],
+      sessionId: 'session-canonical',
+    })).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForEngineIdle(unhealthyEngine);
+    expect(calls).toEqual([]);
+    expect(unhealthy.streamTurn).not.toHaveBeenCalled();
   });
 
   it('projects AG-UI approval resolution without reviving the pending card', () => {
@@ -266,6 +496,16 @@ describe('RunEngineImpl', () => {
   });
 
   it('settles session streaming when AG-UI finishes with an approval interrupt', async () => {
+    const absentConversationClient: ConversationClient = {
+      getSurface: vi.fn(async () => {
+        throw new ConversationClientError(
+          'conversation_http_error',
+          'not found',
+          { status: 404 },
+        );
+      }),
+      streamTurn: vi.fn(),
+    };
     const fetchMock = vi.fn(async () => new Response(
       [
         'data: {"type":"RUN_STARTED","threadId":"session-approval","runId":"run-approval"}',
@@ -285,6 +525,7 @@ describe('RunEngineImpl', () => {
       agentFramework: 'langgraph',
       selectedModel: '',
       thinkingMode: 'auto',
+      conversationClient: absentConversationClient,
       hostedChatTransport: {
         Protocol: 'ag-ui',
         Runtime: 'copilotkit',
@@ -299,6 +540,8 @@ describe('RunEngineImpl', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(absentConversationClient.getSurface).toHaveBeenCalledOnce();
+    expect(absentConversationClient.streamTurn).not.toHaveBeenCalled();
     await waitForEngineIdle(engine);
 
     expect(useStreamingStore.getState().getSessionActivity('session-approval')).toMatchObject({

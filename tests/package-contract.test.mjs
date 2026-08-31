@@ -11,11 +11,15 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.deepEqual(packageJson.publishConfig, { access: 'public' });
   assert.equal(packageJson.scripts['build:lib'], 'vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json');
   assert.equal(packageJson.scripts['build:all'], 'npm run build:ksadk && npm run build:hosted && npm run build:lib');
+  assert.equal(packageJson.scripts['test:node'], 'node --test tests/*.test.mjs');
+  assert.equal(packageJson.scripts['release:provenance'], 'node scripts/release-provenance.mjs');
+  assert.equal(packageJson.scripts['release:preflight'], 'node scripts/release-preflight.mjs');
 
   assert.deepEqual(Object.keys(packageJson.exports).sort(), [
     '.',
     './capabilities',
     './components',
+    './conversation',
     './runtime',
     './styles',
     './types',
@@ -23,6 +27,8 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.equal(packageJson.exports['./runtime'].types, './dist-lib/public/runtime.d.ts');
   assert.equal(packageJson.exports['./runtime'].import, './dist-lib/runtime.js');
   assert.equal(packageJson.exports['./components'].types, './dist-lib/public/components.d.ts');
+  assert.equal(packageJson.exports['./conversation'].types, './dist-lib/public/conversation.d.ts');
+  assert.equal(packageJson.exports['./conversation'].import, './dist-lib/conversation.js');
   assert.equal(packageJson.exports['./capabilities'].types, './dist-lib/public/capabilities.d.ts');
   assert.equal(packageJson.exports['./types'].types, './dist-lib/public/types.d.ts');
   assert.equal(packageJson.exports['./styles'], './dist-lib/styles.css');
@@ -32,6 +38,8 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.ok(packageJson.files.includes('README.md'));
   assert.ok(packageJson.files.includes('CHANGELOG.md'));
   assert.ok(packageJson.files.includes('LICENSE'));
+  assert.ok(packageJson.files.includes('RELEASE_PROVENANCE.json'));
+  assert.ok(packageJson.files.includes('schemas'));
 });
 
 test('react is a peer dependency for hosted-ui consumers', () => {
@@ -47,6 +55,8 @@ test('npm publishing uses trusted publishing instead of repository tokens', () =
   assert.match(publishWorkflow, /id-token:\s+write/);
   assert.match(publishWorkflow, /npm publish --access public --provenance/);
   assert.doesNotMatch(publishWorkflow, /NODE_AUTH_TOKEN|NPM_TOKEN/);
+  assert.match(publishWorkflow, /playwright install --with-deps chromium/);
+  assert.match(publishWorkflow, /npm run release:preflight/);
 });
 
 test('successful npm release automatically deploys the matching Pages bundle', () => {

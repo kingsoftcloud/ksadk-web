@@ -76,6 +76,17 @@ function bootstrap() {
 async function installFixture(page) {
   const state = { approved: false, created: false, aguiBodies: [] };
 
+  // AG-UI is the intended transport in this fixture. Explicitly advertise
+  // canonical ConversationSurface absence so production fallback semantics
+  // are exercised instead of receiving Vite's index.html with HTTP 200.
+  await page.route('**/api/v1/agents/**/conversation-surface**', async (route) => {
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'conversation surface unavailable in AG-UI fixture' }),
+    });
+  });
+
   await page.route('**/agentengine/agui', async (route) => {
     const body = route.request().postDataJSON();
     state.aguiBodies.push(body);

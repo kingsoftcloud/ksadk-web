@@ -116,6 +116,17 @@ function resolvedEvent(interactionId = 'int-1', outcome = 'approved') {
  * tabs hit the same server truth.
  */
 async function installFixture(page, state, options = {}) {
+  // This suite exercises the pre-ConversationSurface Interaction/v1 path.
+  // An explicit 404 is the only valid compatibility signal; allowing Vite's
+  // HTML fallback to answer 200 would correctly fail closed as bad JSON.
+  await page.route('**/api/v1/agents/**/conversation-surface**', async (route) => {
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'conversation surface unavailable in legacy fixture' }),
+    });
+  });
+
   await page.route('**/agentengine/api/v1/**', async (route) => {
     const action = new URL(route.request().url()).pathname.split('/').pop();
 

@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.3 - 2026-08-28
+
+### Headless conversation surface
+
+- Add the Node/SSR-safe `@kingsoftcloud/ksadk-web/conversation` entrypoint with
+  strict ConversationSurface/Input/Item v1 decoders, input preflight, bounded
+  HTTP/SSE reconnect, passive renderer data, and the shared identity reducer.
+- Route the bundled Hosted UI through the same conversation client and reducer
+  when a valid Surface is advertised. A Surface HTTP 404 keeps the existing
+  Responses / AG-UI / legacy path; malformed surfaces and server failures do
+  not silently bypass the declared contract.
+- Preserve different item identities even when their text is equal, ignore
+  replayed `(itemId, sourceEventId)` pairs, keep terminal items monotonic, and
+  retain additive unknown item kinds for replay/audit without rendering a
+  repeated transcript card; newer schemas on known kinds safely downgrade to
+  one passive fallback card.
+- Preserve the canonical item timeline for renderers: a separate native tool
+  result enriches its original `callId` tool card rather than rendering a
+  duplicate card, while reasoning, tools and answers keep their original
+  interleaving. Add an immutable exact `kind + payloadSchemaRef` trusted
+  renderer catalog; providers cannot supply executable UI code in event
+  payloads or claim a future schema version.
+- Keep `output` and `reasoning` summaries as a compatibility view beside the
+  canonical timeline, so Studio can adopt the shared reducer without a second
+  text aggregation implementation during the 0.8.3 transition.
+- Keep canonical approvals without a durable `revision` read-only. Consumers
+  must not guess a revision or submit them through the revision-CAS Interaction
+  API until the server supplies an authoritative value.
+- Make attachment upload and model selection first-class canonical inputs in
+  Hosted UI. Unsupported inputs and oversized files fail before upload or turn
+  submission instead of silently degrading to legacy `RunAgent` behavior.
+- Prove the headless entrypoint from a minimal independent consumer across two
+  turns, cursor reconnect, text/tool/approval/unknown-item rendering, and
+  revision-CAS approval submission.
+- Add a repeatable release preflight that runs unit, Node contract, lint, all
+  production builds, canonical Conversation browser E2E, provenance checks,
+  npm packing, and a clean tarball-install public API smoke test.
+
 ## 0.3.2 - 2026-08-21
 
 Release candidate for the durable Interaction/v1 web experience. This is the

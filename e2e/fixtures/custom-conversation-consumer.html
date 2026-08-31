@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Independent Conversation Consumer</title>
+  </head>
+  <body>
+    <main>
+      <h1>Independent Conversation Consumer</h1>
+      <form id="composer">
+        <label for="message">Message</label>
+        <textarea id="message" name="message"></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <p id="status" role="status">ready</p>
+      <section id="timeline" aria-label="Canonical timeline"></section>
+    </main>
+    <script type="module" src="./custom-conversation-consumer.ts"></script>
+  </body>
+</html>

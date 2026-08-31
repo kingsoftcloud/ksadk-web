@@ -23,6 +23,11 @@ import {
 import { mergeRecoveredRunMessages } from '../../utils/recovered-run.js';
 import { isFailedToolOutput } from '../../utils/tool-display.js';
 import type { Message } from '../../components/chat/types.js';
+import {
+  mergeConversationRunMessages,
+  projectConversationStreamForHostedUi,
+} from '../conversation/hosted.js';
+import { sharedInteractionStore } from '../interaction/index.js';
 
 const TERMINAL_COMPLETE_STATUSES = new Set(['completed']);
 const TERMINAL_ERROR_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'incomplete']);
@@ -507,6 +512,19 @@ export function dispatchRunEventToStores(event: RunEvent) {
           });
         }
       }
+      break;
+    }
+
+    case 'conversation_snapshot': {
+      const projected = projectConversationStreamForHostedUi(event.result);
+      for (const interaction of projected.interactions) {
+        sharedInteractionStore.upsert(interaction);
+      }
+      ms.patchMessages((previous) => mergeConversationRunMessages(
+        previous,
+        event.result,
+      ));
+      bumpEventCount(event.sessionId);
       break;
     }
 
