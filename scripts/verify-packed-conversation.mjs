@@ -6,6 +6,7 @@ import {
   decodeConversationInput,
   decodeConversationItem,
   decodeConversationSurface,
+  preflightConversationInput,
   projectConversationItems,
 } from '@kingsoftcloud/ksadk-web/conversation';
 
@@ -18,6 +19,10 @@ const input = buildConversationInput({
   idempotencyKey: 'packed-turn-1',
   parts: [{ kind: 'text', text: 'hello from packed consumer' }],
   modelRef: 'packed-model',
+  extensions: {
+    'ksadk.approval': 'risk',
+    'ksadk.collaboration': 'default',
+  },
 });
 assert.deepEqual(decodeConversationInput(input), input);
 
@@ -30,10 +35,12 @@ const surface = decodeConversationSurface({
   inputs: [
     { name: 'text', mode: 'native' },
     { name: 'model.select', mode: 'native' },
+    { name: 'approval', mode: 'native' },
   ],
   outputs: [{ name: 'text', mode: 'native' }],
 });
 assert.equal(surface?.apiVersion, 'conversation.ksadk.io/v1');
+assert.deepEqual(preflightConversationInput(surface, input), input);
 
 const item = decodeConversationItem({
   apiVersion: 'conversation.ksadk.io/v1',
