@@ -7,7 +7,7 @@ import {
 import type { SessionEventRecord } from '../types/session-events.js';
 import { buildMessagesFromSessionEvents } from './session-events.js';
 
-type PersistedSessionEventRecord = SessionEventRecord & {
+export type PersistedSessionEventRecord = SessionEventRecord & {
   Content?: SessionEventRecord['Content'] & {
     runtime_event?: Record<string, unknown>;
     session_event?: Record<string, unknown>;
@@ -21,7 +21,12 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function eventTimestamp(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // RuntimeEvent/v2 timestamps are Unix seconds while the legacy message
+    // projection and JavaScript Date APIs use milliseconds. Normalise before
+    // sorting or a refreshed run places every user row after all model items.
+    return value > 0 && value < 100_000_000_000 ? value * 1000 : value;
+  }
   const parsed = Date.parse(String(value || ''));
   return Number.isFinite(parsed) ? parsed : Date.now();
 }
