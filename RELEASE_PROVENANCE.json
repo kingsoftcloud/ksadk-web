@@ -2,6 +2,6 @@
   "schema_version": 1,
   "package": "@kingsoftcloud/ksadk-web",
   "version": "0.3.4",
-  "source_commit": "207fc6468a7ae4a904ba782f28d6c2d80def866c",
+  "source_commit": "4a63ace692e04780468eda73193507111b576e06",
   "interaction_contract_digest": "47e1003e03d97abeba232cc3e03a14b9cbcf78b1109870ccd2ce371f073b6211"
 }
