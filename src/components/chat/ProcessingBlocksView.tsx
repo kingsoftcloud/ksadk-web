@@ -86,7 +86,7 @@ function ThinkingRow({ block }: { block: ThinkingBlock }) {
           data-testid={generating ? 'thinking-indicator' : undefined}
           role={generating ? 'status' : undefined}
         >
-          {generating ? '正在思考' : '已思考'}
+          {generating ? '正在思考…' : '已思考'}
         </span>
         {!generating && (
           <>

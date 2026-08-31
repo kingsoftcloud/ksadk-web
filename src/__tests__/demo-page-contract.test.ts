@@ -16,6 +16,10 @@ describe('public demo page contract', () => {
     expect(demo).toContain('不会连接或冒充真实 Agent');
     expect(demo).toContain('setMessages');
     expect(demo).toContain('status: \'streaming\'');
+    expect(demo).toContain('<InteractionTray');
+    expect(demo).toContain('<FeedbackControls');
+    expect(demo).toContain('window.setInterval');
+    expect(demo).toContain('按字符增量渲染正文');
     expect(pages).toContain('npm run build:demo');
     expect(pages).toContain('path: dist-demo');
   });
@@ -29,7 +33,7 @@ describe('public demo page contract', () => {
     const styles = readFileSync(resolve(repoRoot, 'src/index.css'), 'utf8');
     expect(source).toContain("generating && 'waiting-thinking-text'");
     expect(source).toContain("data-testid={generating ? 'thinking-indicator'");
-    expect(source).toContain("generating ? '正在思考' : '已思考'");
+    expect(source).toContain("generating ? '正在思考…' : '已思考'");
     expect(styles).toContain('@keyframes waiting-thinking-text');
     expect(styles).toContain('animation: waiting-thinking-text 1.6s linear infinite');
     expect(styles).toContain('@media (prefers-reduced-motion: reduce)');

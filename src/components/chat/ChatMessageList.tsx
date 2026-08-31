@@ -618,18 +618,21 @@ function ToolPayloadBlock({
   );
 }
 
-function FeedbackControls({
+export function FeedbackControls({
   isLastMessage,
   isStreaming,
   message,
   onDeleteFeedback,
   onSubmitFeedback,
+  alwaysVisible = false,
 }: {
   isLastMessage: boolean;
   isStreaming: boolean;
   message: Message;
   onDeleteFeedback: (message: Message) => void;
   onSubmitFeedback: ChatMessageListProps['onSubmitFeedback'];
+  /** Public demo and embedded review surfaces may keep the feedback controls visible. */
+  alwaysVisible?: boolean;
 }) {
   const [commentOpen, setCommentOpen] = useState(false);
   const [comment, setComment] = useState(message.feedback?.comment || '');
@@ -652,7 +655,12 @@ function FeedbackControls({
   };
 
   return (
-    <div className="mt-2 flex flex-col gap-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+    <div
+      className={cn(
+        'mt-2 flex flex-col gap-2 transition-opacity duration-150 focus-within:opacity-100',
+        alwaysVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+      )}
+    >
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
         <button
           type="button"

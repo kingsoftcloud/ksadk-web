@@ -10,9 +10,10 @@
   matching WeWork's low-noise thinking treatment while preserving the compact,
   collapsible completed state.
 - Publish a dedicated interactive GitHub Pages demo that exercises the shared
-  reasoning, tool, Markdown, and composer components entirely in the browser.
-  It is explicitly labelled as local sample data instead of attempting to
-  connect to a nonexistent Agent backend.
+  reasoning, tool, approval tray, token-by-token Markdown, feedback, and
+  composer components entirely in the browser. It is explicitly labelled as
+  local sample data instead of attempting to connect to a nonexistent Agent
+  backend.
 
 ## 0.3.3 - 2026-08-28
 
