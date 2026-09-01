@@ -165,7 +165,7 @@ describe('HttpConversationClient', () => {
             operation: 'completed',
             lifecycle: 'completed',
             payloadSchemaRef: 'conversation.item.progress/v1',
-            payload: {},
+            payload: { status: 'completed' },
           })),
         ].join(''));
       }
@@ -203,6 +203,48 @@ describe('HttpConversationClient', () => {
     expect(result.cursor).toBe(3);
     expect(result.runId).toBe('run-1');
     expect(result.presentation.textItems[0]?.text).toBe('hello world');
+    expect(result.presentation.terminalStatus).toBe('completed');
+  });
+
+  it('does not treat a completed progress item as a completed run', async () => {
+    const calls: string[] = [];
+    const completedNotification = item('source-notification', '', {
+      itemId: 'notification-1',
+      kind: 'progress',
+      operation: 'completed',
+      lifecycle: 'completed',
+      payloadSchemaRef: 'conversation.item.progress/v1',
+      payload: { message: 'autoApprovalReview' },
+    });
+    const fetcher = vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.includes('conversation:stream')) {
+        return stream(frame(1, 'item.completed', completedNotification));
+      }
+      return stream(frame(2, 'run.completed', item('source-terminal', '', {
+        itemId: 'run-end',
+        kind: 'progress',
+        operation: 'completed',
+        lifecycle: 'completed',
+        payloadSchemaRef: 'conversation.item.progress/v1',
+        payload: { status: 'completed' },
+      })));
+    });
+    const client = new HttpConversationClient({
+      fetch: fetcher,
+      maxReconnects: 1,
+      sleep: async () => {},
+    });
+
+    const result = await client.streamTurn({
+      bootstrap: { buildId: 'build-1', surface: SURFACE },
+      input: input(),
+    });
+
+    expect(calls).toEqual([
+      '/api/v1/builds/build-1/conversation:stream',
+      '/api/v1/runs/run-1/events?after=1',
+    ]);
     expect(result.presentation.terminalStatus).toBe('completed');
   });
 

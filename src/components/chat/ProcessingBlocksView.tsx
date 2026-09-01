@@ -80,13 +80,14 @@ function ThinkingRow({ block }: { block: ThinkingBlock }) {
         onClick={() => setOpen((value) => !value)}
         className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] leading-5 text-slate-400 transition-colors hover:bg-slate-100/70 hover:text-slate-500 dark:text-slate-500 dark:hover:bg-slate-800/40 dark:hover:text-slate-400"
       >
-        <Sparkles
-          className={cn(
-            'h-3.5 w-3.5 shrink-0',
-            generating && 'animate-pulse motion-reduce:animate-none',
-          )}
-        />
-        <span className="min-w-0 truncate">{generating ? '思考中' : '已思考'}</span>
+        {!generating && <Sparkles className="h-3.5 w-3.5 shrink-0" />}
+        <span
+          className={cn('min-w-0 truncate', generating && 'waiting-thinking-text')}
+          data-testid={generating ? 'thinking-indicator' : undefined}
+          role={generating ? 'status' : undefined}
+        >
+          {generating ? '正在思考…' : '已思考'}
+        </span>
         {!generating && (
           <>
             <span className="text-slate-300 dark:text-slate-600">·</span>

@@ -61,7 +61,7 @@ export type RunEvent =
     }
   | { type: 'compaction'; phase: string; trigger?: string; compactedUntilSeqId?: number; sessionId?: string | null }
   | { type: 'system_message'; content: string; sessionId?: string | null }
-  | { type: 'stream_ended'; sessionId?: string | null }
+  | { type: 'stream_ended'; sessionId?: string | null; runId?: string | null }
   | { type: 'error'; error: Error; sessionId?: string | null }
   | { type: 'rate_limited'; retryAfterSec?: number; message?: string; sessionId?: string | null }
   | { type: 'terminal'; status: string; sessionId?: string | null }

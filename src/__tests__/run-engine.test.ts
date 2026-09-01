@@ -143,7 +143,7 @@ function canonicalResult(): ConversationStreamResult {
       lifecycle: 'completed',
       visibility: 'public',
       payloadSchemaRef: 'conversation.item.progress/v1',
-      payload: {},
+      payload: { status: 'completed' },
       nativeRef: {},
     },
   ];
@@ -222,6 +222,51 @@ describe('RunEngineImpl', () => {
       itemId: 'canonical-answer',
       content: 'canonical answer',
     }));
+  });
+
+  it('keeps one transcript owner when canonical and durable run projections overlap', () => {
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+    const result = canonicalResult();
+
+    dispatchRunEventToStores({
+      type: 'stream_event',
+      sessionId: 'session-canonical',
+      event: {
+        EventId: 'legacy-final-before-canonical',
+        EventType: 'assistant_message',
+        SessionId: 'session-canonical',
+        InvocationId: 'run-canonical',
+        SeqId: 10,
+        Content: { parts: [{ text: 'canonical answer' }] },
+      },
+    });
+    dispatchRunEventToStores({
+      type: 'conversation_snapshot',
+      sessionId: 'session-canonical',
+      result,
+    });
+    dispatchRunEventToStores({
+      type: 'stream_event',
+      sessionId: 'session-canonical',
+      event: {
+        EventId: 'legacy-final-after-canonical',
+        EventType: 'assistant_message',
+        SessionId: 'session-canonical',
+        InvocationId: 'run-canonical',
+        SeqId: 11,
+        Content: { parts: [{ text: 'canonical answer' }] },
+      },
+    });
+
+    const answers = useMessageStore.getState().messages.filter(
+      (message) => message.role === 'model' && message.content === 'canonical answer',
+    );
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({
+      eventType: 'conversation_item_v1',
+      runId: 'run-canonical',
+      itemId: 'canonical-answer',
+    });
   });
 
   it('keeps the existing Responses path only when the conversation surface endpoint is absent', async () => {
@@ -1054,6 +1099,27 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('removes only a terminal answer mirrored at the tail of legacy reasoning', () => {
+    dispatchRunEventToStores({
+      type: 'reasoning_delta',
+      messageId: 'assistant-legacy',
+      delta: 'I will summarize. 最终答案',
+    });
+    dispatchRunEventToStores({
+      type: 'text_final',
+      messageId: 'assistant-legacy',
+      text: '最终答案',
+    });
+
+    const message = useMessageStore.getState().messages[0];
+    expect(message.reasoning).toBe('I will summarize. ');
+    expect(message.content).toBe('最终答案');
+    expect(message.blocks).toEqual([
+      expect.objectContaining({ type: 'thinking', content: 'I will summarize. ', status: 'done' }),
+      expect.objectContaining({ type: 'text', content: '最终答案', status: 'done' }),
+    ]);
+  });
+
   it('settles an offscreen session when its Responses stream ends after a session switch', () => {
     useSessionStore.getState().setCurrentSessionId('session-visible');
     useStreamingStore.getState().setSessionStreaming('session-background', true);
@@ -1074,6 +1140,42 @@ describe('RunEngineImpl', () => {
       status: 'completed',
       phase: '运行完成',
     });
+  });
+
+  it('only finalizes streaming blocks owned by the completed canonical run', () => {
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    useMessageStore.getState().setMessages([
+      {
+        id: 'assistant-run-a',
+        role: 'model',
+        content: '',
+        timestamp: 1,
+        runId: 'run-a',
+        blocks: [
+          { id: 'thinking-a', type: 'thinking', content: 'run a is thinking', status: 'streaming' },
+        ],
+      },
+      {
+        id: 'assistant-run-b',
+        role: 'model',
+        content: '',
+        timestamp: 2,
+        runId: 'run-b',
+        blocks: [
+          { id: 'thinking-b', type: 'thinking', content: 'run b is thinking', status: 'streaming' },
+        ],
+      },
+    ]);
+
+    dispatchRunEventToStores({
+      type: 'stream_ended',
+      sessionId: 'session-live',
+      runId: 'run-a',
+    });
+
+    const [runA, runB] = useMessageStore.getState().messages;
+    expect(runA.blocks?.[0]?.status).toBe('done');
+    expect(runB.blocks?.[0]?.status).toBe('streaming');
   });
 
   it('settles running tools when a run reaches a terminal status', () => {
@@ -1290,6 +1392,10 @@ describe('RunEngineImpl', () => {
       },
     });
     const settledSessionIds: Array<string | null> = [];
+    const events: Array<{ type: string; error?: Error }> = [];
+    engine.subscribe((event) => {
+      events.push(event);
+    });
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -1317,6 +1423,8 @@ describe('RunEngineImpl', () => {
     expect(calls[0]).toMatchObject({ SessionId: 'session-history' });
     expect(createdSessions).toEqual([]);
     expect(settledSessionIds).toEqual(['session-history']);
+    expect(events.some((event) => event.type === 'activity' && 'phase' in event && event.phase === '运行完成')).toBe(false);
+    expect(events.find((event) => event.type === 'error')?.error?.message).toContain('空响应流');
   });
 
   it('does not create a second session or replay a prompt after an empty first stream', async () => {
@@ -1338,6 +1446,10 @@ describe('RunEngineImpl', () => {
         });
       },
     });
+    const events: Array<{ type: string; error?: Error }> = [];
+    engine.subscribe((event) => {
+      events.push(event);
+    });
 
     engine.updateConfig({
       agentId: 'agent-live',
@@ -1354,6 +1466,8 @@ describe('RunEngineImpl', () => {
     expect(createdSessions).toEqual(['session-1']);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ SessionId: 'session-1' });
+    expect(events.some((event) => event.type === 'activity' && 'phase' in event && event.phase === '运行完成')).toBe(false);
+    expect(events.find((event) => event.type === 'error')?.error?.message).toContain('空响应流');
   });
 
   it('keeps response.failed as failed instead of overwriting it as completed', async () => {

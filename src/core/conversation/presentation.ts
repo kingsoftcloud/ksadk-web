@@ -20,8 +20,37 @@ const SUPPORTED_SCHEMAS: Partial<Record<ConversationItemKind, string>> = {
   error: 'conversation.item.error/v1',
 };
 
-function terminal(item: ConversationItem): boolean {
+function itemLifecycleTerminal(item: ConversationItem): boolean {
   return item.lifecycle === 'completed' || item.lifecycle === 'failed';
+}
+
+const FAILED_RUN_STATUSES = new Set([
+  'aborted',
+  'canceled',
+  'cancelled',
+  'failed',
+  'incomplete',
+  'interrupted',
+]);
+
+/**
+ * Return a run-level terminal state only for an explicit run status.
+ *
+ * Item lifecycle is scoped to one item. A completed user message, tool call,
+ * approval, usage report, or provider notification must never unlock the
+ * composer while the containing run is still active.
+ */
+export function conversationTerminalStatus(
+  item: ConversationItem,
+): 'completed' | 'failed' | undefined {
+  if ((item.kind !== 'progress' && item.kind !== 'error')
+    || !itemLifecycleTerminal(item)) return undefined;
+  const status = typeof item.payload.status === 'string'
+    ? item.payload.status.toLowerCase()
+    : '';
+  if (status === 'completed') return 'completed';
+  if (FAILED_RUN_STATUSES.has(status)) return 'failed';
+  return undefined;
 }
 
 function schemaSupported(item: ConversationItem): boolean {
@@ -93,7 +122,7 @@ function mergeTimelineItem(
   previous: ConversationItem,
   incoming: ConversationItem,
 ): ConversationItem {
-  const preserveTerminal = terminal(previous) && !terminal(incoming);
+  const preserveTerminal = itemLifecycleTerminal(previous) && !itemLifecycleTerminal(incoming);
   return {
     ...previous,
     ...incoming,
@@ -160,7 +189,7 @@ export function projectConversationItems(
   ];
   const failures = supported.filter((item) => item.kind === 'error');
   const terminalItem = [...supported].reverse().find((item) => (
-    (item.kind === 'progress' || item.kind === 'error') && terminal(item)
+    conversationTerminalStatus(item) !== undefined
   ));
 
   return {
@@ -197,8 +226,6 @@ export function projectConversationItems(
       })),
     ],
     runId: visible.at(-1)?.runId || '',
-    terminalStatus: terminalItem
-      ? terminalItem.lifecycle === 'failed' ? 'failed' : 'completed'
-      : undefined,
+    terminalStatus: terminalItem ? conversationTerminalStatus(terminalItem) : undefined,
   };
 }

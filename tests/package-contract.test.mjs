@@ -10,7 +10,8 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
   assert.deepEqual(packageJson.publishConfig, { access: 'public' });
   assert.equal(packageJson.scripts['build:lib'], 'vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json');
-  assert.equal(packageJson.scripts['build:all'], 'npm run build:ksadk && npm run build:hosted && npm run build:lib');
+  assert.equal(packageJson.scripts['build:demo'], 'VITE_DEMO_MODE=1 VITE_BASE_PATH=./ vite build --outDir dist-demo');
+  assert.equal(packageJson.scripts['build:all'], 'npm run build:ksadk && npm run build:hosted && npm run build:demo && npm run build:lib');
   assert.equal(packageJson.scripts['test:node'], 'node --test tests/*.test.mjs');
   assert.equal(packageJson.scripts['release:provenance'], 'node scripts/release-provenance.mjs');
   assert.equal(packageJson.scripts['release:preflight'], 'node scripts/release-preflight.mjs');
@@ -65,7 +66,7 @@ test('npm publishing uses trusted publishing instead of repository tokens', () =
 
 test('successful npm release automatically deploys the matching Pages bundle', () => {
   assert.match(publishWorkflow, /actions\/upload-pages-artifact@v3/);
-  assert.match(publishWorkflow, /path:\s+dist-ksadk/);
+  assert.match(publishWorkflow, /path:\s+dist-demo/);
   assert.match(publishWorkflow, /deploy-pages:\s*[\s\S]*needs:\s+publish/);
   assert.match(publishWorkflow, /pages:\s+write/);
   assert.match(publishWorkflow, /actions\/deploy-pages@v4/);

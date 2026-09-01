@@ -20,6 +20,20 @@ export {
   createTrustedRendererCatalog,
   surfacePermitsInput,
 } from '../core/conversation/index.js';
+export {
+  persistedRuntimeFrame,
+  rebuildPersistedSessionHistory,
+} from '../utils/persisted-session-history.js';
+export type {
+  PersistedSessionEventRecord,
+} from '../utils/persisted-session-history.js';
+export type {
+  BlockStatus,
+  ProcessingBlock,
+  TextBlock,
+  ThinkingBlock,
+  ToolBlock,
+} from '../core/run/blocks.js';
 export type {
   ConversationArtifact,
   ConversationCapability,

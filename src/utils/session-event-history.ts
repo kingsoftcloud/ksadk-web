@@ -45,32 +45,20 @@ export async function loadCompleteSessionEventHistory(
   const shouldContinue = options?.shouldContinue || (() => true);
   const shouldAbort = () => !shouldContinue();
 
-  const probe = await listSessionEvents(sessionId, { offset: 0, limit: 1 });
+  const first = await listSessionEvents(sessionId, { offset: 0, limit: pageSize });
   if (shouldAbort()) return null;
 
-  const total = Math.max(0, Number(probe.Total ?? probe.Events?.length ?? 0) || 0);
-  if (total <= 1) {
+  const total = Math.max(0, Number(first.Total ?? first.Events?.length ?? 0) || 0);
+  if (total <= (first.Events?.length ?? 0)) {
     return {
-      events: ((probe.Events || []) as SessionEventRecord[]),
+      events: ((first.Events || []) as SessionEventRecord[]),
       total,
-      offset: Number(probe.Offset ?? 0),
-      limit: Number(probe.Limit ?? probe.Events?.length ?? 0),
+      offset: Number(first.Offset ?? 0),
+      limit: Number(first.Limit ?? first.Events?.length ?? 0),
     };
   }
 
-  const tailPage = resolveOlderSessionEventPage({ offset: 0, total }, pageSize);
-  if (!tailPage) {
-    return {
-      events: [],
-      total,
-      offset: 0,
-      limit: 0,
-    };
-  }
-  const tail = await listSessionEvents(sessionId, tailPage);
-  if (shouldAbort()) return null;
-
-  let merged = (tail.Events || []) as SessionEventRecord[];
+  let merged = (first.Events || []) as SessionEventRecord[];
   let loadedCount = merged.length;
 
   while (loadedCount < total) {

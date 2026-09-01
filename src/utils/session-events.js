@@ -394,11 +394,45 @@ function buildCompactionLabel(trigger, status, historical) {
 }
 
 function assistantOutputDedupeKey(invocationId, message) {
+  if (message?.itemId) {
+    return [
+      'runtime-item',
+      message.runId || invocationId,
+      message.scopeId || invocationId,
+      message.itemId,
+    ].join('\u0000');
+  }
   return [
     invocationId,
     message.content || '',
     message.reasoning || '',
   ].join('\u0000');
+}
+
+function assistantEventProjectionKey(event) {
+  const invocationId = String(event?.InvocationId || '').trim();
+  const runtimeItem = event?.Metadata?.RuntimeItem;
+  if (runtimeItem?.ItemId) {
+    return [
+      'runtime-item',
+      runtimeItem.RunId || invocationId,
+      runtimeItem.ScopeId || invocationId,
+      runtimeItem.ItemId,
+    ].join('\u0000');
+  }
+  return invocationId;
+}
+
+function runtimeIdentityFromEvent(event) {
+  const runtimeItem = event?.Metadata?.RuntimeItem;
+  if (!runtimeItem?.ItemId) return null;
+  return {
+    id: `runtime:${runtimeItem.RunId || event.InvocationId || 'run'}:${runtimeItem.ScopeId || event.InvocationId || 'scope'}:${runtimeItem.ItemId}`,
+    runId: String(runtimeItem.RunId || event.InvocationId || ''),
+    scopeId: String(runtimeItem.ScopeId || event.InvocationId || ''),
+    itemId: String(runtimeItem.ItemId),
+    partId: runtimeItem.PartId ? String(runtimeItem.PartId) : undefined,
+  };
 }
 
 function isResponsesMirrorEvent(event) {
@@ -494,12 +528,14 @@ function toolMessageFromSessionEvent(event) {
               ?? {},
           ),
         };
+  const runtimeIdentity = runtimeIdentityFromEvent(event);
   return {
-    id: event.EventId || String(Date.now() + Math.random()),
+    id: runtimeIdentity?.id || event.EventId || String(Date.now() + Math.random()),
     role: 'model',
     content: '',
     timestamp: event.Timestamp || Date.now(),
     eventType,
+    ...(runtimeIdentity || {}),
     tools: {
       [name]: tool,
     },
@@ -547,10 +583,7 @@ function mergeMessageMetadata(existing, incoming) {
   return {
     ...existing,
     reasoning: mergeReasoningText(existing.reasoning, incoming.reasoning),
-    tools: {
-      ...(existing.tools || {}),
-      ...(incoming.tools || {}),
-    },
+    tools: mergeToolMaps(existing.tools, incoming.tools),
     eventId: incoming.eventId || existing.eventId,
     responseId: incoming.responseId || existing.responseId,
     traceId: incoming.traceId || existing.traceId,
@@ -603,6 +636,7 @@ export function buildCompactionMessage(options) {
  */
 export function buildMessageFromSessionEvent(event) {
   const eventType = event?.EventType || '';
+  const runtimeIdentity = runtimeIdentityFromEvent(event);
   if (eventType === 'run_status') {
     if (event.Content?.status === 'failed') {
       return {
@@ -645,12 +679,13 @@ export function buildMessageFromSessionEvent(event) {
     const reasoning = parsed.text || textFromUnknown(event.Metadata?.reasoning);
     return reasoning
       ? {
-          id: event.EventId || String(Date.now() + Math.random()),
+          id: runtimeIdentity?.id || event.EventId || String(Date.now() + Math.random()),
           role: 'model',
           content: '',
           reasoning,
           timestamp: event.Timestamp || Date.now(),
           eventType,
+          ...(runtimeIdentity || {}),
         }
       : null;
   }
@@ -686,7 +721,7 @@ export function buildMessageFromSessionEvent(event) {
   ).trim();
 
   return {
-    id: event.EventId || String(Date.now() + Math.random()),
+    id: runtimeIdentity?.id || event.EventId || String(Date.now() + Math.random()),
     role: eventType === 'user_message' ? 'user' : 'model',
     content: parsed.text,
     timestamp: event.Timestamp || Date.now(),
@@ -696,6 +731,7 @@ export function buildMessageFromSessionEvent(event) {
     traceId: traceId || undefined,
     rootSpanId: rootSpanId || undefined,
     attachments: parsed.attachments,
+    ...(runtimeIdentity || {}),
     ...responsesEnhancements,
   };
 }
@@ -724,22 +760,22 @@ export function buildMessagesFromSessionEvents(events = []) {
     uniqueEvents.push(event);
   }
   const canonicalUserMessageKeys = new Set();
-  const finalAssistantInvocations = new Set();
-  const latestSnapshotByInvocation = new Map();
+  const finalAssistantKeys = new Set();
+  const latestSnapshotByKey = new Map();
   for (const event of uniqueEvents) {
     if (event?.EventType !== 'user_message' || isResponsesMirrorEvent(event)) {
       if (event?.EventType === 'assistant_message') {
-        const invocationId = String(event.InvocationId || '').trim();
-        if (invocationId) {
-          finalAssistantInvocations.add(invocationId);
+        const projectionKey = assistantEventProjectionKey(event);
+        if (projectionKey) {
+          finalAssistantKeys.add(projectionKey);
         }
       }
       if (isAssistantStreamSnapshotEvent(event)) {
-        const invocationId = String(event.InvocationId || '').trim();
-        if (invocationId) {
-          const existing = latestSnapshotByInvocation.get(invocationId);
+        const projectionKey = assistantEventProjectionKey(event);
+        if (projectionKey) {
+          const existing = latestSnapshotByKey.get(projectionKey);
           if (!existing || eventOrderValue(event) >= eventOrderValue(existing)) {
-            latestSnapshotByInvocation.set(invocationId, event);
+            latestSnapshotByKey.set(projectionKey, event);
           }
         }
       }
@@ -752,14 +788,14 @@ export function buildMessagesFromSessionEvents(events = []) {
   }
   const replayEvents = uniqueEvents.filter((event) => {
     if (isAssistantStreamSnapshotEvent(event)) {
-      const invocationId = String(event.InvocationId || '').trim();
-      if (!invocationId) {
+      const projectionKey = assistantEventProjectionKey(event);
+      if (!projectionKey) {
         return true;
       }
-      if (finalAssistantInvocations.has(invocationId)) {
+      if (finalAssistantKeys.has(projectionKey)) {
         return false;
       }
-      return latestSnapshotByInvocation.get(invocationId) === event;
+      return latestSnapshotByKey.get(projectionKey) === event;
     }
     if (event?.EventType !== 'user_message' || !isResponsesMirrorEvent(event)) {
       return true;
@@ -792,12 +828,21 @@ export function buildMessagesFromSessionEvents(events = []) {
   /** @type {Array<Message & { invocationId?: string }>} */
   const messages = [];
   const responseIdToIndex = new Map();
+  const runtimeItemToIndex = new Map();
   /** @type {(Message & { invocationId?: string }) | null} */
   let pendingReasoning = null;
   /** @type {Map<string, Message & { invocationId?: string }>} */
   const pendingToolsByInvocation = new Map();
 
   const pushMessage = (message) => {
+    const runtimeItemKey = message?.itemId
+      ? `${message.runId || message.invocationId || ''}\u0000${message.scopeId || message.invocationId || ''}\u0000${message.itemId}`
+      : '';
+    const runtimeItemIndex = runtimeItemKey ? runtimeItemToIndex.get(runtimeItemKey) : undefined;
+    if (runtimeItemIndex !== undefined) {
+      messages[runtimeItemIndex] = mergeMessageMetadata(messages[runtimeItemIndex], message);
+      return;
+    }
     const responseId = String(message?.responseId || '').trim();
     const existingIndex = responseId ? responseIdToIndex.get(responseId) : undefined;
     if (existingIndex !== undefined) {
@@ -806,6 +851,9 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     if (responseId) {
       responseIdToIndex.set(responseId, messages.length);
+    }
+    if (runtimeItemKey) {
+      runtimeItemToIndex.set(runtimeItemKey, messages.length);
     }
     messages.push(message);
   };
@@ -849,6 +897,11 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     if (TOOL_EVENT_TYPES.has(message.eventType)) {
       const invocationId = String(event.InvocationId || '').trim();
+      if (message.itemId) {
+        flushPendingReasoning();
+        pushMessage(message);
+        continue;
+      }
       if (!invocationId) {
         flushPendingReasoning();
         pushMessage(message);
@@ -873,12 +926,26 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
     if (message.eventType === 'reasoning') {
       const invocationId = String(event.InvocationId || '').trim();
+      const runtimeOperation = String(event.Metadata?.RuntimeItem?.Operation || '').toLowerCase();
+      const sameRuntimeItem = Boolean(
+        message.itemId
+        && pendingReasoning?.itemId === message.itemId
+        && pendingReasoning?.runId === message.runId
+        && pendingReasoning?.scopeId === message.scopeId,
+      );
+      const sameLegacyInvocation = Boolean(
+        !message.itemId
+        && !pendingReasoning?.itemId
+        && invocationId
+        && pendingReasoning?.invocationId === invocationId,
+      );
       if (
         pendingReasoning &&
-        invocationId &&
-        pendingReasoning.invocationId === invocationId
+        (sameRuntimeItem || sameLegacyInvocation)
       ) {
-        pendingReasoning.reasoning = `${pendingReasoning.reasoning || ''}${message.reasoning || ''}`;
+        pendingReasoning.reasoning = runtimeOperation === 'replace' || runtimeOperation === 'completed'
+          ? message.reasoning
+          : `${pendingReasoning.reasoning || ''}${message.reasoning || ''}`;
         pendingReasoning.timestamp = message.timestamp;
         continue;
       }

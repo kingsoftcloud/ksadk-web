@@ -103,8 +103,20 @@ describe('chat message list contracts', () => {
     expect(source).toContain('max-h-[min(46vh,28rem)]');
     expect(source).toContain('custom-scrollbar');
     expect(source).toContain('border-slate-200/80');
-    expect(source).toContain('生成中');
+    expect(source).toContain('正在思考…');
     expect(source).toContain('leading-7');
+  });
+
+  it('uses the same non-spinning shimmer for legacy reasoning rows', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain("className={cn('truncate', reasoningStreaming && 'waiting-thinking-text')}");
+    expect(source).toContain("reasoningStreaming ? '正在思考…' : '思考过程'");
+    const reasoningSection = source.slice(
+      source.indexOf('{message.reasoning ? ('),
+      source.indexOf('{message.tools', source.indexOf('{message.reasoning ? (')),
+    );
+    expect(reasoningSection).not.toContain('animate-spin');
   });
 
   it('remeasures virtual rows when expandable content changes height', () => {
@@ -164,24 +176,22 @@ describe('chat message list contracts', () => {
     expect(listSource).toContain('取消运行并保留最近 checkpoint');
   });
 
-  it('uses projected message cursors without duplicating raw event history loads', () => {
+  it('uses canonical event history as the transcript owner with projected messages as fallback', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
     expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
-    // Raw event history must not be loaded for the transcript. The only
-    // allowed listSessionEvents call is the Interaction/v1 pending
-    // replay (0.3.2), which ingests durable interaction facts only and
-    // never issues a submit.
+    // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The durable
+    // message projection is retained only for legacy runs and pagination.
     const listSessionEventsCalls = lifecycleSource
       .split('\n')
       .filter((line) => line.includes('api.listSessionEvents(sessionId'));
-    expect(listSessionEventsCalls).toHaveLength(1);
-    expect(listSessionEventsCalls[0]).toContain('limit: 50');
-    expect(
-      lifecycleSource.indexOf('api.listSessionEvents(sessionId'),
-    ).toBeGreaterThan(lifecycleSource.indexOf('Interaction/v1'));
+    expect(listSessionEventsCalls).toHaveLength(0);
+    expect(lifecycleSource).toContain('loadCompleteSessionEventHistory(');
+    expect(lifecycleSource).toContain('rebuildPersistedSessionHistory(');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 500');
+    expect(lifecycleSource).toContain('canonicalRunIdsBySessionRef');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
   });
@@ -231,6 +241,11 @@ describe('chat message list contracts', () => {
     const dispatcherSource = readFileSync(resolve(repoRoot, 'src/core/run/dispatcher.ts'), 'utf8');
 
     expect(appSource).not.toContain('void loadSession(sessionId);');
+    // The lifecycle hook owns this imperative ref. Mirroring a stale React
+    // render back into it can invalidate the in-flight restored-history load:
+    // the header keeps the selected session while the transcript stays empty
+    // until the user clicks the same session again.
+    expect(appSource).not.toContain('currentSessionIdRef.current = currentSessionId;');
     expect(appSource).toContain('clearSessionMessageHistory(sessionId)');
     expect(lifecycleSource).toContain('const isStillCurrentSession = () => (');
     expect(lifecycleSource).toContain('loadSessionGenerationRef.current === generation');

@@ -117,6 +117,31 @@ export function finalizeTextBlock(
   return [...next, { id: nextId('text'), type: 'text', content: text, status: 'done' }];
 }
 
+/**
+ * Compatibility for runtimes that mislabeled a streamed final answer as the
+ * tail of reasoning and only emitted the answer's authoritative snapshot at
+ * completion. This is deliberately narrow: it touches only the last thinking
+ * block and only when that block ends with the exact terminal answer.
+ */
+export function stripMirroredTerminalAnswerFromThinking(
+  blocks: ProcessingBlock[] | undefined,
+  terminalAnswer: string,
+): ProcessingBlock[] {
+  if (!terminalAnswer) return [...(blocks ?? [])];
+  const next = [...(blocks ?? [])];
+  const last = next[next.length - 1];
+  if (last?.type !== 'thinking' || !last.content.endsWith(terminalAnswer)) {
+    return next;
+  }
+  const content = last.content.slice(0, -terminalAnswer.length);
+  if (!content) {
+    next.pop();
+    return next;
+  }
+  next[next.length - 1] = { ...last, content };
+  return next;
+}
+
 /** upsert 工具块(对应 wework mergeProcessingBlock + finalize):
  *  先关闭打开的 thinking 块,再按 toolName 找已有 tool 块更新,否则新建。 */
 export function upsertToolBlock(

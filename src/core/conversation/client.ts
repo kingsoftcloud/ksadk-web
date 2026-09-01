@@ -4,7 +4,10 @@ import {
   preflightConversationInput,
 } from './contracts.js';
 import { ConversationClientError } from './errors.js';
-import { projectConversationItems } from './presentation.js';
+import {
+  conversationTerminalStatus,
+  projectConversationItems,
+} from './presentation.js';
 import { ConversationItemReducer } from './reducer.js';
 import type {
   ConversationClientOptions,
@@ -227,10 +230,7 @@ async function consumeEventStream(
 }
 
 function terminal(result: ConversationStreamResult): boolean {
-  return result.state.items.some((item) => (
-    (item.kind === 'progress' || item.kind === 'error')
-    && (item.lifecycle === 'completed' || item.lifecycle === 'failed')
-  ));
+  return result.state.items.some((item) => conversationTerminalStatus(item) !== undefined);
 }
 
 /**

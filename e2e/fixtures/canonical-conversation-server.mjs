@@ -359,6 +359,7 @@ async function streamFirstReconnect(response, requestUrl, request) {
         sourceEventId: 'event-terminal-1',
         kind: 'progress',
         schema: 'conversation.item.progress/v1',
+        payload: { status: 'completed' },
         operation: 'completed',
         lifecycle: 'completed',
       }));
@@ -403,6 +404,7 @@ async function streamSecondTurn(response) {
     sourceEventId: 'event-terminal-2',
     kind: 'progress',
     schema: 'conversation.item.progress/v1',
+    payload: { status: 'completed' },
     operation: 'completed',
     lifecycle: 'completed',
   }));

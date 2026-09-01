@@ -4,6 +4,7 @@ import {
   appendTextBlock,
   finalizeTextBlock,
   finalizeThinkingBlocks,
+  stripMirroredTerminalAnswerFromThinking,
   upsertToolBlock,
 } from './blocks.js';
 import { useMessageStore } from '../../stores/message.js';
@@ -145,11 +146,25 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
-            ? {
-                ...msg,
-                content: event.text,
-                blocks: finalizeTextBlock(msg.blocks, event.text),
-              }
+            ? (() => {
+                const mirroredLegacyAnswer = Boolean(
+                  event.text
+                  && !msg.content
+                  && msg.reasoning?.endsWith(event.text),
+                );
+                const reasoning = mirroredLegacyAnswer
+                  ? msg.reasoning!.slice(0, -event.text.length)
+                  : msg.reasoning;
+                const blocks = mirroredLegacyAnswer
+                  ? stripMirroredTerminalAnswerFromThinking(msg.blocks, event.text)
+                  : msg.blocks;
+                return {
+                  ...msg,
+                  reasoning,
+                  content: event.text,
+                  blocks: finalizeTextBlock(blocks, event.text),
+                };
+              })()
             : msg,
         ),
       );
@@ -383,7 +398,14 @@ export function dispatchRunEventToStores(event: RunEvent) {
       if (!sessionIsOffscreen) {
         useMessageStore.getState().patchMessages((prev) =>
           prev.map((msg) => {
-            if (msg.role !== 'model' || !msg.blocks?.some((b) => b.status === 'streaming')) {
+            const belongsToEndedRun = !event.runId
+              || msg.runId === event.runId
+              || msg.invocationId === event.runId;
+            if (
+              !belongsToEndedRun
+              || msg.role !== 'model'
+              || !msg.blocks?.some((b) => b.status === 'streaming')
+            ) {
               return msg;
             }
             return {
@@ -477,9 +499,19 @@ export function dispatchRunEventToStores(event: RunEvent) {
           [event.event],
         );
         recoveredEventsByRun.set(runKey, recoveredEvents);
-        useMessageStore.getState().patchMessages((prev) =>
-          mergeRecoveredRunMessages(prev, recoveredEvents, invocationId),
-        );
+        useMessageStore.getState().patchMessages((prev) => {
+          // ConversationItem/v1 is the single presentation owner for a
+          // canonical run. SubscribeSessionEvents remains useful for durable
+          // interactions, checkpoints and lifecycle, but projecting the same
+          // output through the legacy read model creates a second live answer.
+          const canonicalOwnsRun = prev.some((message) => (
+            message.eventType === 'conversation_item_v1'
+            && message.runId === invocationId
+          ));
+          return canonicalOwnsRun
+            ? prev
+            : mergeRecoveredRunMessages(prev, recoveredEvents, invocationId);
+        });
         if (eventHasTerminalRunStatus(event.event)) {
           recoveredEventsByRun.delete(runKey);
         }

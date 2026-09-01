@@ -254,9 +254,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
 
   useEffect(() => {
     agentIdRef.current = agentId;
-    currentSessionIdRef.current = currentSessionId;
     writePersistedSessionId(agentId, currentSessionId);
-  }, [agentId, currentSessionId, agentIdRef, currentSessionIdRef]);
+  }, [agentId, currentSessionId, agentIdRef]);
 
   useEffect(() => {
     if (!isMobile) {

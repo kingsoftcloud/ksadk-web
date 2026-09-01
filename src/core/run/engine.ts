@@ -341,7 +341,7 @@ export class RunEngineImpl implements RunEngine {
             status: 'completed',
             countEvent: false,
           });
-          this.emit({ type: 'stream_ended' });
+          this.emit({ type: 'stream_ended', sessionId, runId: result.runId });
           return;
         }
 
@@ -1188,11 +1188,13 @@ export class RunEngineImpl implements RunEngine {
     const decoder = new TextDecoder();
     let buffer = '';
     let messageCreated = false;
+    let receivedByteCount = 0;
 
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        receivedByteCount += value.byteLength;
         if (!messageCreated) {
           messageCreated = true;
           this.emit({ type: 'assistant_message_created', messageId, invocationId });
@@ -1254,6 +1256,10 @@ export class RunEngineImpl implements RunEngine {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
         throw error;
       }
+    }
+
+    if (receivedByteCount === 0) {
+      throw new Error('运行时返回了空响应流，请稍后重试；若问题持续，请检查运行时状态。');
     }
 
     return {};

@@ -59,13 +59,75 @@ describe('KernelRunEventTranslator', () => {
   it('accumulates item.updated append deltas into cumulative snapshots', () => {
     const t = new KernelRunEventTranslator('sess-1');
     const first = t.translate(
-      itemFrame(11, 'item.updated', 'agentMessage', { op: 'replace', ...AGENT_SNAPSHOT('你好') }),
+      itemFrame(11, 'item.updated', 'agentMessage', {
+        item_id: 'message-1',
+        op: 'replace',
+        update: { part_id: 'p2', content_type: 'text', text: '你好' },
+      }),
     );
     const second = t.translate(
-      itemFrame(12, 'item.updated', 'agentMessage', { op: 'append', ...AGENT_SNAPSHOT('，世界') }),
+      itemFrame(12, 'item.updated', 'agentMessage', {
+        item_id: 'message-1',
+        op: 'append',
+        update: { part_id: 'p2', content_type: 'text', text: '，世界' },
+      }),
     );
     expect(first?.Content).toEqual({ parts: [{ text: '你好' }] });
     expect(second?.Content).toEqual({ parts: [{ text: '你好，世界' }] });
+  });
+
+  it('reads item.updated from the RuntimeEvent/v2 update field', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    const first = t.translate(itemFrame(15, 'item.updated', 'agentMessage', {
+      item_id: 'message-1',
+      op: 'append',
+      update: { part_id: 'p2', content_type: 'text', text: '云端' },
+    }));
+    const second = t.translate(itemFrame(16, 'item.updated', 'agentMessage', {
+      item_id: 'message-1',
+      op: 'append',
+      update: { part_id: 'p2', content_type: 'text', text: '流式' },
+    }));
+
+    expect(first?.Content).toEqual({ parts: [{ text: '云端' }] });
+    expect(second?.Content).toEqual({ parts: [{ text: '云端流式' }] });
+  });
+
+  it('atomically replaces an open assistant item snapshot', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    t.translate(itemFrame(17, 'item.updated', 'agentMessage', {
+      item_id: 'message-1',
+      op: 'append',
+      update: { part_id: 'p2', content_type: 'text', text: '旧内容' },
+    }));
+    const replaced = t.translate(itemFrame(18, 'item.snapshot_replaced', 'agentMessage', {
+      item_id: 'message-1',
+      snapshot: { parts: [{ part_id: 'p2', content_type: 'text', text: '修正后的内容' }] },
+    }));
+
+    expect(replaced?.EventType).toBe('assistant_stream_snapshot');
+    expect(replaced?.Content).toEqual({ parts: [{ text: '修正后的内容' }] });
+    expect(replaced?.Metadata?.RuntimeItem).toMatchObject({
+      ItemId: 'message-1',
+      PartId: 'p2',
+      Operation: 'replace',
+    });
+  });
+
+  it('atomically replaces an open reasoning item snapshot', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    const replaced = t.translate(itemFrame(19, 'item.snapshot_replaced', 'reasoning', {
+      item_id: 'reasoning-1',
+      snapshot: { parts: [{ part_id: 'rp1', content_type: 'text', text: '新的推理摘要' }] },
+    }));
+
+    expect(replaced?.EventType).toBe('reasoning');
+    expect(replaced?.Content).toEqual({ parts: [{ text: '新的推理摘要' }] });
+    expect(replaced?.Metadata?.RuntimeItem).toMatchObject({
+      ItemId: 'reasoning-1',
+      PartId: 'rp1',
+      Operation: 'replace',
+    });
   });
 
   it('translates interaction frames verbatim for the interaction adapter', () => {
@@ -112,8 +174,34 @@ describe('KernelRunEventTranslator', () => {
     );
     expect(started?.EventType).toBe('tool_call');
     expect(started?.Metadata?.call_id).toBe('tool-1');
+    expect(started?.Metadata?.RuntimeItem).toMatchObject({
+      ItemId: 'tool-1',
+      Operation: 'replace',
+    });
     expect(completed?.EventType).toBe('tool_result');
     expect(completed?.Metadata?.call_id).toBe('tool-1');
+    expect(completed?.Metadata?.RuntimeItem).toMatchObject({
+      ItemId: 'tool-1',
+      Operation: 'completed',
+    });
+  });
+
+  it('settles a failed tool item as an identity-bound error result', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    const failed = t.translate(itemFrame(20, 'item.failed', 'commandExecution', {
+      item_id: 'tool-1',
+      error: { code: 'command_failed', message: 'permission denied' },
+    }));
+
+    expect(failed?.EventType).toBe('tool_result');
+    expect(failed?.Metadata?.call_id).toBe('tool-1');
+    expect(failed?.Metadata?.tool_output).toEqual({
+      error: { code: 'command_failed', message: 'permission denied' },
+    });
+    expect(failed?.Metadata?.RuntimeItem).toMatchObject({
+      ItemId: 'tool-1',
+      Operation: 'completed',
+    });
   });
 
   it('skips control noise and non-runtime families', () => {
