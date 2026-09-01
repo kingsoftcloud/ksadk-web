@@ -1099,6 +1099,27 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('removes only a terminal answer mirrored at the tail of legacy reasoning', () => {
+    dispatchRunEventToStores({
+      type: 'reasoning_delta',
+      messageId: 'assistant-legacy',
+      delta: 'I will summarize. 最终答案',
+    });
+    dispatchRunEventToStores({
+      type: 'text_final',
+      messageId: 'assistant-legacy',
+      text: '最终答案',
+    });
+
+    const message = useMessageStore.getState().messages[0];
+    expect(message.reasoning).toBe('I will summarize. ');
+    expect(message.content).toBe('最终答案');
+    expect(message.blocks).toEqual([
+      expect.objectContaining({ type: 'thinking', content: 'I will summarize. ', status: 'done' }),
+      expect.objectContaining({ type: 'text', content: '最终答案', status: 'done' }),
+    ]);
+  });
+
   it('settles an offscreen session when its Responses stream ends after a session switch', () => {
     useSessionStore.getState().setCurrentSessionId('session-visible');
     useStreamingStore.getState().setSessionStreaming('session-background', true);

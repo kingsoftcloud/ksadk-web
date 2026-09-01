@@ -4,6 +4,7 @@ import {
   appendTextBlock,
   finalizeTextBlock,
   finalizeThinkingBlocks,
+  stripMirroredTerminalAnswerFromThinking,
   upsertToolBlock,
 } from './blocks.js';
 import { useMessageStore } from '../../stores/message.js';
@@ -145,11 +146,25 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ms.patchMessages((prev) =>
         prev.map((msg) =>
           msg.id === event.messageId
-            ? {
-                ...msg,
-                content: event.text,
-                blocks: finalizeTextBlock(msg.blocks, event.text),
-              }
+            ? (() => {
+                const mirroredLegacyAnswer = Boolean(
+                  event.text
+                  && !msg.content
+                  && msg.reasoning?.endsWith(event.text),
+                );
+                const reasoning = mirroredLegacyAnswer
+                  ? msg.reasoning!.slice(0, -event.text.length)
+                  : msg.reasoning;
+                const blocks = mirroredLegacyAnswer
+                  ? stripMirroredTerminalAnswerFromThinking(msg.blocks, event.text)
+                  : msg.blocks;
+                return {
+                  ...msg,
+                  reasoning,
+                  content: event.text,
+                  blocks: finalizeTextBlock(blocks, event.text),
+                };
+              })()
             : msg,
         ),
       );

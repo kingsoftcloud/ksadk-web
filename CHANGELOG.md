@@ -17,6 +17,12 @@
   separate answer. Canonical runs retain item identity across reload, while
   historical runtimes without canonical events continue to use the projected
   message API as a compatibility fallback.
+- Repair the legacy runtime shape that streamed an answer through the
+  reasoning channel and repeated it as a terminal snapshot. When no text
+  delta was received and the exact terminal answer is mirrored only at the
+  tail of the final thinking block, the renderer removes that run-local mirror
+  before presenting the authoritative answer; unrelated or repeated text is
+  never deduplicated by content.
 - Keep a conversation turn active until an explicit run-level terminal status
   arrives. Completed user messages, tools, approvals, usage reports, and
   provider notifications no longer unlock the composer or trigger duplicate
