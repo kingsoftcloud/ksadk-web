@@ -27,7 +27,20 @@ describe('chat message list contracts', () => {
 
     expect(source).toContain('distanceFromBottom');
     expect(source).toContain('shouldShowScrollToBottom');
+    expect(source).toContain('animate-bounce');
+    expect(source).toContain('animationDelay');
+    expect(source).toContain('data-scroll-indicator="streaming"');
+    expect(source).toContain('data-scroll-indicator="idle"');
+    expect(source).toContain('<ChevronDown');
     expect(source).not.toContain('scrollTop > 320');
+  });
+
+  it('returns to the live edge after the user sends a new turn', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('previousLastMessageIdRef');
+    expect(source).toContain("lastMessage?.role === 'user'");
+    expect(source).toContain('scrollToBottom();');
   });
 
   it('keeps runtime diagnostics out of the conversation viewport', () => {
@@ -128,6 +141,10 @@ describe('chat message list contracts', () => {
     expect(source).toContain('border-slate-200/80');
     expect(source).toContain('正在思考…');
     expect(source).toContain('leading-7');
+    expect(source).toContain("message.eventType === 'optimistic_assistant_placeholder'");
+    expect(source).toContain('aria-label="正在生成"');
+    expect(source).toContain('waiting-generation-breathe');
+    expect(source).not.toContain('正在连接…');
   });
 
   it('uses the same non-spinning shimmer for legacy reasoning rows', () => {
@@ -283,6 +300,29 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('currentSessionIdRef.current === options.sessionId');
     expect(lifecycleSource).toContain('dispatchRunEventToStores({');
     expect(dispatcherSource).toContain('mergeRecoveredRunMessages');
+  });
+
+  it('keeps a newly-created session local until its first turn is durable', () => {
+    const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+    const createSessionSource = lifecycleSource.slice(
+      lifecycleSource.indexOf('const createNewSession = useCallback'),
+      lifecycleSource.indexOf('const deleteSession = useCallback'),
+    );
+    const adoptSessionSource = lifecycleSource.slice(
+      lifecycleSource.indexOf('const adoptCreatedSession = useCallback'),
+      lifecycleSource.indexOf('const createNewSession = useCallback'),
+    );
+    const runAgentSource = readFileSync(resolve(repoRoot, 'src/hooks/useRunAgent.ts'), 'utf8');
+
+    expect(adoptSessionSource).toContain('upsertSessions');
+    expect(createSessionSource).not.toContain('fetchSessions(');
+    expect(createSessionSource).toContain('sessionCreationPromiseRef.current = creation');
+    expect(lifecycleSource).toContain('if (sessionCreationPromiseRef.current) {');
+    expect(runAgentSource).toContain('await waitForPendingSessionCreation?.();');
+    expect(runAgentSource.indexOf('optimisticMessageId: appendOptimisticMessage')).toBeLessThan(
+      runAgentSource.indexOf('await waitForPendingSessionCreation?.();'),
+    );
+    expect(runAgentSource).toContain('if (!draft.optimisticMessageId) appendOptimisticMessage(draft);');
   });
 
   it('keeps an initial transcript load distinct from an actually empty session', () => {

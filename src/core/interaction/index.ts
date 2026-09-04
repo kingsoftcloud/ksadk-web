@@ -46,6 +46,18 @@ export type { A2uiRenderMode } from './a2ui-validate.js';
 import { InteractionStore } from './store.js';
 import { interactionFromSessionEvent } from './adapters/session-events.js';
 import { interactionFromResponsesApproval } from './adapters/responses.js';
+import { sessionEventRunStatus } from '../../utils/session-events.js';
+
+const RUN_TERMINAL_STATUSES = new Set([
+  'completed',
+  'failed',
+  'error',
+  'cancelled',
+  'canceled',
+  'aborted',
+  'interrupted',
+  'resume_failed',
+]);
 import { interactionFromAguiInterrupt } from './adapters/agui.js';
 import type { Interaction } from './types.js';
 
@@ -65,6 +77,34 @@ export function ingestSessionEventRecord(
   if (interaction) {
     sharedInteractionStore.upsert(interaction);
   }
+  const envelope = typeof raw === 'object' && raw !== null
+    ? raw as Record<string, unknown>
+    : null;
+  const terminalStatus = envelope
+    ? sessionEventRunStatus(envelope as never)
+    : null;
+  if (RUN_TERMINAL_STATUSES.has(terminalStatus)) {
+    const content = typeof envelope?.Content === 'object' && envelope.Content !== null
+      ? envelope.Content as Record<string, unknown>
+      : {};
+    const payload = typeof content.payload === 'object' && content.payload !== null
+      ? content.payload as Record<string, unknown>
+      : {};
+    const sessionId = String(
+      envelope?.SessionId
+      || envelope?.session_id
+      || fallbackSessionId
+      || '',
+    );
+    const runId = String(
+      envelope?.InvocationId
+      || envelope?.run_id
+      || payload.run_id
+      || payload.runId
+      || '',
+    );
+    sharedInteractionStore.markRunTerminal(sessionId, runId);
+  }
   return interaction;
 }
 
@@ -72,6 +112,7 @@ export function ingestSessionEventRecord(
 export function ingestApprovalRequestedEvent(event: {
   approvalRequestId: string;
   protocol: 'ag-ui' | 'responses';
+  runId?: string;
   name?: string;
   message?: string;
   args?: string;
@@ -92,12 +133,35 @@ export function ingestApprovalRequestedEvent(event: {
       : interactionFromResponsesApproval({
           approvalRequestId: event.approvalRequestId,
           sessionId,
+          runId: event.runId,
           name: event.name,
           message: event.message,
+          args: event.args,
           approvalLevel: event.approvalLevel,
         });
   if (interaction) {
     sharedInteractionStore.upsert(interaction);
   }
   return interaction;
+}
+
+/** Ingest the authoritative terminal fact carried by a live approval stream. */
+export function ingestApprovalResolvedEvent(event: {
+  approvalRequestId: string;
+  decision: 'approved' | 'rejected';
+  revision?: number;
+  sessionId?: string | null;
+}): Interaction | null {
+  const sessionId = event.sessionId || '';
+  if (!sessionId || !event.approvalRequestId) return null;
+  return ingestSessionEventRecord({
+    EventType: 'approval.resolved',
+    Content: {
+      approvalId: event.approvalRequestId,
+      revision: event.revision || 2,
+      outcome: event.decision,
+      actor: 'user',
+      resolvedAt: new Date().toISOString(),
+    },
+  }, sessionId);
 }

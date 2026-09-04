@@ -273,6 +273,70 @@ describe('KernelRunEventTranslator', () => {
     });
   });
 
+  it('settles a Codex tool_call item whose completed snapshot includes its result', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    t.translate({
+      seq: 40,
+      family: 'runtime',
+      event_type: 'item.started',
+      event_id: 'event-command-started',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-command',
+      item_kind: 'tool_call',
+      initial: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'command-call',
+          call_id: 'call-command',
+          name: 'codex.command',
+          arguments: { command: 'echo hello' },
+        }],
+      },
+      source: { framework: 'codex', metadata: { native_item_kind: 'commandExecution' } },
+    });
+
+    const completed = t.translate({
+      seq: 41,
+      family: 'runtime',
+      event_type: 'item.completed',
+      event_id: 'event-command-completed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-command',
+      item_kind: 'tool_call',
+      snapshot: {
+        parts: [
+          {
+            content_type: 'tool_call',
+            part_id: 'command-call',
+            call_id: 'call-command',
+            name: 'codex.command',
+            arguments: { command: 'echo hello' },
+          },
+          {
+            content_type: 'tool_result',
+            part_id: 'command-result',
+            call_id: 'call-command',
+            result: { exit_code: 0, output: 'hello\n' },
+            is_error: false,
+          },
+        ],
+      },
+      source: { framework: 'codex', metadata: { native_item_kind: 'commandExecution' } },
+    });
+
+    expect(completed).toMatchObject({
+      EventType: 'tool_result',
+      Metadata: {
+        call_id: 'call-command',
+        tool_name: 'codex.command',
+        tool_output: { exit_code: 0, output: 'hello\n' },
+        RuntimeItem: { ItemId: 'call-command', Operation: 'completed' },
+      },
+    });
+  });
+
   it('settles a failed tool item as an identity-bound error result', () => {
     const t = new KernelRunEventTranslator('sess-1');
     const failed = t.translate(itemFrame(20, 'item.failed', 'commandExecution', {

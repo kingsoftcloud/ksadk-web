@@ -1,3 +1,4 @@
+@import "./motion.css";
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @plugin "tailwindcss-animate";
@@ -141,61 +142,6 @@
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background-color: rgba(156, 163, 175, 0.5);
-}
-
-.token-count-pulse {
-  animation: token-count-pulse 260ms ease-out;
-}
-
-@keyframes token-count-pulse {
-  0% {
-    opacity: 0.45;
-    transform: translateY(1px);
-  }
-  55% {
-    opacity: 0.95;
-    transform: translateY(-0.5px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes waiting-thinking-text {
-  0% {
-    background-position: 140% 50%;
-  }
-  100% {
-    background-position: -40% 50%;
-  }
-}
-
-.waiting-thinking-text {
-  display: inline-block;
-  color: hsl(var(--text-muted));
-  background-image: linear-gradient(
-    90deg,
-    hsl(var(--text-muted)) 0%,
-    hsl(var(--text-muted)) 32%,
-    hsl(var(--foreground)) 50%,
-    hsl(var(--text-muted)) 68%,
-    hsl(var(--text-muted)) 100%
-  );
-  background-size: 240% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: waiting-thinking-text 1.6s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .waiting-thinking-text {
-    animation: none;
-    background: none;
-    color: hsl(var(--text-muted));
-    -webkit-text-fill-color: currentColor;
-  }
 }
 
 .prose {

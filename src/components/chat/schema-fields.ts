@@ -1,7 +1,7 @@
 export type InteractionRequestSchemaField = {
   name: string;
   title?: string;
-  type: 'string' | 'number' | 'boolean' | 'unknown';
+  type: 'string' | 'number' | 'boolean' | 'array' | 'unknown';
   required: boolean;
   enumValues?: unknown[];
 };
@@ -27,15 +27,20 @@ export function schemaFields(schema: Record<string, unknown>): InteractionReques
     const property = asRecord(raw);
     const rawType = String(property?.type || '').toLowerCase();
     const type: InteractionRequestSchemaField['type'] =
-      rawType === 'string' || rawType === 'number' || rawType === 'boolean'
-        ? (rawType as 'string' | 'number' | 'boolean')
+      rawType === 'string' || rawType === 'number' || rawType === 'boolean' || rawType === 'array'
+        ? (rawType as 'string' | 'number' | 'boolean' | 'array')
         : 'unknown';
+    const items = asRecord(property?.items);
     fields.push({
       name,
       title: typeof property?.title === 'string' ? property.title : undefined,
       type,
       required: required.has(name),
-      enumValues: Array.isArray(property?.enum) ? property.enum : undefined,
+      enumValues: Array.isArray(property?.enum)
+        ? property.enum
+        : Array.isArray(items?.enum)
+          ? items.enum
+          : undefined,
     });
   }
   return fields;

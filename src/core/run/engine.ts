@@ -776,8 +776,10 @@ export class RunEngineImpl implements RunEngine {
         this.emit({
           type: 'approval_resolved',
           approvalRequestId: params.interruptId,
-          decision: params.status === 'cancelled' || rawDecision === 'reject' || rawDecision === 'rejected'
-            ? 'rejected'
+          decision: params.status === 'cancelled'
+            ? 'cancelled'
+            : rawDecision === 'reject' || rawDecision === 'rejected'
+              ? 'rejected'
             : 'approved',
         });
         if (result.status === 'interrupted') {
@@ -1292,9 +1294,18 @@ export class RunEngineImpl implements RunEngine {
           messageId,
           approvalRequestId: action.approvalRequestId,
           protocol: 'responses',
+          runId: action.runId,
           name: action.name || '人工确认',
           args: action.args || '',
           message: action.message || '本次运行需要人工审批后才能继续。',
+        });
+        break;
+      case 'approval_resolved':
+        this.emit({
+          type: 'approval_resolved',
+          approvalRequestId: action.approvalRequestId,
+          decision: action.decision,
+          revision: action.revision,
         });
         break;
       case 'incomplete':

@@ -499,8 +499,15 @@ function toolMessageFromSessionEvent(event) {
       || textFromUnknown(event.Content?.parts)
       || 'tool',
   ).trim() || 'tool';
+  const callId = String(
+    event.Metadata?.call_id
+      || event.Metadata?.callId
+      || event.Metadata?.RuntimeItem?.ToolCallId
+      || '',
+  ).trim();
   const existing = {
     name,
+    ...(callId ? { callId } : {}),
     args: '',
     status: 'running',
   };

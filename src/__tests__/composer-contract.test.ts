@@ -40,8 +40,11 @@ describe('ChatComposer interaction contract', () => {
     expect(composerSource).toContain('<ModelSettingsMenu');
     expect(composerSource).toContain("'flex h-9 w-9 shrink-0 items-center justify-center rounded-full");
     expect(modelMenuSource).not.toContain('<select');
-    expect(modelMenuSource).toContain('rounded-xl bg-muted/80');
-    expect(modelMenuSource).toContain("type SettingsPanel = 'model' | 'reasoning'");
+    expect(modelMenuSource).toContain('var(--ksadk-menu-trigger-background');
+    expect(modelMenuSource).toContain('var(--ksadk-menu-background');
+    expect(modelMenuSource).not.toContain("type SettingsPanel = 'model' | 'reasoning'");
+    expect(modelMenuSource).toContain('role="menuitemradio"');
+    expect(modelMenuSource).toContain("<span className=\"text-[11px] font-medium text-text-muted\">推理</span>");
     expect(permissionSource).toContain("value: 'ask'");
     expect(permissionSource).toContain("value: 'risk'");
     expect(permissionSource).toContain("value: 'full'");

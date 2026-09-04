@@ -19,6 +19,8 @@ type QueuedDraft = {
   text: string;
   attachments: File[];
   executionMode?: RuntimeExecutionMode;
+  optimisticMessageId?: string;
+  optimisticAssistantMessageId?: string;
 };
 
 type RunAgentContext = {
@@ -37,6 +39,8 @@ type RunAgentContext = {
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
   onRunSettled?: (sessionId: string | null) => void;
+  onSessionCreated?: (sessionId: string) => void;
+  waitForPendingSessionCreation?: () => Promise<string | null>;
   /** `null` keeps an embedded host on the legacy action transport. */
   conversationClient?: ConversationClient | null;
 };
@@ -62,6 +66,8 @@ export function useRunAgent(ctx: RunAgentContext) {
     currentSessionIdRef,
     queuedDraftRef,
     onRunSettled,
+    onSessionCreated,
+    waitForPendingSessionCreation,
     uiCapabilities,
   } = ctx;
 
@@ -110,6 +116,46 @@ export function useRunAgent(ctx: RunAgentContext) {
     useUIStore.getState().setQueuedDrafts((prev) => [...prev, draft]);
   }, [queuedDraftRef]);
 
+  const appendOptimisticMessage = useCallback((draft: Pick<QueuedDraft, 'text' | 'attachments'>) => {
+    const trimmedText = draft.text.trim();
+    const userAttachments = draft.attachments.map((file) => ({
+      name: file.name,
+      url: URL.createObjectURL(file),
+      type: file.type || 'application/octet-stream',
+    }));
+    if (!trimmedText && userAttachments.length === 0) return undefined;
+
+    const userMessageId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    useMessageStore.getState().patchMessages((prev) => [
+      ...prev,
+      {
+        id: userMessageId,
+        role: 'user',
+        content: trimmedText,
+        timestamp: Date.now(),
+        eventType: 'optimistic_user_message',
+        attachments: userAttachments.length ? userAttachments : undefined,
+      },
+    ]);
+    return userMessageId;
+  }, []);
+
+  const appendOptimisticAssistant = useCallback(() => {
+    const messageId = `optimistic-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    useMessageStore.getState().patchMessages((prev) => [
+      ...prev,
+      {
+        id: messageId,
+        role: 'model',
+        content: '',
+        reasoning: '',
+        timestamp: Date.now(),
+        eventType: 'optimistic_assistant_placeholder',
+      },
+    ]);
+    return messageId;
+  }, []);
+
   const startDraft = useCallback(
     (draft: QueuedDraft & { responsesInput?: unknown; previousResponseId?: string }) => {
       const targetSessionId = currentSessionIdRef.current;
@@ -122,27 +168,8 @@ export function useRunAgent(ctx: RunAgentContext) {
       useUIStore.getState().setMobileActionsOpen(false);
       useStreamingStore.getState().setSessionStreaming(targetSessionId, true);
 
-      const trimmedText = draft.text.trim();
-      const userMessageId = String(Date.now());
-      const userAttachments = draft.attachments.map((file) => ({
-        name: file.name,
-        url: URL.createObjectURL(file),
-        type: file.type || 'application/octet-stream',
-      }));
-
-      if (trimmedText || userAttachments.length > 0) {
-        useMessageStore.getState().patchMessages((prev) => [
-          ...prev,
-          {
-            id: userMessageId,
-            role: 'user',
-            content: trimmedText,
-            timestamp: Date.now(),
-            eventType: 'optimistic_user_message',
-            attachments: userAttachments.length ? userAttachments : undefined,
-          },
-        ]);
-      }
+      if (!draft.optimisticMessageId) appendOptimisticMessage(draft);
+      if (!draft.optimisticAssistantMessageId) appendOptimisticAssistant();
 
       const accepted = engine.start({
         text: draft.text,
@@ -152,10 +179,14 @@ export function useRunAgent(ctx: RunAgentContext) {
         executionMode: draft.executionMode,
         sessionId: targetSessionId,
         onSessionCreated: (sessionId: string) => {
-          useSessionStore.getState().upsertSessions([{ SessionId: sessionId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
-          currentSessionIdRef.current = sessionId;
+          if (onSessionCreated) {
+            onSessionCreated(sessionId);
+          } else {
+            useSessionStore.getState().upsertSessions([{ SessionId: sessionId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
+            currentSessionIdRef.current = sessionId;
+            useSessionStore.getState().setCurrentSessionId(sessionId);
+          }
           writePersistedSessionId(agentId, sessionId);
-          useSessionStore.getState().setCurrentSessionId(sessionId);
           if (targetSessionId !== sessionId) {
             enginesRef.current.set(sessionId, engine);
           }
@@ -171,7 +202,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       }
       return accepted;
     },
-    [agentId, currentSessionIdRef, getEngine, onRunSettled],
+    [agentId, appendOptimisticAssistant, appendOptimisticMessage, currentSessionIdRef, getEngine, onRunSettled, onSessionCreated],
   );
 
   useEffect(() => {
@@ -206,21 +237,36 @@ export function useRunAgent(ctx: RunAgentContext) {
         responsesInput,
         previousResponseId,
         executionMode,
+        optimisticMessageId: appendOptimisticMessage({ text: draftText, attachments: draftAttachments }),
+        optimisticAssistantMessageId: appendOptimisticAssistant(),
       };
+      await waitForPendingSessionCreation?.();
 
       const engine = getEngine(currentSessionIdRef.current);
       if (engine.stage !== 'idle' && useStreamingStore.getState().isSessionStreaming(currentSessionIdRef.current)) {
         if (responsesInput === undefined) {
-          enqueueDraft({ text: draftText, attachments: draftAttachments, executionMode });
+          enqueueDraft({
+            text: draftText,
+            attachments: draftAttachments,
+            executionMode,
+            optimisticMessageId: draft.optimisticMessageId,
+            optimisticAssistantMessageId: draft.optimisticAssistantMessageId,
+          });
         }
         return;
       }
 
       if (!startDraft(draft) && responsesInput === undefined) {
-        enqueueDraft({ text: draftText, attachments: draftAttachments, executionMode });
+        enqueueDraft({
+          text: draftText,
+          attachments: draftAttachments,
+          executionMode,
+          optimisticMessageId: draft.optimisticMessageId,
+          optimisticAssistantMessageId: draft.optimisticAssistantMessageId,
+        });
       }
     },
-    [currentSessionIdRef, enqueueDraft, getEngine, startDraft],
+    [appendOptimisticAssistant, appendOptimisticMessage, currentSessionIdRef, enqueueDraft, getEngine, startDraft, waitForPendingSessionCreation],
   );
 
   const stopGeneration = useCallback(() => {

@@ -79,7 +79,7 @@ function ThinkingRow({ block }: { block: ThinkingBlock }) {
         aria-expanded={open}
         aria-controls={detailId}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] leading-5 text-slate-400 transition-colors hover:bg-slate-100/70 hover:text-slate-500 dark:text-slate-500 dark:hover:bg-slate-800/40 dark:hover:text-slate-400"
+        className="inline-flex max-w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] leading-5 text-slate-400 transition-colors hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
       >
         {!generating && <Sparkles className="h-3.5 w-3.5 shrink-0" />}
         <span
@@ -131,13 +131,29 @@ function ToolRow({
   // 审批字段优先从 block.extra 读(approval_requested 同步写进 blocks,key=toolName 一致);
   // fallback 从 tool 读(旧路径,msg.tools 用 approvalRequestId 做 key 可能和 toolName 不一致。
   const extra = (block.extra || {}) as Record<string, unknown>;
-  const approvalStatus = (extra.approvalStatus as string) || tool?.approvalStatus;
+  const interactionApprovalStatus = interactionRecord?.outcome === 'cancelled'
+    || interactionRecord?.outcome === 'expired'
+    || interactionRecord?.status === 'cancelled'
+    || interactionRecord?.status === 'expired'
+    ? 'cancelled'
+    : interactionRecord?.outcome === 'rejected'
+      ? 'rejected'
+      : interactionRecord?.outcome === 'approved'
+        ? 'approved'
+        : undefined;
+  const approvalStatus = interactionApprovalStatus
+    || (extra.approvalStatus as string)
+    || tool?.approvalStatus;
   const approvalRequestId = (extra.approvalRequestId as string) || tool?.approvalRequestId;
   const approvalMessage = (extra.approvalMessage as string) || tool?.approvalMessage;
   const approvalProtocol = (extra.approvalProtocol as string) || tool?.approvalProtocol;
   const previousResponseId = (extra.previousResponseId as string) || tool?.previousResponseId;
   const running = status === 'running';
-  const errored = status === 'error';
+  // Codex reports a cancelled command as item.failed after the authoritative
+  // interaction cancellation. Present that expected terminal state as
+  // cancelled instead of turning the user's feedback into an execution error.
+  const cancelledByInteraction = approvalStatus === 'cancelled' || approvalStatus === 'rejected';
+  const errored = status === 'error' && !cancelledByInteraction;
   const paused = status === 'paused';
 
   // Approval is an audit trail. The execution result is the primary state,
@@ -148,6 +164,8 @@ function ToolRow({
       ? '等待确认'
       : approvalStatus === 'rejected'
         ? '已拒绝'
+        : approvalStatus === 'cancelled'
+          ? '已取消'
         : running
           ? approvalStatus === 'approved' ? '已授权 · 执行中' : '正在运行'
           : approvalStatus === 'approved'
@@ -224,13 +242,19 @@ function ToolRow({
         ) : null}
         {approvalRequestId && approvalStatus && approvalStatus !== 'pending' && (
           <div className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
-            <span>{approvalStatus === 'approved' ? '已授权' : '已拒绝'}</span>
+            <span>
+              {approvalStatus === 'approved'
+                ? '已授权'
+                : approvalStatus === 'cancelled'
+                  ? '已取消'
+                  : '已拒绝'}
+            </span>
             {approvalStatus === 'approved' && running ? <span>· 工具执行中</span> : null}
             {approvalStatus === 'approved' && errored ? <span>· 工具执行失败</span> : null}
           </div>
         )}
         {args ? <PayloadBlock label="入参" value={args} tone="input" /> : null}
-        {output ? renderToolOutput(block.toolName, output, errored) : null}
+        {output && !cancelledByInteraction ? renderToolOutput(block.toolName, output, errored) : null}
       </div>
     </Collapsible>
   );
@@ -396,9 +420,16 @@ export function ProcessingBlocksView({
             || message.tools?.[block.toolName]?.approvalRequestId
             || '',
           );
+          const callId = String(
+            blockExtra.callId
+            || blockExtra.call_id
+            || '',
+          );
           const record = approvalId
             ? interactionRecords?.find((entry) => entry.interactionId === approvalId)
-            : undefined;
+            : callId
+              ? interactionRecords?.find((entry) => String(entry.extensions.call_id || '') === callId)
+              : undefined;
           return (
             <div key={block.id}>
               <ToolRow

@@ -88,6 +88,8 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     loadSession,
     loadOlderSessionMessages,
     createNewSession,
+    adoptCreatedSession,
+    waitForPendingSessionCreation,
     deleteSession,
     currentSessionIdRef,
     agentIdRef,
@@ -135,6 +137,8 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSessionsAfterRun,
+    onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
+    waitForPendingSessionCreation,
     conversationClient: options.conversationClient,
   });
 
@@ -193,6 +197,22 @@ export function useAgentChat(options: AgentChatOptions = {}) {
       respondToAguiApprovalRef.current({ interruptId, approve: status === 'resolved' })
     ),
   });
+
+  const respondInteractionAndContinue = useCallback(async (
+    input: Parameters<typeof respondInteraction>[0],
+  ) => {
+    const receipt = await respondInteraction(input);
+    const feedback = input.action === 'cancel'
+      ? String(input.response.feedback || '').trim()
+      : '';
+    if (receipt.status === 'accepted' && feedback) {
+      // Codex-style “tell the Agent what to do differently”: cancel the
+      // blocked turn first, then enqueue the feedback as a real user turn.
+      // submitDraft queues automatically while the cancelled run settles.
+      await submitDraft(feedback, []);
+    }
+    return receipt;
+  }, [respondInteraction, submitDraft]);
 
   useEffect(() => {
     if (!explicitAgentId) return;
@@ -271,7 +291,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     resumeCheckpoint,
     pendingInteractions,
     interactionRecords,
-    respondInteraction,
+    respondInteraction: respondInteractionAndContinue,
     localCatalog,
     respondToApproval,
     submitAguiAction,

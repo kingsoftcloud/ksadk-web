@@ -96,6 +96,7 @@ function textMessage(item: ConversationItem): Message {
 
 function toolMessage(item: ConversationItem): Message {
   const toolName = nonEmptyString(item.payload.tool) || 'Tool';
+  const callId = nonEmptyString(item.payload.callId);
   const args = displayValue(item.payload.args);
   const output = Object.prototype.hasOwnProperty.call(item.payload, 'output')
     ? displayValue(item.payload.output)
@@ -117,9 +118,16 @@ function toolMessage(item: ConversationItem): Message {
       args,
       output,
       status,
+      ...(callId ? { extra: { callId } } : {}),
     }],
     tools: {
-      [toolName]: { name: toolName, args, output, status },
+      [toolName]: {
+        name: toolName,
+        ...(callId ? { callId } : {}),
+        args,
+        output,
+        status,
+      },
     },
   };
 }
@@ -172,7 +180,12 @@ function interactionFromItem(item: ConversationItem): Interaction | null {
       ? nonEmptyString(item.payload.responseSummary)
       : null,
     source: 'interaction_v1',
-    extensions: { conversation_item_id: item.itemId },
+    extensions: {
+      conversation_item_id: item.itemId,
+      ...(nonEmptyString(item.payload.callId)
+        ? { call_id: nonEmptyString(item.payload.callId)! }
+        : {}),
+    },
   };
 }
 
@@ -180,7 +193,11 @@ function approvalMessage(item: ConversationItem, interaction: Interaction): Mess
   const toolName = nonEmptyString(item.payload.kind) || 'approval';
   const args = displayValue(item.payload.detail);
   const approvalStatus = interaction.status === 'resolved'
-    ? interaction.outcome === 'rejected' ? 'rejected' as const : 'approved' as const
+    ? interaction.outcome === 'rejected'
+      ? 'rejected' as const
+      : interaction.outcome === 'cancelled' || interaction.outcome === 'expired'
+        ? 'cancelled' as const
+        : 'approved' as const
     : 'pending' as const;
   const status = interaction.status === 'pending' ? 'paused' as const : 'completed' as const;
   const extra = {
@@ -332,6 +349,9 @@ export function projectConversationStreamForHostedUi(
     }
     const fallback = fallbackById.get(item.itemId);
     if (fallback) {
+      const cancelled = item.kind === 'error'
+        && ['cancelled', 'canceled'].includes(String(item.payload.status || '').toLowerCase());
+      if (cancelled) continue;
       messages.push(fallbackMessage(
         item,
         fallback.title,
@@ -367,22 +387,24 @@ export function mergeConversationRunMessages(
   // older unscoped user message for the current prompt.  If the turn input
   // is absent from the canonical stream, the optimistic row is still
   // absorbed so the user never sees a duplicate bubble.
-  let cleanPrevious = previous;
+  let cleanPrevious = previous.filter(
+    (message) => message.eventType !== 'optimistic_assistant_placeholder',
+  );
   {
     let optimisticUserIndex = -1;
-    for (let index = previous.length - 1; index >= 0; index -= 1) {
-      const message = previous[index];
+    for (let index = cleanPrevious.length - 1; index >= 0; index -= 1) {
+      const message = cleanPrevious[index];
       if (message.role === 'user' && message.eventType === 'optimistic_user_message') {
         optimisticUserIndex = index;
         break;
       }
     }
     if (optimisticUserIndex >= 0) {
-      const optimistic = previous[optimisticUserIndex];
+      const optimistic = cleanPrevious[optimisticUserIndex];
       const optimisticContent = String(optimistic.content || '').trim();
       cleanPrevious = [
-        ...previous.slice(0, optimisticUserIndex),
-        ...previous.slice(optimisticUserIndex + 1),
+        ...cleanPrevious.slice(0, optimisticUserIndex),
+        ...cleanPrevious.slice(optimisticUserIndex + 1),
       ];
       const hasProjectedUser = projected.some((m) => m.role === 'user');
       if (!hasProjectedUser && optimisticContent) {

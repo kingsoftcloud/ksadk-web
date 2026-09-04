@@ -10,7 +10,6 @@ import {
 } from 'react';
 
 import {
-  ArrowDown,
   Bot,
   Check,
   ChevronDown,
@@ -783,6 +782,8 @@ function ChatMessage({
                         ? '已批准：'
                         : tool.approvalStatus === 'rejected'
                           ? '已拒绝：'
+                          : tool.approvalStatus === 'cancelled'
+                            ? '已取消：'
                       : tool.status === 'error'
                         ? '工具调用失败：'
                         : '工具调用：'}
@@ -807,6 +808,8 @@ function ChatMessage({
                         ? '已批准该工具调用。'
                         : tool.approvalStatus === 'rejected'
                           ? '已拒绝该工具调用。'
+                          : tool.approvalStatus === 'cancelled'
+                            ? '已取消该工具调用。'
                           : tool.approvalMessage || '该工具调用需要人工确认后继续。'}
                     </div>
                     {tool.approvalLevel ? (
@@ -872,7 +875,11 @@ function ChatMessage({
                         ) : (
                           <XCircle className="h-3.5 w-3.5 text-rose-500" />
                         )}
-                        {tool.approvalStatus === 'approved' ? '已批准' : '已拒绝'}
+                        {tool.approvalStatus === 'approved'
+                          ? '已批准'
+                          : tool.approvalStatus === 'cancelled'
+                            ? '已取消'
+                            : '已拒绝'}
                       </div>
                     )}
                   </div>
@@ -912,8 +919,11 @@ function ChatMessage({
       <div className="w-full break-words">
         {message.content ? (
           <MessageMarkdown content={message.content} />
-        ) : isStreaming && isLastMessage && !message.reasoning && !message.tools ? (
-          <span className="ml-1 mt-2 inline-block h-4 w-2 animate-pulse rounded-sm bg-emerald-500 align-middle opacity-80 shadow-sm" />
+        ) : (isStreaming && isLastMessage && !message.reasoning && !message.tools)
+          || message.eventType === 'optimistic_assistant_placeholder' ? (
+          <span className="relative mt-1 inline-flex h-4 w-4 items-center justify-center" role="status" aria-label="正在生成">
+            <span className="waiting-generation-breathe h-2.5 w-2.5 rounded-full" />
+          </span>
         ) : null}
       </div>
         </>
@@ -1088,7 +1098,7 @@ export function ChatMessageList({
                     onDeleteFeedback={onDeleteFeedback}
                     onOpenAttachmentPreview={onOpenAttachmentPreview}
                     onRespondToApproval={onRespondToApproval}
-          interactionRecords={interactionRecords}
+                    interactionRecords={interactionRecords}
                     onRespondToAguiApproval={onRespondToAguiApproval}
                     onSubmitFeedback={onSubmitFeedback}
                     onSubmitAguiAction={onSubmitAguiAction}
@@ -1116,7 +1126,19 @@ export function ChatMessageList({
           className="sticky bottom-4 left-1/2 z-20 mx-auto flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
           title="回到底部"
         >
-          <ArrowDown className="h-4 w-4" />
+          {isStreaming ? (
+            <span aria-hidden="true" className="flex items-center gap-0.5" data-scroll-indicator="streaming">
+              {[0, 1, 2].map((index) => (
+                <span
+                  key={index}
+                  className="h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none"
+                  style={{ animationDelay: `${index * 120}ms` }}
+                />
+              ))}
+            </span>
+          ) : (
+            <ChevronDown aria-hidden="true" className="h-5 w-5" data-scroll-indicator="idle" />
+          )}
         </button>
       ) : null}
     </div>

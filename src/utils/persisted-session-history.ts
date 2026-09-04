@@ -10,7 +10,9 @@ import { buildMessagesFromSessionEvents } from './session-events.js';
 export type PersistedSessionEventRecord = SessionEventRecord & {
   Content?: SessionEventRecord['Content'] & {
     runtime_event?: Record<string, unknown>;
+    runtimeEvent?: Record<string, unknown>;
     session_event?: Record<string, unknown>;
+    sessionEvent?: Record<string, unknown>;
   };
 };
 
@@ -46,7 +48,7 @@ function eventTimestamp(value: unknown): number {
 export function persistedRuntimeFrame(
   raw: PersistedSessionEventRecord,
 ): KernelSessionEventFrame | null {
-  const runtimeEvent = record(raw?.Content?.runtime_event);
+  const runtimeEvent = record(raw?.Content?.runtime_event || raw?.Content?.runtimeEvent);
   if (runtimeEvent && String(runtimeEvent.event_type || '')) {
     return {
       ...runtimeEvent,
@@ -56,7 +58,7 @@ export function persistedRuntimeFrame(
     };
   }
 
-  const envelope = record(raw?.Content?.session_event);
+  const envelope = record(raw?.Content?.session_event || raw?.Content?.sessionEvent);
   if (!envelope || String(envelope.family || '') !== 'runtime') return null;
   const payload = record(envelope.payload);
   if (!payload || !String(payload.event_type || envelope.event_type || '')) return null;
@@ -74,11 +76,16 @@ function withHistoryBlocks(message: Message): Message {
   if (message.role !== 'model') return message;
   return {
     ...message,
-    blocks: buildBlocksFromHistory({
-      content: message.content,
-      reasoning: message.reasoning,
-      tools: message.tools,
-    }),
+    // Canonical blocks carry provider identities (for example callId) that
+    // legacy reasoning/tools fields cannot reconstruct. Rebuild only when a
+    // historical source truly has no ordered block projection.
+    blocks: message.blocks?.length
+      ? message.blocks
+      : buildBlocksFromHistory({
+          content: message.content,
+          reasoning: message.reasoning,
+          tools: message.tools,
+        }),
   };
 }
 
@@ -178,6 +185,56 @@ function completedCanonicalRunIds(messages: Message[]): Set<string> {
   );
 }
 
+const INTERACTION_RESOLUTION_EVENTS = new Set([
+  'approval.resolved',
+  'interaction.resolved',
+  'interaction.cancelled',
+  'interaction.canceled',
+  'a2ui.action',
+]);
+
+function cancelledInteractionRunIds(
+  records: PersistedSessionEventRecord[],
+): Set<string> {
+  const cancelled = new Set<string>();
+  for (const persisted of records) {
+    const content = record(persisted.Content) || {};
+    const runtime = record(content.runtime_event || content.runtimeEvent) || {};
+    const payload = record(content.payload) || record(runtime.payload) || {};
+    const eventType = String(
+      persisted.EventType
+      || content.event_type
+      || content.eventType
+      || runtime.event_type
+      || '',
+    ).toLowerCase();
+    if (!INTERACTION_RESOLUTION_EVENTS.has(eventType)) continue;
+    const action = String(
+      content.outcome
+      || content.action
+      || content.name
+      || content.status
+      || payload.outcome
+      || payload.action
+      || payload.name
+      || payload.status
+      || '',
+    ).toLowerCase();
+    if (!['cancel', 'cancelled', 'canceled'].includes(action)) continue;
+    const runId = String(
+      persisted.InvocationId
+      || content.runId
+      || content.run_id
+      || payload.runId
+      || payload.run_id
+      || runtime.run_id
+      || '',
+    ).trim();
+    if (runId) cancelled.add(runId);
+  }
+  return cancelled;
+}
+
 /**
  * Rebuild the transcript for runs that have canonical RuntimeEvent/v2
  * history. Cumulative ListSessionMessages rows remain only a compatibility
@@ -239,6 +296,7 @@ export function rebuildPersistedSessionHistory(
   const completeCanonicalRunIds = new Set(
     [...completedCanonicalRunIds(projected)].filter((runId) => fullyObservedRunIds.has(runId)),
   );
+  const cancelledRunIds = cancelledInteractionRunIds(orderedRecords);
   const canonicalMessages = [...completeCanonicalRunIds].flatMap((runId) => enrichCanonicalRun(
     projected.filter((message) => message.invocationId === runId),
     fallbackByRun.get(runId) || [],
@@ -258,9 +316,14 @@ export function rebuildPersistedSessionHistory(
     [...partialFallbackByRun.values()].flat().map((message) => [message.id, message]),
   );
   const retainedFallback = fallbackMessages.filter((message) => (
-    message.role === 'a2ui'
-    || !message.invocationId
-    || !completeCanonicalRunIds.has(message.invocationId)
+    !(message.role === 'model'
+      && message.invocationId
+      && cancelledRunIds.has(message.invocationId))
+    && (
+      message.role === 'a2ui'
+      || !message.invocationId
+      || !completeCanonicalRunIds.has(message.invocationId)
+    )
   )).map((message) => partialFallbackMessageById.get(message.id) || message);
   const messages = [...retainedFallback, ...canonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),

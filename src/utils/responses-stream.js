@@ -12,6 +12,8 @@ export function createResponsesStreamState() {
     toolArguments: new Map(),
     callIds: new Map(),
     currentResponseId: '',
+    sawTextDelta: false,
+    sawReasoningDelta: false,
   };
 }
 
@@ -172,6 +174,7 @@ function normalizeOutputItem({ data, state, status }) {
     const name = String(item.name || 'approval');
     const args = stringifyPayload(item.arguments ?? item.args);
     const approvalRequestId = String(item.id || item.approval_request_id || '');
+    const runId = String(item.run_id || item.runId || data?.run_id || data?.runId || '');
     return [
       {
         type: 'tool_upsert',
@@ -190,6 +193,7 @@ function normalizeOutputItem({ data, state, status }) {
         type: 'approval_request',
         approvalRequestId,
         previousResponseId: String(data?.response_id || state.currentResponseId || ''),
+        ...(runId ? { runId } : {}),
         name,
         args,
       },
@@ -258,11 +262,13 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     eventType === 'response.reasoning_summary_text.delta'
   ) {
     const text = firstString(data?.delta, data?.text);
+    if (text) state.sawReasoningDelta = true;
     return text ? [{ type: 'reasoning_delta', text }] : [];
   }
 
   if (eventType === 'response.output_text.delta') {
     const text = firstString(data?.delta, data?.text);
+    if (text) state.sawTextDelta = true;
     return text ? [{ type: 'text_delta', text }] : [];
   }
 
@@ -276,8 +282,10 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     const text = firstString(data?.delta?.text, data?.delta, data?.text);
     if (!text) return [];
     if (partType.includes('reasoning')) {
+      state.sawReasoningDelta = true;
       return [{ type: 'reasoning_delta', text }];
     }
+    state.sawTextDelta = true;
     return [{ type: 'text_delta', text }];
   }
 
@@ -289,11 +297,16 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
         state,
         status: 'completed',
       });
-    });
+    }).filter((action) => (
+      !(state.sawTextDelta && action.type === 'text_final')
+      && !(state.sawReasoningDelta && action.type === 'reasoning_delta')
+    ));
     const hasFinalTextAction = outputActions.some((action) => action.type === 'text_final');
     return [
       ...outputActions,
-      ...(text && !hasFinalTextAction ? [{ type: 'text_final', text }] : []),
+      ...(text && !state.sawTextDelta && !hasFinalTextAction
+        ? [{ type: 'text_final', text }]
+        : []),
       { type: 'terminal', status: 'completed' },
     ];
   }
@@ -322,6 +335,7 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     const interruptInfo = unwrapInterruptInfo(data?.interrupt_info);
     const approvalRequestId = String(interruptInfo.approval_request_id || interruptInfo.id || '');
     const previousResponseId = String(data?.response_id || state.currentResponseId || '');
+    const runId = String(data?.run_id || data?.runId || '');
     // 把审批详情(工具名/参数/允许决定)转成可交互 tool_upsert(status=paused),
     // 让 ChatMessageList 渲染 ApprovalBar(批准/拒绝按钮),而不是只出一句系统消息。
     // 兼容两种嵌套:interrupt_info.approval_requests.action_requests(外层包装)
@@ -346,6 +360,7 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
           type: 'approval_request',
           approvalRequestId,
           previousResponseId,
+          ...(runId ? { runId } : {}),
           name: String(first?.name || '人工确认'),
           args: JSON.stringify(first?.args ?? {}),
         },
@@ -356,8 +371,26 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
         type: 'approval_request',
         approvalRequestId,
         previousResponseId,
+        ...(runId ? { runId } : {}),
       },
     ];
+  }
+
+  if (eventType === 'response.approval_resolved' || eventType === 'response.ksadk.approval_resolved') {
+    const rawDecision = String(data?.decision || data?.outcome || '').toLowerCase();
+    const decision = rawDecision === 'reject' || rawDecision === 'rejected' || rawDecision === 'denied'
+      ? 'rejected'
+      : rawDecision === 'cancel' || rawDecision === 'cancelled' || rawDecision === 'canceled'
+        ? 'cancelled'
+        : 'approved';
+    return [{
+      type: 'approval_resolved',
+      approvalRequestId: String(
+        data?.approval_request_id || data?.approvalRequestId || data?.approval_id || data?.approvalId || '',
+      ),
+      decision,
+      revision: Number(data?.revision || 2),
+    }];
   }
 
   // A2UI surface 生命周期。兼容两种命名:

@@ -180,6 +180,47 @@ describe('mapBackendMessage', () => {
     });
   });
 
+  it('gives activities a distinct row id when the backend reuses the assistant id', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'run-1:assistant',
+      Role: 'assistant',
+      Content: { text: '状态如下' },
+      Activities: [{
+        MessageId: 'run-1:assistant',
+        SurfaceId: 'status',
+        Content: { a2ui_operations: [{ createSurface: { surfaceId: 'status' } }] },
+      }],
+    }]);
+
+    expect(result.map((message) => message.id)).toEqual([
+      'run-1:assistant',
+      'run-1:assistant:a2ui:status:0',
+    ]);
+  });
+
+  it('does not replay Studio approval compatibility surfaces as blank activity cards', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'run-approval:assistant',
+      Role: 'assistant',
+      Content: { text: '等待确认' },
+      Activities: [{
+        MessageId: 'run-approval:assistant',
+        SurfaceId: 'approval-item-1',
+        Content: {
+          a2ui_operations: [{
+            updateComponents: {
+              surfaceId: 'approval-item-1',
+              components: [{ id: 'approval', component: 'ApprovalBar' }],
+            },
+          }],
+        },
+      }],
+    }]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe('model');
+  });
+
   it('repairs only the legacy A2UI root id during history rehydration', () => {
     const result = mapBackendMessages([{
       MessageId: 'assistant-legacy',

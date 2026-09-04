@@ -22,10 +22,18 @@ export type StreamAction =
       type: 'approval_request';
       approvalRequestId: string;
       previousResponseId?: string;
+      /** Durable run identity used by Interaction/v1 submission. */
+      runId?: string;
       /** Optional legacy transport detail for the unified composer tray. */
       name?: string;
       args?: string;
       message?: string;
+    }
+  | {
+      type: 'approval_resolved';
+      approvalRequestId: string;
+      decision: 'approved' | 'rejected' | 'cancelled';
+      revision?: number;
     }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: A2UISurface }
   | { type: 'a2ui_surface_update'; surfaceId: string; surface: A2UISurface }

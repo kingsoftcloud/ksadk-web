@@ -76,6 +76,30 @@ describe('three-source normalization', () => {
     }
   });
 
+  it('normalizes Studio camelCase approval replay with its durable run id', () => {
+    const interaction = interactionFromSessionEvent({
+      EventType: 'approval.requested',
+      InvocationId: 'run-studio-1',
+      Content: {
+        approvalId: 'approval-studio-1',
+        runId: 'run-studio-1',
+        kind: 'command',
+        detail: { command: 'echo safe' },
+        revision: 1,
+      },
+    }, 'session-studio-1');
+
+    expect(interaction).toMatchObject({
+      interactionId: 'approval-studio-1',
+      sessionId: 'session-studio-1',
+      runId: 'run-studio-1',
+      kind: 'approval',
+      message: 'echo safe',
+      revision: 1,
+      source: 'interaction_v1',
+    });
+  });
+
   it('resolves Interaction/v1 terminal events with outcome, not a fifth event type', () => {
     const resolved = interactionFromSessionEvent({
       ...FIXTURES.interactionV1,
@@ -91,6 +115,27 @@ describe('three-source normalization', () => {
     expect(resolved!.status).toBe('resolved');
     expect(resolved!.outcome).toBe('rejected');
     expect(resolved!.actor).toBe('user-2');
+  });
+
+  it('restores legacy Studio cancel actions as cancelled rather than approved', () => {
+    const resolved = interactionFromSessionEvent({
+      EventType: 'approval.resolved',
+      InvocationId: 'run-studio-cancel',
+      Content: {
+        interactionId: 'approval-studio-cancel',
+        runId: 'run-studio-cancel',
+        name: 'cancel',
+        data: { feedback: '请改成 echo 你好' },
+        revision: 2,
+      },
+    }, 'session-studio-cancel');
+
+    expect(resolved).toMatchObject({
+      interactionId: 'approval-studio-cancel',
+      status: 'resolved',
+      outcome: 'cancelled',
+      responseSummary: 'cancel',
+    });
   });
 });
 
@@ -234,6 +279,32 @@ describe('single submit path', () => {
     const error = record.extensions.submit_error as { code: string; message: string };
     expect(error.code).toBe('interaction_already_resolved');
     expect(error.message).toBe('first-wins');
+  });
+
+  it('turns a thrown transport failure into a retryable failed interaction', async () => {
+    const submitInteraction = vi.fn().mockRejectedValue(new Error('Broken pipe'));
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+      interactionV1Enabled: true,
+    });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+
+    await expect(client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    })).rejects.toThrow('Broken pipe');
+
+    const record = client.store.get('session-1', 'int-1')!;
+    expect(record.status).toBe('failed');
+    expect(record.extensions.submit_error).toEqual({
+      code: 'interaction_submit_failed',
+      message: 'Broken pipe',
+      retryable: true,
+    });
   });
 });
 
@@ -387,5 +458,27 @@ describe('store first-wins semantics', () => {
     );
     expect(store.get('session-1', 'int-1')!.status).toBe('expired');
     expect(store.get('session-1', 'int-1')!.outcome).toBe('expired');
+  });
+
+  it('closes an open approval when its run becomes terminal', () => {
+    const store = new InteractionStore();
+    store.upsert(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+    store.markRunTerminal('session-1', 'run-1');
+    expect(store.get('session-1', 'int-1')!.status).toBe('expired');
+    expect(store.listPending('session-1')).toHaveLength(0);
+  });
+
+  it('does not resurrect an approval replayed after its terminal run', () => {
+    const store = new InteractionStore();
+    store.markRunTerminal('session-1', 'run-1');
+    store.upsert(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+    expect(store.get('session-1', 'int-1')!.status).toBe('expired');
+  });
+
+  it('closes open cards when only a session-scoped terminal is available', () => {
+    const store = new InteractionStore();
+    store.upsert(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+    store.markSessionTerminal('session-1');
+    expect(store.get('session-1', 'int-1')!.status).toBe('expired');
   });
 });

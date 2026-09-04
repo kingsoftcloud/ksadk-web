@@ -305,6 +305,13 @@ describe('RunEngineImpl', () => {
         timestamp: 3,
         eventType: 'optimistic_user_message',
       },
+      {
+        id: 'optimistic-assistant',
+        role: 'model',
+        content: '',
+        timestamp: 4,
+        eventType: 'optimistic_assistant_placeholder',
+      },
     ]);
 
     dispatchRunEventToStores({
@@ -318,6 +325,35 @@ describe('RunEngineImpl', () => {
       'older answer',
       'new prompt',
       'canonical answer',
+    ]);
+  });
+
+  it('reuses the pending assistant row for the first legacy stream event', () => {
+    useSessionStore.getState().setCurrentSessionId('session-pending-assistant');
+    useMessageStore.getState().setMessages([
+      {
+        id: 'optimistic-assistant',
+        role: 'model',
+        content: '',
+        timestamp: 1,
+        eventType: 'optimistic_assistant_placeholder',
+      },
+    ]);
+
+    dispatchRunEventToStores({
+      type: 'assistant_message_created',
+      sessionId: 'session-pending-assistant',
+      messageId: 'assistant-live',
+      invocationId: 'run-live',
+    });
+
+    expect(useMessageStore.getState().messages).toEqual([
+      expect.objectContaining({
+        id: 'assistant-live',
+        role: 'model',
+        invocationId: 'run-live',
+        eventType: undefined,
+      }),
     ]);
   });
 

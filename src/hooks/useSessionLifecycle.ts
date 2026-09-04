@@ -15,7 +15,11 @@ import { mapBackendMessages } from '../utils/messages.js';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
-import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
+import {
+  mergePendingSessions,
+  readPersistedSessionId,
+  resolveSessionToRestore,
+} from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
@@ -131,6 +135,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
   const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
   const eventHistoryBySessionRef = useRef(new Map<string, SessionEventHistoryCache>());
+  // CreateSession can become usable before ListSessions' projection catches up.
+  // Keep those optimistic rows until the server returns them so a settled-run
+  // refresh cannot evict the active transcript in that short window.
+  const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
+  const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
   const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
@@ -593,13 +602,34 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           page: 1,
           pageSize: SESSION_LIST_PAGE_SIZE,
         });
-        useSessionStore.getState().upsertSessions((data.Sessions || []) as Session[], {
+        const listedSessions = (data.Sessions || []) as Session[];
+        for (const listedSession of listedSessions) {
+          pendingCreatedSessionAgentsRef.current.delete(listedSession.SessionId);
+        }
+        const pendingSessionIds = new Set(
+          Array.from(pendingCreatedSessionAgentsRef.current.entries())
+            .filter(([, pendingAgentId]) => pendingAgentId === targetAgentId)
+            .map(([sessionId]) => sessionId),
+        );
+        const refreshedSessions = mergePendingSessions(
+          listedSessions,
+          useSessionStore.getState().sessions,
+          pendingSessionIds,
+        ) as Session[];
+        useSessionStore.getState().upsertSessions(refreshedSessions, {
           agentId: targetAgentId,
           total: Number(data.Total ?? data.Sessions?.length ?? 0),
           page: Number(data.Page ?? 1),
           pageSize: Number(data.PageSize ?? SESSION_LIST_PAGE_SIZE),
           replace: true,
         });
+        // A manual “new conversation” can overlap the initial ListSessions
+        // request. Do not let that older response restore a previous session
+        // while CreateSession is still resolving: doing so starts a stale
+        // history hydrate that can replace the just-rendered optimistic turn.
+        if (sessionCreationPromiseRef.current) {
+          return;
+        }
         const sorted = useSessionStore.getState().sessions;
         const activeSessionId = currentSessionIdRef.current;
         const restoredSessionId = resolveSessionToRestore(
@@ -673,35 +703,70 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     fetchSessionsRef.current = fetchSessions;
   }, [fetchSessions]);
 
-  const createNewSession = useCallback(async () => {
-    try {
-      loadSessionGenerationRef.current += 1;
-      runSubscriptionAbortRef.current?.abort();
-      const session = await api.createSession(agentId);
-      const newId = session.SessionId;
-      if (newId) {
-        useSessionStore
-          .getState()
-          .upsertSessions([{ SessionId: newId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
-        currentSessionIdRef.current = newId;
-        useSessionStore.getState().setCurrentSessionId(newId);
-        useMessageStore.getState().setMessages([]);
-        useSessionStore.getState().clearSessionMessageHistory(newId);
-        useCheckpointStore.getState().setSessionCheckpoints(newId, []);
-        useCheckpointStore.getState().setSessionToolReceipts(newId, []);
-        useStreamingStore.getState().setCurrentRunId('');
-        useStreamingStore.getState().clearActivity();
-        if (isMobile) {
-          useUIStore.getState().setMobileSidebarOpen(false);
-          useUIStore.getState().setMobileActionsOpen(false);
-        }
-        void fetchSessions(agentId, newId);
-      }
-    } catch (error) {
-      if (error instanceof CancelledError) return;
-      console.error('Failed to create session:', error);
+  const adoptCreatedSession = useCallback((newId: string, preserveMessages = false) => {
+    loadSessionGenerationRef.current += 1;
+    runSubscriptionAbortRef.current?.abort();
+    pendingCreatedSessionAgentsRef.current.set(newId, agentIdRef.current);
+    useSessionStore
+      .getState()
+      .upsertSessions([{ SessionId: newId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
+    currentSessionIdRef.current = newId;
+    useSessionStore.getState().setCurrentSessionId(newId);
+    if (!preserveMessages) {
+      useMessageStore.getState().setMessages([]);
+      useStreamingStore.getState().setCurrentRunId('');
+      useStreamingStore.getState().clearActivity();
     }
-  }, [agentId, api, fetchSessions, isMobile]);
+    useSessionStore.getState().clearSessionMessageHistory(newId);
+    useCheckpointStore.getState().setSessionCheckpoints(newId, []);
+    useCheckpointStore.getState().setSessionToolReceipts(newId, []);
+    if (isMobile) {
+      useUIStore.getState().setMobileSidebarOpen(false);
+      useUIStore.getState().setMobileActionsOpen(false);
+    }
+  }, [isMobile]);
+
+  const createNewSession = useCallback(async () => {
+    // Invalidate an older session hydrate immediately. A fast user can type
+    // and send while CreateSession is in flight; submitDraft waits on this
+    // exact promise instead of starting a second session or using the prior one.
+    loadSessionGenerationRef.current += 1;
+    runSubscriptionAbortRef.current?.abort();
+    currentSessionIdRef.current = null;
+    useSessionStore.getState().setCurrentSessionId(null);
+    useMessageStore.getState().setMessages([]);
+    const creation = api.createSession(agentId)
+      .then((session) => {
+        const newId = session.SessionId || null;
+        if (newId) {
+          const preserveMessages = useMessageStore.getState().messages.some((message) => (
+            message.eventType === 'optimistic_user_message'
+            || message.eventType === 'optimistic_assistant_placeholder'
+          ));
+          adoptCreatedSession(newId, preserveMessages);
+        }
+        return newId;
+      })
+      .catch((error) => {
+        if (!(error instanceof CancelledError)) {
+          console.error('Failed to create session:', error);
+        }
+        return null;
+      });
+    sessionCreationPromiseRef.current = creation;
+    try {
+      await creation;
+    } finally {
+      if (sessionCreationPromiseRef.current === creation) {
+        sessionCreationPromiseRef.current = null;
+      }
+    }
+  }, [adoptCreatedSession, agentId, api]);
+
+  const waitForPendingSessionCreation = useCallback(async () => {
+    await sessionCreationPromiseRef.current;
+    return currentSessionIdRef.current;
+  }, []);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
@@ -721,6 +786,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         fallbackHistoryBySessionRef.current.delete(sessionId);
         eventHistoryBySessionRef.current.delete(sessionId);
         canonicalRunIdsBySessionRef.current.delete(sessionId);
+        pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
           runSubscriptionAbortRef.current?.abort();
@@ -844,6 +910,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     loadSession,
     loadOlderSessionMessages,
     createNewSession,
+    adoptCreatedSession,
+    waitForPendingSessionCreation,
     deleteSession,
     currentSessionIdRef,
     agentIdRef,

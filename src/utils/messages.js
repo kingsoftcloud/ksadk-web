@@ -169,8 +169,22 @@ function mapBackendActivities(msg) {
         ? content
         : [];
     if (!messages.length) return [];
+    const isStudioApprovalSurface = surfaceId.startsWith('approval-')
+      && messages.some((operation) => {
+        const components = operation?.updateComponents?.components
+          || operation?.update_components?.components;
+        return Array.isArray(components)
+          && components.some((component) => component?.component === 'ApprovalBar');
+      });
+    // InteractionTray is the canonical approval UI. Replaying the Studio-only
+    // compatibility surface would render a second, empty approval rectangle.
+    if (isStudioApprovalSurface) return [];
+    const sourceMessageId = String(activity.MessageId || '');
+    const activityId = sourceMessageId && sourceMessageId !== String(msg.MessageId || '')
+      ? sourceMessageId
+      : `${sourceMessageId || msg.MessageId || msg.SeqId || 'message'}:a2ui:${surfaceId}:${index}`;
     return [{
-      id: activity.MessageId || `a2ui-${msg.MessageId || msg.SeqId || 'message'}-${index}`,
+      id: activityId,
       role: 'a2ui',
       content: '',
       timestamp: parseTimestamp(msg.Timestamp),

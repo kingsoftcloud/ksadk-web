@@ -72,6 +72,7 @@ export function ConnectedMessageList({
   const loadingOlderRef = useRef(false);
   const olderLoadTokenRef = useRef<symbol | null>(null);
   const needsInitialScrollRef = useRef(true);
+  const previousLastMessageIdRef = useRef('');
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -129,7 +130,24 @@ export function ConnectedMessageList({
     previousScrollTopRef.current = 0;
     loadingOlderRef.current = false;
     olderLoadTokenRef.current = null;
+    previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
+
+  // Sending a new user turn always returns the viewport to the live edge.
+  // This is an explicit user action, so it overrides a previous manual
+  // detachment and makes the jump indicator disappear immediately.
+  useEffect(() => {
+    const lastMessage = messages.at(-1);
+    const previousId = previousLastMessageIdRef.current;
+    previousLastMessageIdRef.current = String(lastMessage?.id || '');
+    if (
+      lastMessage?.role === 'user'
+      && lastMessage.id !== previousId
+      && !needsInitialScrollRef.current
+    ) {
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     const scroller = scrollRef.current;

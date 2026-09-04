@@ -28,6 +28,12 @@ function requestSchemaKeys(
  * no inputs, nothing editable).
  */
 export function InteractionHistoryAnchor({ interaction }: { interaction: Interaction }) {
+  // A cancellation is already reflected by the stopped tool row. Keeping a
+  // second full-width audit card here made feedback look like a failed or
+  // still-actionable approval after refresh.
+  if (interaction.outcome === 'cancelled' || interaction.status === 'cancelled') {
+    return null;
+  }
   const terminal =
     interaction.status === 'resolved'
     || interaction.status === 'cancelled'

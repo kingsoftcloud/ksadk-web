@@ -24,14 +24,58 @@ export function InteractionSchemaForm({
   const fields: InteractionRequestSchemaField[] = schemaFields(schema);
 
   return (
-    <div className="mt-3" data-testid="interaction-schema-form">
+    <form
+      className="mt-3"
+      data-testid="interaction-schema-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!disabled) onSubmit();
+      }}
+    >
       {fields.map((field) => (
-        <label key={field.name} className="mb-2 block text-xs text-[var(--ksadk-interaction-muted)]">
+        <div key={field.name} className="mb-2 block text-xs text-[var(--ksadk-interaction-muted)]">
           <span className="mb-1 block font-medium">
             {field.title || field.name}
             {field.required ? <span className="ml-0.5 text-rose-500">*</span> : null}
           </span>
-          {field.enumValues && field.enumValues.length > 0 ? (
+          {field.type === 'array' && field.enumValues && field.enumValues.length > 0 ? (
+            <span
+              data-testid={`interaction-field-${field.name}`}
+              className="flex flex-col gap-1"
+            >
+              {field.enumValues.map((value, index) => {
+                const selected = Array.isArray(values[field.name])
+                  ? (values[field.name] as unknown[]).map(String).includes(String(value))
+                  : false;
+                return (
+                  <label
+                    key={String(value)}
+                    className="flex min-h-9 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--ksadk-interaction-foreground)] hover:bg-[var(--ksadk-interaction-muted-background)]"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--ksadk-interaction-muted-background)] text-xs text-[var(--ksadk-interaction-muted)]">
+                      {index + 1}
+                    </span>
+                    <input
+                      type="checkbox"
+                      disabled={disabled}
+                      checked={selected}
+                      onChange={(event) => {
+                        const current = Array.isArray(values[field.name])
+                          ? (values[field.name] as unknown[])
+                          : [];
+                        const next = event.target.checked
+                          ? [...current, value]
+                          : current.filter((entry) => String(entry) !== String(value));
+                        onChange({ ...values, [field.name]: next });
+                      }}
+                      className="h-4 w-4"
+                    />
+                    <span>{String(value)}</span>
+                  </label>
+                );
+              })}
+            </span>
+          ) : field.enumValues && field.enumValues.length > 0 ? (
             <select
               data-testid={`interaction-field-${field.name}`}
               disabled={disabled}
@@ -77,14 +121,13 @@ export function InteractionSchemaForm({
               className="w-full rounded-md border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-control-background)] px-2 py-1.5 text-sm text-foreground"
             />
           )}
-        </label>
+        </div>
       ))}
       <div className="mt-2 flex flex-wrap gap-2">
         <button
-          type="button"
+          type="submit"
           data-testid="interaction-submit"
           disabled={disabled}
-          onClick={onSubmit}
           className="inline-flex min-h-8 items-center rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
         >
           提交
@@ -99,6 +142,6 @@ export function InteractionSchemaForm({
           取消本次确认
         </button>
       </div>
-    </div>
+    </form>
   );
 }

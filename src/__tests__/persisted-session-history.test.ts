@@ -19,7 +19,9 @@ describe('rebuildPersistedSessionHistory', () => {
       // Production RuntimeEvent/v2 persists this value in Unix seconds.
       Timestamp: '1700000001',
       Content: {
-        runtime_event: {
+        // Local Studio persists the additive canonical payload in camelCase;
+        // cloud/session-envelope history may still use runtime_event.
+        runtimeEvent: {
           family: 'runtime',
           event_type: 'item.completed',
           event_id: 'event-1',
@@ -176,7 +178,7 @@ describe('rebuildPersistedSessionHistory', () => {
       InvocationId: 'run-partial-tools',
       Timestamp: String(1_700_000_000 + seq),
       Content: {
-        runtime_event: {
+        runtimeEvent: {
           family: 'runtime',
           run_id: 'run-partial-tools',
           scope_id: 'scope-partial-tools',
@@ -235,9 +237,51 @@ describe('rebuildPersistedSessionHistory', () => {
     )?.tools?.['mcp.metaso-inner.metaso_topic_list'];
     expect(tool).toMatchObject({
       name: 'mcp.metaso-inner.metaso_topic_list',
+      callId: 'call-mcp-tool',
       status: 'error',
     });
     expect(tool?.output).toContain('user rejected MCP tool call');
+    expect(rebuilt.messages.find(
+      (message) => message.tools?.['mcp.metaso-inner.metaso_topic_list'],
+    )?.blocks).toContainEqual(expect.objectContaining({
+      type: 'tool',
+      extra: { callId: 'call-mcp-tool' },
+    }));
+  });
+
+  it('drops the failed assistant projection after custom feedback cancels an approval run', () => {
+    const fallback: Message[] = [
+      {
+        id: 'user-cancelled-run',
+        role: 'user',
+        content: '执行原命令',
+        timestamp: 1_700_000_000_000,
+        invocationId: 'run-cancelled-by-feedback',
+      },
+      {
+        id: 'assistant-cancelled-run',
+        role: 'model',
+        content: 'Codex turn/interrupt completed',
+        timestamp: 1_700_000_001_000,
+        invocationId: 'run-cancelled-by-feedback',
+      },
+    ];
+    const records: PersistedSessionEventRecord[] = [{
+      SeqId: 43,
+      EventId: 'approval-resolution',
+      EventType: 'approval.resolved',
+      InvocationId: 'run-cancelled-by-feedback',
+      Timestamp: '1700000001',
+      Content: {
+        name: 'cancel',
+        data: { feedback: '请改成 echo 你好' },
+        revision: 2,
+      },
+    } as PersistedSessionEventRecord];
+
+    const rebuilt = rebuildPersistedSessionHistory(fallback, records, 'session-feedback');
+
+    expect(rebuilt.messages.map((message) => message.content)).toEqual(['执行原命令']);
   });
 
   it('rehydrates LangGraph tool calls from canonical history after refresh', () => {

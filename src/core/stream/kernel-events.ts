@@ -365,9 +365,29 @@ export class KernelRunEventTranslator {
       const parts = frameParts(frame, 'snapshot');
       if (frame.item_kind === 'tool_call') {
         const call = toolCallPart(parts);
-        const callId = call?.callId || String(frame.item_id || '');
-        const name = call?.name || this.toolNameByCallId.get(callId) || 'tool';
+        const result = toolResultPart(parts);
+        const remembered = this.toolCallByItemId.get(String(frame.item_id || ''));
+        const callId = result?.callId || call?.callId || remembered?.callId || String(frame.item_id || '');
+        const name = call?.name || remembered?.name || this.toolNameByCallId.get(callId) || 'tool';
         if (callId) this.toolNameByCallId.set(callId, name);
+        // Codex commandExecution completes one canonical tool_call item with
+        // both the original call part and its terminal result part. Treat the
+        // mixed snapshot as the result; replaying it as another tool_call left
+        // completed commands permanently marked as running after refresh.
+        if (result) {
+          const output = result.isError ? { error: result.result } : result.result;
+          return {
+            ...base(),
+            EventType: 'tool_result',
+            Metadata: {
+              ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+              call_id: callId,
+              tool_name: name,
+              run_id: runId,
+              tool_output: output,
+            },
+          };
+        }
         return {
           ...base(),
           EventType: 'tool_call',

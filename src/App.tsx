@@ -111,6 +111,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     loadSession,
     loadOlderSessionMessages,
     createNewSession,
+    adoptCreatedSession,
+    waitForPendingSessionCreation,
     deleteSession,
     currentSessionIdRef,
     agentIdRef,
@@ -167,6 +169,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSettledRun,
+    onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
+    waitForPendingSessionCreation,
   });
 
 

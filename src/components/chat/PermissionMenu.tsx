@@ -17,7 +17,7 @@ const options: PermissionOption[] = [
   {
     value: 'ask',
     label: '请求批准',
-    description: '所有操作前确认',
+    description: 'Agent 请求授权时确认',
     icon: Hand,
   },
   {
