@@ -31,6 +31,21 @@ export class CancelledError extends Error {
 
 const API_BASE = '/agentengine/api/v1';
 
+export type AgentEngineFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export type AgentEngineClientOptions = {
+  fetch?: AgentEngineFetch;
+  baseUrl?: string;
+  /**
+   * Scope every action to one agent. Embedded hosts such as Studio should set
+   * this instead of selecting an agent through a process-wide cookie.
+   */
+  agentId?: string;
+};
+
 async function parseActionResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
   let data: Record<string, unknown> = {};
@@ -90,135 +105,196 @@ function rethrowIfNotCancelled(error: unknown): never {
 }
 
 /** 1. JSON POST — 普通 agentengine action */
-export async function postJsonAction<T>(
+export class AgentEngineClient {
+  private readonly fetcher: AgentEngineFetch;
+
+  private readonly baseUrl: string;
+
+  private readonly agentId: string;
+
+  constructor(options: AgentEngineClientOptions = {}) {
+    this.fetcher = options.fetch || ((input, init) => globalThis.fetch(input, init));
+    this.baseUrl = String(options.baseUrl || API_BASE).replace(/\/+$/, '');
+    this.agentId = String(options.agentId || '').trim();
+  }
+
+  private actionUrl(action: string): string {
+    return `${this.baseUrl}/${action}`;
+  }
+
+  private scopedBody(body: Record<string, unknown>): Record<string, unknown> {
+    return this.agentId && !body.AgentId ? { ...body, AgentId: this.agentId } : body;
+  }
+
+  async postJsonAction<T>(
+    action: string,
+    body: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<T> {
+    let response: Response;
+    try {
+      response = await this.fetcher(this.actionUrl(action), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.scopedBody(body)),
+        signal: options?.signal,
+      });
+    } catch (error) {
+      throw rethrowIfNotCancelled(error);
+    }
+    return parseActionResponse<T>(response);
+  }
+
+  /** 2. FormData POST — UploadFile、AddWorkspaceFile */
+  async postFormAction<T>(
+    action: string,
+    formData: FormData,
+    options?: { signal?: AbortSignal },
+  ): Promise<T> {
+    let response: Response;
+    if (this.agentId && !formData.has('AgentId')) formData.append('AgentId', this.agentId);
+    try {
+      response = await this.fetcher(this.actionUrl(action), {
+        method: 'POST',
+        body: formData,
+        signal: options?.signal,
+      });
+    } catch (error) {
+      throw rethrowIfNotCancelled(error);
+    }
+    return parseActionResponse<T>(response);
+  }
+
+  /** 3. GET blob/text — GetWorkspaceFileContent、AttachmentContent */
+  async getResource(
+    action: string,
+    params: Record<string, string>,
+    options?: { signal?: AbortSignal; asText?: boolean },
+  ): Promise<Blob | string> {
+    const scopedParams = this.agentId && !params.AgentId
+      ? { AgentId: this.agentId, ...params }
+      : params;
+    const qs = new URLSearchParams(scopedParams).toString();
+    const url = qs ? `${this.actionUrl(action)}?${qs}` : this.actionUrl(action);
+    let response: Response;
+    try {
+      response = await this.fetcher(url, { signal: options?.signal });
+    } catch (error) {
+      throw rethrowIfNotCancelled(error);
+    }
+
+    if (!response.ok) {
+      throw new ApiError(response.status, `资源获取失败: ${response.statusText}`);
+    }
+
+    try {
+      return options?.asText ? await response.text() : await response.blob();
+    } catch {
+      throw new ApiError(-3, '文件读取失败');
+    }
+  }
+
+  /** 4. SSE stream — RunAgent / SubscribeRunEvents */
+  async streamAction(
+    action: string,
+    body: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<ReadableStream<Uint8Array>> {
+    let response: Response;
+    try {
+      response = await this.fetcher(this.actionUrl(action), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(this.scopedBody(body)),
+        signal: options?.signal,
+      });
+    } catch (error) {
+      throw rethrowIfNotCancelled(error);
+    }
+
+    if (!response.ok) {
+      throw new ApiError(response.status, `流式请求失败: ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+    if (contentType.includes('application/json')) {
+      // Action endpoints sometimes carry business failures in an HTTP 200 JSON
+      // envelope. Validate a clone so successful legacy JSON responses keep
+      // their original body while rejected admissions never masquerade as SSE.
+      await parseActionResponse(response.clone());
+    }
+
+    if (!response.body) {
+      throw new ApiError(-1, '无法获取响应流');
+    }
+
+    return response.body;
+  }
+
+  /** GET SSE stream — SubscribeRunEvents 用 query params */
+  async streamGetAction(
+    action: string,
+    params: Record<string, string>,
+    options?: { signal?: AbortSignal },
+  ): Promise<ReadableStream<Uint8Array>> {
+    const scopedParams = this.agentId && !params.AgentId
+      ? { AgentId: this.agentId, ...params }
+      : params;
+    const qs = new URLSearchParams(scopedParams).toString();
+    const url = qs ? `${this.actionUrl(action)}?${qs}` : this.actionUrl(action);
+    let response: Response;
+    try {
+      response = await this.fetcher(url, {
+        headers: { Accept: 'text/event-stream' },
+        signal: options?.signal,
+      });
+    } catch (error) {
+      throw rethrowIfNotCancelled(error);
+    }
+
+    if (!response.ok) {
+      throw new ApiError(response.status, `流式订阅失败: ${response.statusText}`);
+    }
+
+    if (!response.body) {
+      throw new ApiError(-1, '无法获取响应流');
+    }
+
+    return response.body;
+  }
+}
+
+const defaultAgentEngineClient = new AgentEngineClient();
+
+export const postJsonAction = <T>(
   action: string,
   body: Record<string, unknown>,
   options?: { signal?: AbortSignal },
-): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/${action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: options?.signal,
-    });
-  } catch (error) {
-    throw rethrowIfNotCancelled(error);
-  }
-  return parseActionResponse<T>(response);
-}
+): Promise<T> => defaultAgentEngineClient.postJsonAction<T>(action, body, options);
 
-/** 2. FormData POST — UploadFile、AddWorkspaceFile */
-export async function postFormAction<T>(
+export const postFormAction = <T>(
   action: string,
   formData: FormData,
   options?: { signal?: AbortSignal },
-): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/${action}`, {
-      method: 'POST',
-      body: formData,
-      signal: options?.signal,
-    });
-  } catch (error) {
-    throw rethrowIfNotCancelled(error);
-  }
-  return parseActionResponse<T>(response);
-}
+): Promise<T> => defaultAgentEngineClient.postFormAction<T>(action, formData, options);
 
-/** 3. GET blob/text — GetWorkspaceFileContent、AttachmentContent */
-export async function getResource(
+export const getResource = (
   action: string,
   params: Record<string, string>,
   options?: { signal?: AbortSignal; asText?: boolean },
-): Promise<Blob | string> {
-  const qs = new URLSearchParams(params).toString();
-  const url = qs ? `${API_BASE}/${action}?${qs}` : `${API_BASE}/${action}`;
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: options?.signal });
-  } catch (error) {
-    throw rethrowIfNotCancelled(error);
-  }
+): Promise<Blob | string> => defaultAgentEngineClient.getResource(action, params, options);
 
-  if (!response.ok) {
-    throw new ApiError(response.status, `资源获取失败: ${response.statusText}`);
-  }
-
-  try {
-    return options?.asText ? await response.text() : await response.blob();
-  } catch {
-    throw new ApiError(-3, '文件读取失败');
-  }
-}
-
-/** 4. SSE stream — RunAgent / SubscribeRunEvents */
-export async function streamAction(
+export const streamAction = (
   action: string,
   body: Record<string, unknown>,
   options?: { signal?: AbortSignal },
-): Promise<ReadableStream<Uint8Array>> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/${action}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-      },
-      body: JSON.stringify(body),
-      signal: options?.signal,
-    });
-  } catch (error) {
-    throw rethrowIfNotCancelled(error);
-  }
+): Promise<ReadableStream<Uint8Array>> => defaultAgentEngineClient.streamAction(action, body, options);
 
-  if (!response.ok) {
-    throw new ApiError(response.status, `流式请求失败: ${response.statusText}`);
-  }
-
-  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-  if (contentType.includes('application/json')) {
-    // Action endpoints sometimes carry business failures in an HTTP 200 JSON
-    // envelope. Validate a clone so successful legacy JSON responses keep
-    // their original body while rejected admissions never masquerade as SSE.
-    await parseActionResponse(response.clone());
-  }
-
-  if (!response.body) {
-    throw new ApiError(-1, '无法获取响应流');
-  }
-
-  return response.body;
-}
-
-/** GET SSE stream — SubscribeRunEvents 用 query params */
-export async function streamGetAction(
+export const streamGetAction = (
   action: string,
   params: Record<string, string>,
   options?: { signal?: AbortSignal },
-): Promise<ReadableStream<Uint8Array>> {
-  const qs = new URLSearchParams(params).toString();
-  const url = qs ? `${API_BASE}/${action}?${qs}` : `${API_BASE}/${action}`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { Accept: 'text/event-stream' },
-      signal: options?.signal,
-    });
-  } catch (error) {
-    throw rethrowIfNotCancelled(error);
-  }
-
-  if (!response.ok) {
-    throw new ApiError(response.status, `流式订阅失败: ${response.statusText}`);
-  }
-
-  if (!response.body) {
-    throw new ApiError(-1, '无法获取响应流');
-  }
-
-  return response.body;
-}
+): Promise<ReadableStream<Uint8Array>> => defaultAgentEngineClient.streamGetAction(action, params, options);

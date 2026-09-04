@@ -16,8 +16,11 @@ export default defineConfig({
     lib: {
       entry: {
         capabilities: path.resolve(__dirname, "src/public/capabilities.ts"),
+        "chat-composer": path.resolve(__dirname, "src/public/chat-composer.ts"),
+        "chat-timeline": path.resolve(__dirname, "src/public/chat-timeline.ts"),
         components: path.resolve(__dirname, "src/public/components.ts"),
         conversation: path.resolve(__dirname, "src/public/conversation.ts"),
+        hooks: path.resolve(__dirname, "src/public/hooks.ts"),
         runtime: path.resolve(__dirname, "src/public/runtime.ts"),
         styles: path.resolve(__dirname, "src/public/styles.ts"),
         types: path.resolve(__dirname, "src/public/types.ts"),

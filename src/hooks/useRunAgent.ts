@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useUIStore } from '../stores/ui.js';
 import { useSessionStore } from '../stores/session.js';
@@ -13,10 +13,7 @@ import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
 import { HttpConversationClient } from '../core/conversation/index.js';
-
-// Same-origin, credential-free canonical transport. It is Node/SSR safe: the
-// client resolves global fetch lazily only when a browser turn starts.
-const hostedConversationClient = new HttpConversationClient();
+import type { ConversationClient } from '../core/conversation/types.js';
 
 type QueuedDraft = {
   text: string;
@@ -40,11 +37,19 @@ type RunAgentContext = {
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
   onRunSettled?: (sessionId: string | null) => void;
+  /** `null` keeps an embedded host on the legacy action transport. */
+  conversationClient?: ConversationClient | null;
 };
 
 export function useRunAgent(ctx: RunAgentContext) {
   const enginesRef = useRef(new Map<string, RunEngineImpl>());
   const drainQueueRef = useRef<() => void>(() => {});
+  // Same-origin canonical transport for Hosted UI. It resolves fetch lazily
+  // so importing the library stays Node/SSR safe.
+  const defaultConversationClient = useMemo(() => new HttpConversationClient(), []);
+  const conversationClient = ctx.conversationClient === undefined
+    ? defaultConversationClient
+    : ctx.conversationClient;
 
   const {
     agentId,
@@ -76,9 +81,9 @@ export function useRunAgent(ctx: RunAgentContext) {
         ),
       }),
       checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
-      conversationClient: hostedConversationClient,
+      conversationClient: conversationClient || undefined,
     });
-  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities]);
+  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
 
   const getEngine = useCallback((sessionId: string | null | undefined) => {
     const key = String(sessionId || 'new-session');

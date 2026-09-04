@@ -20,7 +20,7 @@ import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
 import type { RuntimeExecutionMode } from '../../core/run/types.js';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 
-type ConnectedComposerProps = {
+export type ConnectedComposerProps = {
   composerMaxHeight: number;
   submitDraft: (
     text: string,
@@ -41,6 +41,7 @@ type ConnectedComposerProps = {
   pendingInteractions?: readonly Interaction[];
   onRespondInteraction?: (input: InteractionTrayRespondInput) => void;
   localCatalog?: unknown;
+  className?: string;
 };
 
 export function ConnectedComposer({
@@ -57,6 +58,7 @@ export function ConnectedComposer({
   pendingInteractions,
   onRespondInteraction,
   localCatalog,
+  className,
 }: ConnectedComposerProps) {
   const [activeInteractionIndex, setActiveInteractionIndex] = useState(0);
   const [selectedExecutionMode, setSelectedExecutionMode] = useState<RuntimeExecutionMode | undefined>();
@@ -174,6 +176,7 @@ export function ConnectedComposer({
       onCancelRemote={cancelRemote}
       onSubmit={handleSubmit}
       textareaRef={textareaRef}
+      className={className}
       />
     </div>
   );

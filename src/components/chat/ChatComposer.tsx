@@ -22,7 +22,7 @@ import { ModelSettingsMenu } from './ModelSettingsMenu';
 import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
-type ChatComposerProps = {
+export type ChatComposerProps = {
   attachments: File[];
   composerContextIndicator: ComposerContextIndicator;
   composerMaxHeight: number;
@@ -46,6 +46,7 @@ type ChatComposerProps = {
   onCancelRemote?: () => void;
   onSubmit: (text: string, attachments: File[]) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  className?: string;
 };
 
 export function ChatComposer({
@@ -72,6 +73,7 @@ export function ChatComposer({
   onCancelRemote,
   onSubmit,
   textareaRef,
+  className,
 }: ChatComposerProps) {
   const placeholderText = executionMode === 'goal'
     ? '描述需要持续完成的目标…'
@@ -127,7 +129,10 @@ export function ChatComposer({
   };
 
   return (
-    <div className="relative z-10 flex-shrink-0 bg-background/95 px-3 py-3 backdrop-blur sm:px-4 sm:py-3">
+    <div
+      className={cn('relative z-10 flex-shrink-0 bg-background/95 px-3 py-3 backdrop-blur sm:px-4 sm:py-3', className)}
+      data-slot="composer"
+    >
       <div className="mx-auto w-full max-w-[64rem]">
         {queuedDrafts.length > 0 ? (
           <div className="mb-2 rounded-2xl border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">

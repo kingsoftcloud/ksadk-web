@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import { useBootstrapStore } from '../stores/bootstrap.js';
 import { useModelStore } from '../stores/model.js';
 import { useUIStore } from '../stores/ui.js';
-import { getAgentUiBootstrap } from '../api/bootstrap.js';
-import { listAgentModels } from '../api/model.js';
+import { ApiFacadeImpl } from '../core/api/facade.js';
+import type { ApiFacade } from '../core/api/types.js';
 import { normalizeCapabilities, isHostedChatEnabled } from '../utils/capabilities.js';
 import { readPersistedSessionId } from '../utils/session.js';
 import type { UiCapabilities } from '../types/capabilities.js';
@@ -27,9 +27,11 @@ function normalizeApiFormats(value: unknown): RuntimeApiFormat[] {
   return formats.length > 0 ? formats : ['responses', 'chat_completions'];
 }
 
-export async function fetchModels(targetAgentId: string) {
+const defaultApi = new ApiFacadeImpl();
+
+export async function fetchModels(targetAgentId: string, api: ApiFacade = defaultApi) {
   try {
-    const data = await listAgentModels(targetAgentId);
+    const data = await api.listAgentModels(targetAgentId);
     const models = (data as Record<string, unknown>)?.Models;
     if (Array.isArray(models)) {
       useModelStore.getState().upsertModels(models as import('../components/chat/types.js').ModelCatalogItem[]);
@@ -52,12 +54,18 @@ type SessionCallbacks = {
   fetchSessions: (agentId: string, preferredSessionId: string | null) => Promise<void>;
 };
 
-export function useBootstrap(sessionCallbacks: SessionCallbacks) {
+export function useBootstrap(
+  sessionCallbacks: SessionCallbacks,
+  explicitAgentId?: string,
+  api: ApiFacade = defaultApi,
+) {
   useEffect(() => {
+    const controller = new AbortController();
     void (async () => {
       useBootstrapStore.getState().setStatus('loading');
       try {
-        const data = await getAgentUiBootstrap();
+        const data = await api.getAgentUiBootstrap(explicitAgentId, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         const dataRecord = data as Record<string, unknown>;
         const agentRecord = dataRecord?.Agent as Record<string, unknown> | undefined;
         const bootstrapAgentId = String(agentRecord?.AgentId || 'default-agent');
@@ -98,9 +106,10 @@ export function useBootstrap(sessionCallbacks: SessionCallbacks) {
           useModelStore.getState().upsertModels([bootstrapModel]);
           useModelStore.getState().setModelSource(bootstrapModel.source || '');
         }
-        void fetchModels(bootstrapAgentId);
+        void fetchModels(bootstrapAgentId, api);
         useBootstrapStore.getState().setStatus('ready');
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error('Failed to fetch bootstrap:', error);
         const status = classifyBootstrapFailure(error);
         useBootstrapStore.getState().setStatus(
@@ -111,6 +120,7 @@ export function useBootstrap(sessionCallbacks: SessionCallbacks) {
         );
       }
     })();
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [api, explicitAgentId]);
 }

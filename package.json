@@ -1,6 +1,6 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -33,6 +33,14 @@
       "types": "./dist-lib/public/components.d.ts",
       "import": "./dist-lib/components.js"
     },
+    "./chat/composer": {
+      "types": "./dist-lib/public/chat-composer.d.ts",
+      "import": "./dist-lib/chat-composer.js"
+    },
+    "./chat/timeline": {
+      "types": "./dist-lib/public/chat-timeline.d.ts",
+      "import": "./dist-lib/chat-timeline.js"
+    },
     "./conversation": {
       "types": "./dist-lib/public/conversation.d.ts",
       "import": "./dist-lib/conversation.js"
@@ -44,6 +52,10 @@
     "./capabilities": {
       "types": "./dist-lib/public/capabilities.d.ts",
       "import": "./dist-lib/capabilities.js"
+    },
+    "./hooks": {
+      "types": "./dist-lib/public/hooks.d.ts",
+      "import": "./dist-lib/hooks.js"
     },
     "./styles": "./dist-lib/styles.css",
     "./types": {

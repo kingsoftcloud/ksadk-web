@@ -19,8 +19,11 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.deepEqual(Object.keys(packageJson.exports).sort(), [
     '.',
     './capabilities',
+    './chat/composer',
+    './chat/timeline',
     './components',
     './conversation',
+    './hooks',
     './runtime',
     './styles',
     './types',
@@ -28,6 +31,9 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
   assert.equal(packageJson.exports['./runtime'].types, './dist-lib/public/runtime.d.ts');
   assert.equal(packageJson.exports['./runtime'].import, './dist-lib/runtime.js');
   assert.equal(packageJson.exports['./components'].types, './dist-lib/public/components.d.ts');
+  assert.equal(packageJson.exports['./chat/timeline'].import, './dist-lib/chat-timeline.js');
+  assert.equal(packageJson.exports['./chat/composer'].import, './dist-lib/chat-composer.js');
+  assert.equal(packageJson.exports['./hooks'].import, './dist-lib/hooks.js');
   assert.equal(packageJson.exports['./conversation'].types, './dist-lib/public/conversation.d.ts');
   assert.equal(packageJson.exports['./conversation'].import, './dist-lib/conversation.js');
   assert.equal(packageJson.exports['./capabilities'].types, './dist-lib/public/capabilities.d.ts');

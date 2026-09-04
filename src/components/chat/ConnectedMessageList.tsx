@@ -16,7 +16,7 @@ import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 
-type ConnectedMessageListProps = {
+export type ConnectedMessageListProps = {
   agentName: string;
   isMobile: boolean;
   onDeleteFeedback: (message: Message) => void;
@@ -30,6 +30,7 @@ type ConnectedMessageListProps = {
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
   interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
+  className?: string;
 };
 
 export function ConnectedMessageList({
@@ -46,6 +47,7 @@ export function ConnectedMessageList({
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
   interactionRecords,
+  className,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -281,6 +283,7 @@ export function ConnectedMessageList({
         checkpoints={checkpointResumeEnabled ? checkpoints : []}
         onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}
+        className={className}
       />
       <AttachmentPreview
         attachment={previewAttachment}

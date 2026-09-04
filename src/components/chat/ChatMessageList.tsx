@@ -44,7 +44,7 @@ import { A2UIActivityMessage } from './A2UIActivityMessage';
 import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
 import type { Interaction } from '../../core/interaction/types.js';
 
-type ChatMessageListProps = {
+export type ChatMessageListProps = {
   agentName: string;
   isMobile: boolean;
   isStreaming: boolean;
@@ -73,6 +73,7 @@ type ChatMessageListProps = {
   /** Interaction/v1 records for the current session; anchors replace inline buttons. */
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  className?: string;
 };
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
@@ -1076,6 +1077,7 @@ export function ChatMessageList({
   onResumeCheckpoint,
   interactionRecords,
   scrollRef,
+  className,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
   void checkpoints;
@@ -1148,7 +1150,9 @@ export function ChatMessageList({
       className={cn(
         'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
+        className,
       )}
+      data-slot="message-list"
     >
       <div className={cn('mx-auto flex w-full max-w-[64rem] flex-col', activity ? 'pb-10 sm:pb-10' : 'pb-6 sm:pb-8')}>
         {messages.length === 0 && isLoadingInitialHistory ? (

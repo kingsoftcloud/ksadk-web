@@ -18,13 +18,14 @@ import type { Interaction } from '../../core/interaction/types';
 
 type ToolData = NonNullable<Message['tools']>[string];
 
-interface Props {
+export interface ProcessingBlocksViewProps {
   message: Message;
   isStreaming: boolean;
   onRespondToApproval?: (p: { approvalRequestId: string; approve: boolean; previousResponseId?: string }) => void;
   onRespondToAguiApproval?: (p: { interruptId: string; approve: boolean }) => void;
   /** Interaction/v1 records; when present the read-only anchor replaces inline approval buttons. */
   interactionRecords?: readonly Interaction[];
+  className?: string;
 }
 
 /** 折叠容器:单行 summary + 可展开详情,260ms 高度动画。 */
@@ -376,10 +377,11 @@ export function ProcessingBlocksView({
   onRespondToApproval,
   onRespondToAguiApproval,
   interactionRecords,
-}: Props) {
+  className,
+}: ProcessingBlocksViewProps) {
   const blocks: ProcessingBlock[] = message.blocks ?? [];
   return (
-    <div className="mb-3 min-w-0">
+    <div className={cn('mb-3 min-w-0', className)} data-slot="processing-blocks">
       {blocks.map((block) => {
         if (block.type === 'thinking') {
           return <ThinkingRow key={block.id} block={block} />;

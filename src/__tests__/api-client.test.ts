@@ -1,7 +1,56 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, postJsonAction, streamAction } from '../api/client.js';
+import {
+  AgentEngineClient,
+  ApiError,
+  postJsonAction,
+  streamAction,
+} from '../api/client.js';
 
 describe('AgentEngine action response parsing', () => {
+  it('scopes JSON, form, and stream requests to one embedded agent', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      if (String(input).endsWith('/RunAgent')) {
+        return new Response('event: done\ndata: [DONE]\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+      return new Response(JSON.stringify({ Code: 0, Data: {} }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = new AgentEngineClient({
+      fetch: fetcher,
+      baseUrl: '/studio/actions/',
+      agentId: 'agent-cloud-1',
+    });
+
+    await client.postJsonAction('ListSessionEvents', {
+      SessionId: 'session-1',
+      AgentId: undefined,
+    });
+    const form = new FormData();
+    form.append('File', new Blob(['hello']), 'hello.txt');
+    await client.postFormAction('UploadFile', form);
+    await client.streamAction('RunAgent', { SessionId: 'session-1' });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      '/studio/actions/ListSessionEvents',
+      '/studio/actions/UploadFile',
+      '/studio/actions/RunAgent',
+    ]);
+    expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({
+      AgentId: 'agent-cloud-1',
+      SessionId: 'session-1',
+    });
+    expect(form.get('AgentId')).toBe('agent-cloud-1');
+    expect(JSON.parse(String(calls[2].init?.body))).toMatchObject({
+      AgentId: 'agent-cloud-1',
+      SessionId: 'session-1',
+    });
+  });
+
   it('explains Dashboard authentication when a hosted Agent returns an HTML 401', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('<!doctype html>', {
       status: 401,

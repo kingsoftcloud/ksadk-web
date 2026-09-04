@@ -21,7 +21,7 @@ export type InteractionTrayRespondInput = {
   idempotencyKey: string;
 };
 
-type InteractionTrayProps = {
+export type InteractionTrayProps = {
   /** Pending (and in-flight) interactions for the current session. */
   interactions: readonly Interaction[];
   activeIndex: number;
@@ -29,6 +29,7 @@ type InteractionTrayProps = {
   onRespond: (input: InteractionTrayRespondInput) => void;
   /** Local pinned A2UI catalog used for digest validation. */
   localCatalog?: unknown;
+  className?: string;
 };
 
 function firstA2uiInputSchema(
@@ -89,6 +90,7 @@ export function InteractionTray({
   onSelectIndex,
   onRespond,
   localCatalog,
+  className,
 }: InteractionTrayProps) {
   const [comment, setComment] = useState('');
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
@@ -137,9 +139,10 @@ export function InteractionTray({
   return (
     <div
       data-testid="interaction-tray"
+      data-slot="interaction-tray"
       data-interaction-status={active.status}
       data-interaction-count={interactions.length}
-      className="mx-auto mb-2 w-full max-w-3xl px-6"
+      className={cn('mx-auto mb-2 w-full max-w-3xl px-6', className)}
     >
       <div className="rounded-xl border border-amber-300/80 bg-amber-50/80 p-3 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30">
         <div className="flex items-center justify-between gap-2">

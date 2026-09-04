@@ -250,7 +250,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     },
   });
 
-  useBootstrap({ fetchSessions });
+  useBootstrap({ fetchSessions }, undefined, api);
 
   useEffect(() => {
     agentIdRef.current = agentId;
@@ -323,7 +323,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   if (bootstrapStatus !== 'ready') {
     const authRequired = bootstrapStatus === 'auth-required';
     const bootstrapContent = (
-      <div className="flex h-[var(--app-height)] min-h-[var(--app-height)] items-center justify-center bg-slate-50 px-6 font-sans text-slate-800 dark:bg-slate-950 dark:text-slate-100">
+      <div className="ksadk-web fixed inset-0 flex h-[var(--app-height)] min-h-[var(--app-height)] items-center justify-center bg-slate-50 px-6 font-sans text-slate-800 dark:bg-slate-950 dark:text-slate-100">
         <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-blue-600 dark:bg-blue-950/50">
             {bootstrapStatus === 'loading' ? '…' : '↗'}
@@ -387,7 +387,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   };
 
   const content = (
-    <div className="flex h-[var(--app-height)] min-h-[var(--app-height)] overflow-hidden bg-white font-sans text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+    <div className="ksadk-web fixed inset-0 flex h-[var(--app-height)] min-h-[var(--app-height)] overflow-hidden bg-white font-sans text-slate-800 dark:bg-slate-900 dark:text-slate-200">
       <ConnectedSidebar
         uiCapabilities={uiCapabilities}
         createNewSession={createNewSession}
