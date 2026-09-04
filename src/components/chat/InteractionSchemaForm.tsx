@@ -26,7 +26,7 @@ export function InteractionSchemaForm({
   return (
     <div className="mt-3" data-testid="interaction-schema-form">
       {fields.map((field) => (
-        <label key={field.name} className="mb-2 block text-xs text-slate-600 dark:text-slate-300">
+        <label key={field.name} className="mb-2 block text-xs text-[var(--ksadk-interaction-muted)]">
           <span className="mb-1 block font-medium">
             {field.title || field.name}
             {field.required ? <span className="ml-0.5 text-rose-500">*</span> : null}
@@ -37,7 +37,7 @@ export function InteractionSchemaForm({
               disabled={disabled}
               value={String(values[field.name] ?? '')}
               onChange={(event) => onChange({ ...values, [field.name]: event.target.value })}
-              className="w-full rounded-md border border-amber-300/70 bg-white px-2 py-1.5 text-sm dark:border-amber-900/60 dark:bg-slate-950"
+              className="w-full rounded-md border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-control-background)] px-2 py-1.5 text-sm text-foreground"
             >
               <option value="">请选择…</option>
               {field.enumValues.map((value) => (
@@ -65,7 +65,7 @@ export function InteractionSchemaForm({
                   [field.name]: event.target.value === '' ? undefined : Number(event.target.value),
                 })
               }
-              className="w-full rounded-md border border-amber-300/70 bg-white px-2 py-1.5 text-sm dark:border-amber-900/60 dark:bg-slate-950"
+              className="w-full rounded-md border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-control-background)] px-2 py-1.5 text-sm text-foreground"
             />
           ) : (
             <input
@@ -74,7 +74,7 @@ export function InteractionSchemaForm({
               disabled={disabled}
               value={String(values[field.name] ?? '')}
               onChange={(event) => onChange({ ...values, [field.name]: event.target.value })}
-              className="w-full rounded-md border border-amber-300/70 bg-white px-2 py-1.5 text-sm dark:border-amber-900/60 dark:bg-slate-950"
+              className="w-full rounded-md border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-control-background)] px-2 py-1.5 text-sm text-foreground"
             />
           )}
         </label>

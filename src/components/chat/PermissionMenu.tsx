@@ -17,19 +17,19 @@ const options: PermissionOption[] = [
   {
     value: 'ask',
     label: '请求批准',
-    description: '有副作用的操作执行前先确认',
+    description: '所有操作前确认',
     icon: Hand,
   },
   {
     value: 'risk',
     label: '风险操作需确认',
-    description: '只对命令、写入和外部副作用确认',
+    description: '仅副作用操作',
     icon: ShieldCheck,
   },
   {
     value: 'full',
     label: '完全访问',
-    description: '本次会话不再为默认规则弹出确认',
+    description: '不再确认',
     icon: ShieldAlert,
   },
 ];
@@ -106,9 +106,12 @@ export function PermissionMenu({ approvalPolicy }: PermissionMenuProps) {
         <div
           role="menu"
           aria-label="工具权限"
-          className="absolute bottom-[calc(100%+0.6rem)] left-0 z-30 w-[19rem] rounded-2xl border border-border/80 bg-popover p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.14)]"
+          className="absolute bottom-[calc(100%+0.6rem)] left-0 z-30 w-[18rem] rounded-xl border border-border/80 bg-popover p-1 shadow-[0_10px_24px_rgba(15,23,42,0.12)]"
+          style={{
+            backgroundColor: 'var(--ksadk-popover, #fff)',
+            borderColor: 'var(--ksadk-border, rgba(15, 23, 42, 0.12))',
+          }}
         >
-          <div className="px-2.5 pb-1.5 pt-1 text-[11px] text-text-muted">本次会话的默认审批规则</div>
           {visibleOptions.map((option) => {
             const Icon = option.icon;
             const selected = option.value === permissionMode;
@@ -123,17 +126,15 @@ export function PermissionMenu({ approvalPolicy }: PermissionMenuProps) {
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors',
+                  'flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors',
                   selected ? 'bg-primary/[0.08]' : 'hover:bg-muted/75',
                 )}
               >
-                <Icon className={cn('h-[17px] w-[17px] shrink-0', selected ? 'text-primary' : 'text-text-muted')} />
-                <span className="min-w-0 flex-1">
-                  <span className={cn('block text-[13px] font-medium leading-5', selected ? 'text-text-primary' : 'text-text-secondary')}>
-                    {option.label}
-                  </span>
-                  <span className="block text-[11px] leading-4 text-text-muted">{option.description}</span>
+                <Icon className={cn('h-4 w-4 shrink-0', selected ? 'text-primary' : 'text-text-muted')} />
+                <span className={cn('shrink-0 text-[13px] font-medium', selected ? 'text-text-primary' : 'text-text-secondary')}>
+                  {option.label}
                 </span>
+                <span className="ml-auto truncate text-[11px] text-text-muted">{option.description}</span>
                 {selected ? <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" /> : null}
               </button>
             );

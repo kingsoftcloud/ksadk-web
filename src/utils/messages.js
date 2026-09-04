@@ -14,8 +14,14 @@ const APPROVAL_STATUS_MAP = {
 };
 
 function parseTimestamp(value) {
-  if (typeof value === 'number') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 0 && value < 100_000_000_000 ? value * 1000 : value;
+  }
   if (typeof value === 'string') {
+    const numeric = Number(value.trim());
+    if (value.trim() && Number.isFinite(numeric)) {
+      return numeric > 0 && numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+    }
     const parsed = Date.parse(value);
     if (Number.isFinite(parsed)) return parsed;
   }

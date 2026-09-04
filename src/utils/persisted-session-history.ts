@@ -27,6 +27,12 @@ function eventTimestamp(value: unknown): number {
     // sorting or a refreshed run places every user row after all model items.
     return value > 0 && value < 100_000_000_000 ? value * 1000 : value;
   }
+  if (typeof value === 'string' && value.trim()) {
+    const numeric = Number(value.trim());
+    if (Number.isFinite(numeric)) {
+      return numeric > 0 && numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+    }
+  }
   const parsed = Date.parse(String(value || ''));
   return Number.isFinite(parsed) ? parsed : Date.now();
 }
@@ -81,12 +87,13 @@ function enrichCanonicalRun(
   fallback: Message[],
 ): Message[] {
   const fallbackUser = fallback.find((message) => message.role === 'user');
+  const hasCanonicalUser = canonical.some((message) => message.role === 'user');
   const fallbackModels = fallback.filter((message) => message.role === 'model');
   const canonicalModels = canonical.filter((message) => message.role === 'model');
   const lastCanonicalModel = canonicalModels.at(-1);
   const lastFallbackModel = fallbackModels.at(-1);
 
-  return canonical.map((message) => {
+  const enriched = canonical.map((message) => {
     if (message.role === 'user' && fallbackUser) {
       return {
         ...message,
@@ -104,6 +111,51 @@ function enrichCanonicalRun(
     }
     return withHistoryBlocks(message);
   });
+
+  // Some RuntimeEvent/v2 producers persist only model-side activity. The
+  // cumulative Messages row remains the durable source for that turn's user
+  // input, so retain it when canonical replay has no user item of its own.
+  return fallbackUser && !hasCanonicalUser
+    ? [fallbackUser, ...enriched]
+    : enriched;
+}
+
+/**
+ * A newest-first event page can begin in the middle of a long run. Keep the
+ * complete Messages projection for readable user/assistant text, but enrich
+ * its last assistant row with any durable reasoning and tool facts already
+ * present in the loaded event window. This lets upward pagination reveal old
+ * tool calls page by page without waiting until the run.started boundary is
+ * fetched.
+ */
+function enrichPartialCanonicalRun(
+  fallback: Message[],
+  canonical: Message[],
+): Message[] {
+  const partialModels = canonical.filter((message) => message.role === 'model');
+  const partialTools = partialModels.reduce<NonNullable<Message['tools']>>(
+    (tools, message) => ({ ...tools, ...(message.tools || {}) }),
+    {},
+  );
+  const partialReasoning = partialModels
+    .map((message) => String(message.reasoning || '').trim())
+    .filter(Boolean)
+    .join('\n\n');
+  const target = [...fallback].reverse().find((message) => message.role === 'model');
+  if (!target || (Object.keys(partialTools).length === 0 && !partialReasoning)) {
+    return fallback;
+  }
+  return fallback.map((message) => (
+    message === target
+      ? withHistoryBlocks({
+          ...message,
+          reasoning: message.reasoning || partialReasoning || undefined,
+          tools: Object.keys(partialTools).length > 0
+            ? { ...(message.tools || {}), ...partialTools }
+            : message.tools,
+        })
+      : message
+  ));
 }
 
 /**
@@ -143,15 +195,26 @@ export function rebuildPersistedSessionHistory(
   const translator = new KernelRunEventTranslator(sessionId);
   const translatedEvents: SessionEventRecord[] = [];
   const canonicalRunIds = new Set<string>();
+  const fullyObservedRunIds = new Set<string>();
 
   const orderedRecords = [...(records || [])].sort(
     (left, right) => Number(left.SeqId || 0) - Number(right.SeqId || 0),
   );
+  const startsAtSessionBeginning = Number(orderedRecords[0]?.SeqId || 0) <= 1;
   for (const persisted of orderedRecords) {
     const frame = persistedRuntimeFrame(persisted);
     if (!frame) continue;
     const runId = String(frame.run_id || '').trim();
-    if (runId) canonicalRunIds.add(runId);
+    if (runId) {
+      canonicalRunIds.add(runId);
+      const source = record(frame.source);
+      const sourceMetadata = record(source?.metadata);
+      const containsRunStart = String(frame.event_type || '') === 'run.started';
+      const containsUserItem = sourceMetadata?.native_item_kind === 'userMessage';
+      if (startsAtSessionBeginning || containsRunStart || containsUserItem) {
+        fullyObservedRunIds.add(runId);
+      }
+    }
     const translated = translator.translate(frame);
     if (!translated) continue;
     translatedEvents.push({
@@ -173,16 +236,32 @@ export function rebuildPersistedSessionHistory(
   // A partially persisted canonical run must never make the older Server
   // projection disappear. This matters during upgrade: a historical runtime
   // may have written the user item but not a terminal agentMessage item.
-  const completeCanonicalRunIds = completedCanonicalRunIds(projected);
+  const completeCanonicalRunIds = new Set(
+    [...completedCanonicalRunIds(projected)].filter((runId) => fullyObservedRunIds.has(runId)),
+  );
   const canonicalMessages = [...completeCanonicalRunIds].flatMap((runId) => enrichCanonicalRun(
     projected.filter((message) => message.invocationId === runId),
     fallbackByRun.get(runId) || [],
   ));
+  const partialFallbackByRun = new Map<string, Message[]>();
+  for (const [runId, fallback] of fallbackByRun) {
+    if (completeCanonicalRunIds.has(runId) || !canonicalRunIds.has(runId)) continue;
+    partialFallbackByRun.set(
+      runId,
+      enrichPartialCanonicalRun(
+        fallback,
+        projected.filter((message) => message.invocationId === runId),
+      ),
+    );
+  }
+  const partialFallbackMessageById = new Map(
+    [...partialFallbackByRun.values()].flat().map((message) => [message.id, message]),
+  );
   const retainedFallback = fallbackMessages.filter((message) => (
     message.role === 'a2ui'
     || !message.invocationId
     || !completeCanonicalRunIds.has(message.invocationId)
-  ));
+  )).map((message) => partialFallbackMessageById.get(message.id) || message);
   const messages = [...retainedFallback, ...canonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );

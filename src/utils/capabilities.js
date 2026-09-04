@@ -86,6 +86,36 @@ function normalizeRuntimeCapabilityMatrix(value) {
   }
 }
 
+function legacyCodexRuntimeCapabilityMatrix(data, rawValue) {
+  // A present but malformed matrix must still fail closed. Compatibility is
+  // only for older Codex bootstraps that predate RuntimeCapabilityMatrix/v1.
+  if (rawValue !== undefined && rawValue !== null) return undefined;
+  const agent = asObject(data.Agent);
+  if (firstFramework(agent.Framework, data.Framework) !== 'codex') return undefined;
+  const unavailable = {
+    supported: false,
+    mode: 'unavailable',
+    reason: 'legacy_bootstrap_not_advertised',
+    extensions: {},
+  };
+  const emulated = { supported: true, mode: 'emulated', extensions: {} };
+  return {
+    schema_version: 1,
+    cancel: { ...unavailable },
+    pause: { ...unavailable },
+    resume: { ...unavailable },
+    submit_interaction: { ...unavailable },
+    attach: { ...unavailable },
+    steer: { ...unavailable },
+    inject: { ...unavailable },
+    checkpoint: { ...unavailable },
+    durable_restore: { ...unavailable },
+    goal: { ...emulated },
+    plan: { ...emulated },
+    extensions: { compatibility: 'legacy-codex' },
+  };
+}
+
 function normalizeHostedChatTransports(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -155,12 +185,16 @@ export function normalizeCapabilities(bootstrap) {
     ?? rawCapabilities.InteractionV1
     ?? false,
   );
-  const runtimeCapabilityMatrix = normalizeRuntimeCapabilityMatrix(
-    rawCapabilities.RuntimeCapabilityMatrix ?? data.RuntimeCapabilityMatrix,
-  );
+  const rawRuntimeCapabilityMatrix =
+    rawCapabilities.RuntimeCapabilityMatrix ?? data.RuntimeCapabilityMatrix;
+  const runtimeCapabilityMatrix = normalizeRuntimeCapabilityMatrix(rawRuntimeCapabilityMatrix)
+    ?? legacyCodexRuntimeCapabilityMatrix(data, rawRuntimeCapabilityMatrix);
+  const approvalPolicyAdvertised = rawCapabilities.ApprovalPolicy !== undefined
+    && rawCapabilities.ApprovalPolicy !== null;
 
   return {
     ...rawCapabilities,
+    Approval: normalizeEnabled(rawCapabilities.Approval, approvalPolicyAdvertised),
     RuntimeCapabilityMatrix: runtimeCapabilityMatrix,
     InteractionV1: interactionV1,
     HostedChat: {

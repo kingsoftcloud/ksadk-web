@@ -36,6 +36,7 @@ import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
 import { calculateVirtualMessageWindow } from '../../utils/message-virtualization.js';
 import { distanceFromBottom, shouldShowScrollToBottom } from '../../utils/chat-scroll.js';
+import { continuesAssistantTurn } from '../../utils/chat-message-grouping.js';
 
 import type { RunActivity } from '../../stores/streaming.js';
 import type { SessionCheckpoint } from '../../stores/checkpoint.js';
@@ -69,6 +70,7 @@ export type ChatMessageListProps = {
   onDeleteFeedback: (message: Message) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  onScrollToBottom?: () => void;
   checkpoints?: SessionCheckpoint[];
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   /** Interaction/v1 records for the current session; anchors replace inline buttons. */
@@ -91,8 +93,8 @@ function approvalLevelLabel(level?: string) {
 function approvalLevelTone(level?: string) {
   const normalized = String(level || '').trim().toLowerCase();
   return normalized === 'elevated'
-    ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200'
-    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200';
+    ? 'border-[var(--ksadk-approval-elevated-border)] bg-[var(--ksadk-approval-elevated-background)] text-[var(--ksadk-approval-elevated-foreground)]'
+    : 'border-[var(--ksadk-approval-border)] bg-[var(--ksadk-approval-background)] text-[var(--ksadk-approval-foreground)]';
 }
 
 function MeasuredMessageRow({
@@ -636,6 +638,7 @@ function ChatMessage({
   isMobile,
   isStreaming,
   isLastMessage,
+  showAgentHeader,
   message,
   onDeleteFeedback,
   onOpenAttachmentPreview,
@@ -649,6 +652,7 @@ function ChatMessage({
   isMobile: boolean;
   isStreaming: boolean;
   isLastMessage: boolean;
+  showAgentHeader: boolean;
   message: Message;
   interactionRecords?: readonly Interaction[];
   onDeleteFeedback: (message: Message) => void;
@@ -689,10 +693,12 @@ function ChatMessage({
 
   return (
     <div className="group mx-auto mb-3 w-full max-w-3xl px-6">
-      <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
-        <Bot className="w-3.5 h-3.5" />
-        <span>{agentName}</span>
-      </div>
+      {showAgentHeader ? (
+        <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
+          <Bot className="w-3.5 h-3.5" />
+          <span>{agentName}</span>
+        </div>
+      ) : null}
 
       {message.attachments?.length ? (
         <MessageAttachments
@@ -949,6 +955,7 @@ export function ChatMessageList({
   onSubmitAguiAction,
   onStopGeneration,
   onCancelRemote,
+  onScrollToBottom,
   checkpoints = [],
   onResumeCheckpoint,
   interactionRecords,
@@ -1076,6 +1083,7 @@ export function ChatMessageList({
                     isMobile={isMobile}
                     isStreaming={isStreaming}
                     isLastMessage={entry.index === messages.length - 1}
+                    showAgentHeader={!continuesAssistantTurn(messages[entry.index - 1], entry.item)}
                     message={entry.item}
                     onDeleteFeedback={onDeleteFeedback}
                     onOpenAttachmentPreview={onOpenAttachmentPreview}
@@ -1098,8 +1106,12 @@ export function ChatMessageList({
           aria-label="回到底部"
           data-distance-from-bottom={Math.round(remainingDistance)}
           onClick={() => {
+            if (onScrollToBottom) {
+              onScrollToBottom();
+              return;
+            }
             const scroller = scrollRef.current;
-            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
           }}
           className="sticky bottom-4 left-1/2 z-20 mx-auto flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
           title="回到底部"

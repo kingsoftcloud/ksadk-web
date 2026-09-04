@@ -144,9 +144,12 @@ export function InteractionTray({
       data-interaction-count={interactions.length}
       className={cn('mx-auto mb-2 w-full max-w-3xl px-6', className)}
     >
-      <div className="rounded-xl border border-amber-300/80 bg-amber-50/80 p-3 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30">
+      <div
+        data-slot="interaction-card"
+        className="rounded-xl border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-background)] p-3 text-[var(--ksadk-interaction-foreground)] shadow-sm"
+      >
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2 text-sm font-medium text-[var(--ksadk-interaction-foreground)]">
             <span data-testid="interaction-tray-title">{active.title}</span>
             {interactions.length > 1 ? (
               <span
@@ -164,7 +167,7 @@ export function InteractionTray({
                 data-testid="interaction-tray-prev"
                 disabled={activeIndex <= 0}
                 onClick={() => onSelectIndex(Math.max(activeIndex - 1, 0))}
-                className="rounded border border-amber-400/60 p-1 text-amber-900 disabled:opacity-40 dark:text-amber-200"
+                className="rounded border border-[var(--ksadk-interaction-border)] p-1 text-[var(--ksadk-interaction-foreground)] disabled:opacity-40"
                 aria-label="上一条待确认"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
@@ -174,7 +177,7 @@ export function InteractionTray({
                 data-testid="interaction-tray-next"
                 disabled={activeIndex >= interactions.length - 1}
                 onClick={() => onSelectIndex(Math.min(activeIndex + 1, interactions.length - 1))}
-                className="rounded border border-amber-400/60 p-1 text-amber-900 disabled:opacity-40 dark:text-amber-200"
+                className="rounded border border-[var(--ksadk-interaction-border)] p-1 text-[var(--ksadk-interaction-foreground)] disabled:opacity-40"
                 aria-label="下一条待确认"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
@@ -183,7 +186,7 @@ export function InteractionTray({
           ) : null}
         </div>
 
-        <p className="mt-2 text-sm text-slate-700 dark:text-slate-200" data-testid="interaction-tray-message">
+        <p className="mt-2 text-sm text-[var(--ksadk-interaction-muted)]" data-testid="interaction-tray-message">
           {active.message}
         </p>
 
@@ -225,7 +228,7 @@ export function InteractionTray({
               placeholder="备注（可选）"
               disabled={disabled}
               data-testid="interaction-tray-comment"
-              className="mb-2 w-full rounded-md border border-amber-300/70 bg-white px-2 py-1.5 text-sm dark:border-amber-900/60 dark:bg-slate-950"
+              className="mb-2 w-full rounded-md border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-control-background)] px-2 py-1.5 text-sm text-foreground"
             />
             <div className="flex flex-wrap gap-2">
               <button
@@ -262,7 +265,7 @@ export function InteractionTray({
         )}
 
         {active.status === 'resolving' ? (
-          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">正在提交，请稍候…</p>
+          <p className="mt-2 text-xs text-[var(--ksadk-interaction-muted)]">正在提交，请稍候…</p>
         ) : null}
       </div>
     </div>

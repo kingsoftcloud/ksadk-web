@@ -13,6 +13,9 @@ describe('chat message list contracts', () => {
     expect(source).toContain('stickToBottomRef');
     expect(source).toContain('userDetachedFromBottomRef');
     expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('!needsInitialScrollRef.current');
+    expect(source).toContain('scrolledUp &&');
+    expect(source).toContain('const keepAttachedToBottom');
     expect(source).toContain('isStreamingRef.current && scrolledUp');
     expect(source).toContain('distanceFromBottom <= 12');
     expect(source).toContain('distanceFromBottom < 96');
@@ -51,6 +54,8 @@ describe('chat message list contracts', () => {
     // settles scrollHeight across frames; we rAF-loop until stable (3
     // consecutive unchanged checks) with a 2s timeout backstop.
     expect(source).toContain('needsInitialScrollRef.current) {');
+    expect(source).toContain("el.dispatchEvent(new Event('scroll'))");
+    expect(source).toContain('Keep the initial-pin intent');
     expect(source).toContain('requestAnimationFrame(pin)');
     expect(source).toMatch(/stableCount\s*>=\s*3/);
     expect(source).toMatch(/setTimeout\(finish,\s*2000\)/);
@@ -198,15 +203,24 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
     expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
-    // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The durable
-    // message projection is retained only for legacy runs and pagination.
+    // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The latest
+    // event page hydrates after the readable message projection, and older
+    // event pages follow the same upward-scroll pagination as old messages.
     const listSessionEventsCalls = lifecycleSource
       .split('\n')
       .filter((line) => line.includes('api.listSessionEvents(sessionId'));
-    expect(listSessionEventsCalls).toHaveLength(0);
-    expect(lifecycleSource).toContain('loadCompleteSessionEventHistory(');
+    expect(listSessionEventsCalls).toHaveLength(2);
+    expect(lifecycleSource).not.toContain('loadCompleteSessionEventHistory(');
+    expect(lifecycleSource).toContain('offset: cachedEvents.loadedCount');
+    expect(lifecycleSource).toContain('loadedEventCount < totalEventCount');
     expect(lifecycleSource).toContain('rebuildPersistedSessionHistory(');
-    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 500');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 200');
+    expect(lifecycleSource).toContain('SESSION_TRANSCRIPT_CACHE_SIZE = 8');
+    expect(lifecycleSource).toContain('if (!cachedHistory) {');
+    expect(lifecycleSource).toContain('setSessionInitialMessageHistoryLoading(sessionId, false)');
+    expect(lifecycleSource.indexOf('setMessages(fallbackHistory)')).toBeLessThan(
+      lifecycleSource.indexOf('const eventPage = await api.listSessionEvents(sessionId'),
+    );
     expect(lifecycleSource).toContain('canonicalRunIdsBySessionRef');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");

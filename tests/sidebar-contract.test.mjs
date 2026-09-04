@@ -87,14 +87,14 @@ test('new run sessions are persisted before the next render effect', () => {
   assert.match(runAgentSource, /onSessionCreated:[\s\S]*writePersistedSessionId\(agentId,\s*sessionId\)/);
 });
 
-test('run capsule shows low-noise animated token counts without sidebar clutter', () => {
+test('token context stays in the composer without a floating run capsule or sidebar clutter', () => {
   const messageListSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
   const connectedMessageListSource = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
   const sidebarSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatSidebar.tsx'), 'utf8');
 
   assert.match(connectedMessageListSource, /buildComposerContextIndicator/);
-  assert.match(messageListSource, /AnimatedTokenCount/);
-  assert.match(messageListSource, /token-count-pulse/);
-  assert.match(messageListSource, /估算 token/);
+  assert.doesNotMatch(messageListSource, /AnimatedTokenCount/);
+  assert.doesNotMatch(messageListSource, /token-count-pulse/);
+  assert.doesNotMatch(messageListSource, /估算 token/);
   assert.doesNotMatch(sidebarSource, /usedTokens|contextWindowTokens|token-count-pulse/);
 });

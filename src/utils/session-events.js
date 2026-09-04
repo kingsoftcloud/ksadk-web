@@ -865,7 +865,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
   };
 
-  const takePendingTools = (invocationId) => {
+  const takePendingTools = (invocationId, fallbackRunStatus = '') => {
     const normalizedInvocationId = String(invocationId || '').trim();
     if (!normalizedInvocationId) {
       return {};
@@ -878,7 +878,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     return {
       tools: settleToolMapsForRunStatus(
         pendingTools.tools,
-        latestRunStatusByInvocation.get(normalizedInvocationId),
+        latestRunStatusByInvocation.get(normalizedInvocationId) || fallbackRunStatus,
       ),
     };
   };
@@ -971,7 +971,10 @@ export function buildMessagesFromSessionEvents(events = []) {
       }
       pushMessage({
         ...message,
-        ...takePendingTools(invocationId),
+        ...takePendingTools(
+          invocationId,
+          message.eventType === 'assistant_message' ? 'completed' : '',
+        ),
         reasoning: mergeReasoningText(pendingReasoning.reasoning, message.reasoning),
       });
       pendingReasoning = null;
@@ -989,7 +992,10 @@ export function buildMessagesFromSessionEvents(events = []) {
       }
       pushMessage({
         ...message,
-        ...takePendingTools(invocationId),
+        ...takePendingTools(
+          invocationId,
+          message.eventType === 'assistant_message' ? 'completed' : '',
+        ),
       });
       continue;
     }

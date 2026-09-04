@@ -45,6 +45,8 @@ describe('ChatComposer interaction contract', () => {
     expect(permissionSource).toContain("value: 'ask'");
     expect(permissionSource).toContain("value: 'risk'");
     expect(permissionSource).toContain("value: 'full'");
+    expect(permissionSource).toContain("'flex h-10 w-full items-center");
+    expect(permissionSource).not.toContain('本次会话的默认审批规则</div>');
   });
 
   it('hides unsupported controls and never sends unsupported thinking options', () => {
@@ -58,7 +60,7 @@ describe('ChatComposer interaction contract', () => {
     expect(runSource).toContain("thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto'");
   });
 
-  it('shows goal and plan only from explicit typed runtime capabilities', () => {
+  it('shows goal and plan from typed runtime capabilities', () => {
     const appSource = readSource('App.tsx');
     const composerSource = readSource('components/chat/ChatComposer.tsx');
     const actionMenuSource = readSource('components/chat/ExecutionModeMenu.tsx');
@@ -69,6 +71,7 @@ describe('ChatComposer interaction contract', () => {
     expect(actionMenuSource).not.toContain('Agent Loop');
     expect(actionMenuSource).toContain('计划模式');
     expect(actionMenuSource).toContain('设定目标');
+    expect(actionMenuSource).toContain('--ksadk-popover');
     expect(actionMenuSource).not.toContain('速度');
     expect(runSource).toContain('goal_objective');
     expect(runSource).toContain('collaboration_mode');

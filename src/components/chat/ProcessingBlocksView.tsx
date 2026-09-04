@@ -179,11 +179,14 @@ function ToolRow({
     >
       <div className="flex flex-col gap-2.5 py-1 text-[13px]">
         {approvalRequestId && approvalStatus === 'pending' && !interactionRecord && (
-          <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200/90 bg-white/70 px-2.5 py-2 font-sans text-[12px] text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300">
+          <section
+            data-slot="tool-approval-card"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--ksadk-approval-border)] bg-[var(--ksadk-approval-background)] px-2.5 py-2 font-sans text-[12px] text-[var(--ksadk-approval-foreground)] shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+          >
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
-              <span className="shrink-0 font-medium text-slate-700 dark:text-slate-200">需要确认</span>
-              <span className="min-w-0 truncate text-slate-500 dark:text-slate-400">{approvalMessage || '允许后将执行此工具调用。'}</span>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ksadk-approval-foreground)]" aria-hidden="true" />
+              <span className="shrink-0 font-medium">需要确认</span>
+              <span className="min-w-0 truncate opacity-75">{approvalMessage || '允许后将执行此工具调用。'}</span>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
                 <button

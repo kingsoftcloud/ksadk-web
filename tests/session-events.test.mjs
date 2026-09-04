@@ -469,6 +469,31 @@ test('session event utils suppress stale running banners after assistant output 
   );
 });
 
+test('session event utils settle orphaned tool rows when final assistant output exists', async () => {
+  const sessionEvents = await loadSessionEventUtils();
+
+  assert.ok(sessionEvents, 'expected session event helpers to exist');
+  const messages = sessionEvents.buildMessagesFromSessionEvents([
+    {
+      EventId: 'evt-tool-start',
+      EventType: 'tool_call',
+      InvocationId: 'inv-final',
+      Content: { role: 'model', parts: [{ text: 'legacy_tool' }] },
+      Metadata: { tool_name: 'legacy_tool', tool_args: {} },
+      Timestamp: 1,
+    },
+    {
+      EventId: 'evt-assistant-final',
+      EventType: 'assistant_message',
+      InvocationId: 'inv-final',
+      Content: { role: 'model', parts: [{ text: '已经完成' }] },
+      Timestamp: 2,
+    },
+  ]);
+
+  assert.equal(messages.at(-1)?.tools?.legacy_tool?.status, 'completed');
+});
+
 test('session event utils preserve assistant identifiers for feedback binding', async () => {
   const sessionEvents = await loadSessionEventUtils();
 

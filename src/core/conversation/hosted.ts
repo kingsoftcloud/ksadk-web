@@ -364,10 +364,11 @@ export function mergeConversationRunMessages(
   // The canonical stream may contain a user_message item representing the
   // turn input. Hosted UI marks the temporary row inserted by startDraft(),
   // allowing this projection to replace exactly that row without mistaking an
-  // older unscoped user message for the current prompt.
-  const hasProjectedUser = projected.some((m) => m.role === 'user');
+  // older unscoped user message for the current prompt.  If the turn input
+  // is absent from the canonical stream, the optimistic row is still
+  // absorbed so the user never sees a duplicate bubble.
   let cleanPrevious = previous;
-  if (hasProjectedUser) {
+  {
     let optimisticUserIndex = -1;
     for (let index = previous.length - 1; index >= 0; index -= 1) {
       const message = previous[index];
@@ -377,10 +378,33 @@ export function mergeConversationRunMessages(
       }
     }
     if (optimisticUserIndex >= 0) {
+      const optimistic = previous[optimisticUserIndex];
+      const optimisticContent = String(optimistic.content || '').trim();
       cleanPrevious = [
         ...previous.slice(0, optimisticUserIndex),
         ...previous.slice(optimisticUserIndex + 1),
       ];
+      const hasProjectedUser = projected.some((m) => m.role === 'user');
+      if (!hasProjectedUser && optimisticContent) {
+        // Re-insert the optimistic row ahead of this run's assistant messages
+        // so the turn input stays visible even when the canonical stream
+        // did not carry a user_message item.
+        const retained = cleanPrevious.filter((message) => !(
+          (message.eventType === EVENT_TYPE && message.runId === result.runId)
+          || message.invocationId === result.runId
+        ));
+        const insertionIndex = cleanPrevious.findIndex((message) => (
+          (message.eventType === EVENT_TYPE && message.runId === result.runId)
+          || message.invocationId === result.runId
+        ));
+        const index = insertionIndex < 0 ? retained.length : insertionIndex;
+        return [
+          ...retained.slice(0, index),
+          { ...optimistic, timestamp: Date.now() },
+          ...projected,
+          ...retained.slice(index),
+        ];
+      }
     }
   }
 

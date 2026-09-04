@@ -179,6 +179,8 @@ function runtimeItemMetadata(
 export class KernelRunEventTranslator {
   private readonly textByPart = new Map<string, string>();
   private readonly toolNameByCallId = new Map<string, string>();
+  private readonly toolCallByItemId = new Map<string, { callId: string; name: string }>();
+  private readonly toolResultByItemId = new Map<string, unknown>();
   private readonly sessionId: string;
 
   constructor(sessionId: string) {
@@ -237,6 +239,9 @@ export class KernelRunEventTranslator {
         const callId = call?.callId || String(frame.item_id || '');
         const name = call?.name || 'tool';
         if (callId) this.toolNameByCallId.set(callId, name);
+        if (frame.item_id) {
+          this.toolCallByItemId.set(String(frame.item_id), { callId, name });
+        }
         return {
           ...base(),
           EventType: 'tool_call',
@@ -278,6 +283,28 @@ export class KernelRunEventTranslator {
 
     if (eventType === 'item.updated') {
       const parts = frameParts(frame, 'update');
+      if (frame.item_kind === 'tool_call') {
+        const result = toolResultPart(parts);
+        if (!result) return null;
+        const remembered = this.toolCallByItemId.get(String(frame.item_id || ''));
+        const callId = result.callId || remembered?.callId || String(frame.item_id || '');
+        const name = remembered?.name || this.toolNameByCallId.get(callId) || 'tool';
+        const output = result.isError
+          ? { error: result.result }
+          : result.result;
+        if (frame.item_id) this.toolResultByItemId.set(String(frame.item_id), output);
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_output: output,
+          },
+        };
+      }
       const part = asRecord(parts[0]);
       const partId = String(part?.part_id || frame.item_id || seq);
       const op = String(frame.op || 'replace');
@@ -416,6 +443,24 @@ export class KernelRunEventTranslator {
     }
 
     if (eventType === 'item.failed') {
+      if (frame.item_kind === 'tool_call') {
+        const remembered = this.toolCallByItemId.get(String(frame.item_id || ''));
+        const callId = remembered?.callId || String(frame.item_id || '');
+        const name = remembered?.name || this.toolNameByCallId.get(callId) || 'tool';
+        const detailedOutput = this.toolResultByItemId.get(String(frame.item_id || ''));
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_output: detailedOutput
+              ?? { error: asRecord(frame.error) || frame.error || 'item failed' },
+          },
+        };
+      }
       if (nativeKind && nativeKind !== 'notification' && nativeKind !== 'agentMessage' && nativeKind !== 'reasoning') {
         return {
           ...base(),

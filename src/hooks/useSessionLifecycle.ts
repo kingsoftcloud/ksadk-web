@@ -8,6 +8,7 @@ import { CancelledError } from '../api/client.js';
 import {
   eventHasTerminalRunStatus,
   maxSeqIdFromEvents,
+  mergeSessionEventRecords,
   sessionEventRunStatus,
 } from '../utils/session-events.js';
 import { mapBackendMessages } from '../utils/messages.js';
@@ -24,15 +25,24 @@ import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
   createSessionEventCursor,
-  loadCompleteSessionEventHistory,
 } from '../utils/session-event-history.js';
 import { ingestSessionEventRecord } from '../core/interaction/index.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
-const SESSION_EVENTS_PAGE_SIZE = 500;
+// Tool-heavy Codex runs can make 500 canonical events exceed 600 KB. The
+// durable Messages projection paints the readable transcript first; hydrate
+// a smaller newest-event window and page older runtime detail on upward scroll.
+const SESSION_EVENTS_PAGE_SIZE = 200;
+const SESSION_TRANSCRIPT_CACHE_SIZE = 8;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+
+type SessionEventHistoryCache = {
+  events: SessionEventRecord[];
+  loadedCount: number;
+  total: number;
+};
 
 function waitForRestoreRetry(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -118,6 +128,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const loadSessionGenerationRef = useRef(0);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
+  const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
+  const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
+  const eventHistoryBySessionRef = useRef(new Map<string, SessionEventHistoryCache>());
   const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
@@ -364,10 +377,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     async (sessionId: string) => {
       const previousSessionId = currentSessionIdRef.current;
       const generation = ++loadSessionGenerationRef.current;
+      const cacheTranscript = (targetSessionId: string, transcript: Message[]) => {
+        const cache = sessionTranscriptCacheRef.current;
+        cache.delete(targetSessionId);
+        cache.set(targetSessionId, transcript);
+        while (cache.size > SESSION_TRANSCRIPT_CACHE_SIZE) {
+          const oldestSessionId = cache.keys().next().value;
+          if (!oldestSessionId) break;
+          cache.delete(oldestSessionId);
+        }
+      };
+      const cachedHistory = sessionTranscriptCacheRef.current.get(sessionId);
       // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
       // 切回时用历史快照和 afterSeqId 订阅追平遗漏内容。
       if (previousSessionId && previousSessionId !== sessionId) {
-        useMessageStore.getState().setMessages([]);
+        cacheTranscript(previousSessionId, useMessageStore.getState().messages as Message[]);
+        useMessageStore.getState().setMessages(cachedHistory || []);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
         useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
         useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
@@ -380,7 +405,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         && loadSessionGenerationRef.current === generation
       );
       useSessionStore.getState().setCurrentSessionId(sessionId);
-      useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, true);
+      useSessionStore
+        .getState()
+        .setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
       resetCompaction();
       runSubscriptionAbortRef.current?.abort();
       if (isMobile) {
@@ -388,34 +415,70 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        const messagesData = await api.listSessionMessages(sessionId, {
+        const messageOptions = {
           limit: SESSION_MESSAGES_PAGE_SIZE,
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
-        });
+        };
+        let messagesData;
+        try {
+          messagesData = await api.listSessionMessages(sessionId, messageOptions);
+        } catch (error) {
+          if (error instanceof CancelledError) throw error;
+          // Cloud history reads can briefly race a deployment proxy refresh.
+          // Retry one small idempotent read before turning a cold switch into
+          // an empty conversation. Warm switches continue showing the LRU
+          // transcript throughout this recovery window.
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 180));
+          if (!isStillCurrentSession()) return;
+          messagesData = await api.listSessionMessages(sessionId, messageOptions);
+        }
         if (!isStillCurrentSession()) {
           return;
         }
         const fallbackHistory = mapBackendMessages(messagesData.Messages) as Message[];
+        fallbackHistoryBySessionRef.current.set(sessionId, fallbackHistory);
         let history = fallbackHistory;
         let latestEventSeqId = 0;
         let canonicalRunIds: string[] = [];
+
+        // Durable message rows are small and sufficient for the readable
+        // transcript. Paint them immediately on a cold switch instead of
+        // holding the entire conversation behind RuntimeEvent hydration,
+        // which can be hundreds of kilobytes for tool-heavy runs. A warm
+        // switch keeps the cached canonical transcript visible until the
+        // background refresh is complete.
+        if (!cachedHistory) {
+          useMessageStore.getState().setMessages(fallbackHistory);
+          cacheTranscript(sessionId, fallbackHistory);
+        }
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          nextCursor: messagesData.NextCursor,
+          hasMore: messagesData.HasMore,
+        });
+        useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, false);
 
         // RuntimeEvent/v2 is the transcript source of truth. Persisted
         // ListSessionMessages rows are cumulative snapshots and therefore only
         // a compatibility fallback for runs without canonical item identity.
         try {
-          const eventHistory = await loadCompleteSessionEventHistory(
-            sessionId,
-            (targetSessionId, opts) => api.listSessionEvents(targetSessionId, opts),
-            {
-              pageSize: SESSION_EVENTS_PAGE_SIZE,
-              shouldContinue: isStillCurrentSession,
-            },
-          );
+          const eventPage = await api.listSessionEvents(sessionId, {
+            offset: 0,
+            limit: SESSION_EVENTS_PAGE_SIZE,
+          });
           if (!isStillCurrentSession()) return;
-          if (eventHistory) {
+          const eventHistory = {
+            events: (eventPage.Events || []) as SessionEventRecord[],
+            loadedCount: eventPage.Events?.length || 0,
+            total: Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0),
+          };
+          eventHistoryBySessionRef.current.set(sessionId, eventHistory);
+          useSessionStore.getState().setSessionMessageHistory(sessionId, {
+            nextCursor: messagesData.NextCursor,
+            hasMore: Boolean(messagesData.HasMore || eventHistory.loadedCount < eventHistory.total),
+          });
+          if (eventHistory.events.length > 0) {
             latestEventSeqId = maxSeqIdFromEvents(eventHistory.events);
             const rebuilt = rebuildPersistedSessionHistory(
               fallbackHistory,
@@ -423,9 +486,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               sessionId,
             );
             canonicalRunIds = rebuilt.canonicalRunIds;
-            if (canonicalRunIds.length > 0) {
-              history = rebuilt.messages;
-            }
+            history = rebuilt.messages;
             for (const record of eventHistory.events) {
               ingestSessionEventRecord(record, sessionId);
             }
@@ -436,10 +497,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (!isStillCurrentSession()) return;
         canonicalRunIdsBySessionRef.current.set(sessionId, new Set(canonicalRunIds));
         useMessageStore.getState().setMessages(history);
-        useSessionStore.getState().setSessionMessageHistory(sessionId, {
-          nextCursor: messagesData.NextCursor,
-          hasMore: messagesData.HasMore,
-        });
+        cacheTranscript(sessionId, history);
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
         const lastSeqId = Math.max(messagesData.LatestSeqId || 0, latestEventSeqId);
 
@@ -659,6 +717,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         useSessionStore.getState().removeSession(sessionId);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
+        sessionTranscriptCacheRef.current.delete(sessionId);
+        fallbackHistoryBySessionRef.current.delete(sessionId);
+        eventHistoryBySessionRef.current.delete(sessionId);
+        canonicalRunIdsBySessionRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
           runSubscriptionAbortRef.current?.abort();
@@ -682,12 +744,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const loadOlderSessionMessages = useCallback(async (sessionId: string) => {
     const historyState = useSessionStore.getState().messageHistory[sessionId];
-    if (
-      !historyState
-      || !historyState.hasMore
-      || historyState.nextCursor === null
-      || historyState.isLoadingOlder
-    ) {
+    const cachedEvents = eventHistoryBySessionRef.current.get(sessionId);
+    const canLoadOlderMessages = Boolean(historyState?.hasMore && historyState.nextCursor !== null);
+    const canLoadOlderEvents = Boolean(
+      cachedEvents && cachedEvents.loadedCount < cachedEvents.total,
+    );
+    if (!historyState || historyState.isLoadingOlder || (!canLoadOlderMessages && !canLoadOlderEvents)) {
       return;
     }
     const generation = loadSessionGenerationRef.current;
@@ -695,13 +757,23 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     olderMessageRequestRef.current.set(sessionId, requestToken);
     try {
       useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
-      const data = await api.listSessionMessages(sessionId, {
-        beforeSeqId: historyState.nextCursor,
-        limit: SESSION_MESSAGES_PAGE_SIZE,
-        includeReasoning: true,
-        includeToolEvents: true,
-        includeAttachments: true,
-      });
+      const [messagePage, eventPage] = await Promise.all([
+        canLoadOlderMessages
+          ? api.listSessionMessages(sessionId, {
+              beforeSeqId: historyState.nextCursor,
+              limit: SESSION_MESSAGES_PAGE_SIZE,
+              includeReasoning: true,
+              includeToolEvents: true,
+              includeAttachments: true,
+            })
+          : Promise.resolve(null),
+        canLoadOlderEvents && cachedEvents
+          ? api.listSessionEvents(sessionId, {
+              offset: cachedEvents.loadedCount,
+              limit: SESSION_EVENTS_PAGE_SIZE,
+            })
+          : Promise.resolve(null),
+      ]);
       if (
         currentSessionIdRef.current !== sessionId
         || loadSessionGenerationRef.current !== generation
@@ -709,18 +781,49 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       ) {
         return;
       }
-      const canonicalRunIds = canonicalRunIdsBySessionRef.current.get(sessionId) || new Set<string>();
-      const olderMessages = (mapBackendMessages(data.Messages) as Message[])
-        .filter((message) => !message.invocationId || !canonicalRunIds.has(message.invocationId));
+      const olderMessages = messagePage
+        ? mapBackendMessages(messagePage.Messages) as Message[]
+        : [];
       const olderIds = new Set(olderMessages.map((message) => message.id));
-      const mergedHistory = [
+      const fallbackHistory = [
         ...olderMessages,
-        ...useMessageStore.getState().messages.filter((message) => !olderIds.has(message.id)),
+        ...(fallbackHistoryBySessionRef.current.get(sessionId) || [])
+          .filter((message) => !olderIds.has(message.id)),
       ];
+      fallbackHistoryBySessionRef.current.set(sessionId, fallbackHistory);
+
+      let mergedEvents = cachedEvents?.events || [];
+      let loadedEventCount = cachedEvents?.loadedCount || 0;
+      let totalEventCount = cachedEvents?.total || 0;
+      if (eventPage) {
+        const olderEvents = (eventPage.Events || []) as SessionEventRecord[];
+        mergedEvents = mergeSessionEventRecords(olderEvents, mergedEvents) as SessionEventRecord[];
+        totalEventCount = Math.max(totalEventCount, Number(eventPage.Total ?? 0) || 0);
+        loadedEventCount = olderEvents.length > 0
+          ? Math.min(totalEventCount, loadedEventCount + olderEvents.length)
+          : totalEventCount;
+        eventHistoryBySessionRef.current.set(sessionId, {
+          events: mergedEvents,
+          loadedCount: loadedEventCount,
+          total: totalEventCount,
+        });
+        for (const record of olderEvents) {
+          ingestSessionEventRecord(record, sessionId);
+        }
+      }
+
+      const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId);
+      const mergedHistory = rebuilt.messages;
+      canonicalRunIdsBySessionRef.current.set(sessionId, new Set(rebuilt.canonicalRunIds));
       useMessageStore.getState().setMessages(mergedHistory);
+      sessionTranscriptCacheRef.current.delete(sessionId);
+      sessionTranscriptCacheRef.current.set(sessionId, mergedHistory);
       useSessionStore.getState().setSessionMessageHistory(sessionId, {
-        nextCursor: data.NextCursor,
-        hasMore: data.HasMore,
+        nextCursor: messagePage ? messagePage.NextCursor : historyState.nextCursor,
+        hasMore: Boolean(
+          (messagePage ? messagePage.HasMore : false)
+          || loadedEventCount < totalEventCount
+        ),
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {

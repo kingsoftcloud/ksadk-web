@@ -94,7 +94,11 @@ export function ExecutionModeMenu({
         <div
           role="menu"
           aria-label="附件与执行模式"
-          className="absolute bottom-[calc(100%+0.65rem)] left-0 z-40 w-[min(19rem,calc(100vw-2rem))] rounded-2xl border border-border/80 bg-popover p-1.5 shadow-[0_18px_44px_rgba(15,23,42,0.16)]"
+          className="absolute bottom-[calc(100%+0.6rem)] left-0 z-40 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-border/80 bg-popover p-1 shadow-[0_10px_24px_rgba(15,23,42,0.12)]"
+          style={{
+            backgroundColor: 'var(--ksadk-popover, #fff)',
+            borderColor: 'var(--ksadk-border, rgba(15, 23, 42, 0.12))',
+          }}
         >
           {attachmentsEnabled ? (
             <button
@@ -104,17 +108,13 @@ export function ExecutionModeMenu({
                 onUpload();
                 setOpen(false);
               }}
-              className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition hover:bg-muted/70"
+              className="flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-muted/70"
             >
               <Upload className="h-4 w-4 shrink-0 text-text-muted" />
-              <span>
-                <span className="block text-[13px] font-medium text-text-primary">上传附件</span>
-                <span className="block text-[11px] text-text-muted">添加文件或图片到当前消息</span>
-              </span>
+              <span className="shrink-0 text-[13px] font-medium text-text-primary">上传附件</span>
+              <span className="ml-auto truncate text-[11px] text-text-muted">添加文件或图片</span>
             </button>
           ) : null}
-
-          {attachmentsEnabled && visibleModes.length > 0 ? <div className="my-1 h-px bg-border/70" /> : null}
 
           {visibleModes.map((option) => {
             const Icon = option.icon;
@@ -130,15 +130,13 @@ export function ExecutionModeMenu({
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition',
+                  'flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left transition',
                   selected ? 'bg-muted' : 'hover:bg-muted/70',
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0 text-text-muted" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-text-primary">{option.label}</span>
-                  <span className="block text-[11px] text-text-muted">{option.description}</span>
-                </span>
+                <span className="shrink-0 text-[13px] font-medium text-text-primary">{option.label}</span>
+                <span className="ml-auto truncate text-[11px] text-text-muted">{option.description}</span>
                 {selected ? <Check className="h-4 w-4 shrink-0 text-text-primary" /> : null}
               </button>
             );

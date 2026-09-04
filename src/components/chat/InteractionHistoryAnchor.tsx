@@ -39,10 +39,10 @@ export function InteractionHistoryAnchor({ interaction }: { interaction: Interac
       data-testid="interaction-history-anchor"
       data-interaction-id={interaction.interactionId}
       data-interaction-status={interaction.status}
-      className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300"
+      className="mt-2 rounded-lg border border-border bg-muted/55 px-3 py-2 text-xs text-text-secondary"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-slate-700 dark:text-slate-200">{interaction.title}</span>
+        <span className="font-medium text-text-primary">{interaction.title}</span>
         <InteractionOutcomeLabel outcome={interaction.outcome || interaction.status} />
       </div>
       {terminal ? (
@@ -55,12 +55,12 @@ export function InteractionHistoryAnchor({ interaction }: { interaction: Interac
             </span>
           </div>
           <details data-testid="interaction-history-detail" className="mt-1">
-            <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">
+            <summary className="cursor-pointer select-none text-text-muted hover:text-text-primary">
               查看确认快照
             </summary>
             <div
               data-testid="interaction-history-snapshot"
-              className="mt-1 rounded border border-slate-200 bg-white px-2 py-1.5 leading-relaxed dark:border-slate-800 dark:bg-slate-950"
+              className="mt-1 rounded border border-border bg-card px-2 py-1.5 leading-relaxed text-card-foreground"
             >
               <div>
                 操作者：<span data-testid="interaction-history-actor-ref">{interaction.actor || '—'}</span>

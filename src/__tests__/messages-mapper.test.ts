@@ -3,6 +3,17 @@ import { mapBackendMessage, mapBackendMessages } from '../utils/messages.js';
 import type { BackendMessage } from '../api/messages.js';
 
 describe('mapBackendMessage', () => {
+  it('normalises numeric Unix-second strings from cloud message history', () => {
+    const result = mapBackendMessage({
+      MessageId: 'msg-time',
+      Role: 'user',
+      Content: { text: 'hello' },
+      Timestamp: '1700000000.125',
+    } satisfies BackendMessage);
+
+    expect(result.timestamp).toBe(1_700_000_000_125);
+  });
+
   it('maps user message with attachments', () => {
     const msg: BackendMessage = {
       MessageId: 'msg-1',

@@ -73,6 +73,17 @@
     --destructive-foreground: 210 40% 98%;
     --input: 0 0% 88%;
     --ring: 173 80% 40%;
+    --ksadk-interaction-background: hsl(45 100% 96% / 0.92);
+    --ksadk-interaction-border: hsl(43 96% 74% / 0.85);
+    --ksadk-interaction-foreground: hsl(28 73% 26%);
+    --ksadk-interaction-muted: hsl(32 36% 42%);
+    --ksadk-interaction-control-background: hsl(0 0% 100%);
+    --ksadk-approval-background: hsl(45 100% 96% / 0.72);
+    --ksadk-approval-border: hsl(43 96% 74% / 0.8);
+    --ksadk-approval-foreground: hsl(32 81% 29%);
+    --ksadk-approval-elevated-background: hsl(0 86% 97% / 0.78);
+    --ksadk-approval-elevated-border: hsl(0 94% 82% / 0.85);
+    --ksadk-approval-elevated-foreground: hsl(0 74% 42%);
     --app-height: 100vh;
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
@@ -109,6 +120,17 @@
     --border: 215 12% 25%;
     --input: 215 12% 25%;
     --ring: 173 77% 49%;
+    --ksadk-interaction-background: hsl(32 81% 12% / 0.42);
+    --ksadk-interaction-border: hsl(32 75% 32% / 0.7);
+    --ksadk-interaction-foreground: hsl(43 96% 82%);
+    --ksadk-interaction-muted: hsl(39 72% 72%);
+    --ksadk-interaction-control-background: hsl(215 16% 10%);
+    --ksadk-approval-background: hsl(32 81% 12% / 0.3);
+    --ksadk-approval-border: hsl(32 75% 32% / 0.65);
+    --ksadk-approval-foreground: hsl(43 96% 82%);
+    --ksadk-approval-elevated-background: hsl(0 63% 15% / 0.36);
+    --ksadk-approval-elevated-border: hsl(0 63% 35% / 0.7);
+    --ksadk-approval-elevated-foreground: hsl(0 91% 82%);
   }
 
   .ksadk-web *,
