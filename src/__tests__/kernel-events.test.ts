@@ -186,6 +186,93 @@ describe('KernelRunEventTranslator', () => {
     });
   });
 
+  it('maps LangGraph RuntimeEvent v2 tool parts without native item metadata', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    const started = t.translate({
+      seq: 30,
+      family: 'runtime',
+      event_type: 'item.started',
+      event_id: 'event-tool-started',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-tool-call',
+      item_kind: 'tool_call',
+      initial: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'tool_call',
+          call_id: 'call-1',
+          name: 'load_memory',
+          arguments: { query: '*' },
+        }],
+      },
+      source: { framework: 'langgraph', metadata: {} },
+    });
+    const completedCall = t.translate({
+      seq: 31,
+      family: 'runtime',
+      event_type: 'item.completed',
+      event_id: 'event-tool-call-completed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-tool-call',
+      item_kind: 'tool_call',
+      snapshot: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'tool_call',
+          call_id: 'call-1',
+          name: 'load_memory',
+          arguments: { query: '*' },
+        }],
+      },
+      source: { framework: 'langgraph', metadata: {} },
+    });
+    const completedResult = t.translate({
+      seq: 32,
+      family: 'runtime',
+      event_type: 'item.completed',
+      event_id: 'event-tool-result-completed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-tool-result',
+      item_kind: 'tool_result',
+      snapshot: {
+        parts: [{
+          content_type: 'tool_result',
+          part_id: 'tool_result',
+          call_id: 'call-1',
+          result: { memories: ['breakfast'] },
+          is_error: false,
+        }],
+      },
+      source: { framework: 'langgraph', metadata: {} },
+    });
+
+    expect(started).toMatchObject({
+      EventType: 'tool_call',
+      Metadata: {
+        call_id: 'call-1',
+        tool_name: 'load_memory',
+        tool_args: { query: '*' },
+        RuntimeItem: { ItemId: 'call-1', Operation: 'replace' },
+      },
+    });
+    expect(completedCall).toMatchObject({
+      EventType: 'tool_call',
+      Metadata: { RuntimeItem: { ItemId: 'call-1', Operation: 'replace' } },
+    });
+    expect(completedResult).toMatchObject({
+      EventType: 'tool_result',
+      Metadata: {
+        call_id: 'call-1',
+        tool_name: 'load_memory',
+        tool_output: { memories: ['breakfast'] },
+        RuntimeItem: { ItemId: 'call-1', Operation: 'completed' },
+      },
+    });
+  });
+
   it('settles a failed tool item as an identity-bound error result', () => {
     const t = new KernelRunEventTranslator('sess-1');
     const failed = t.translate(itemFrame(20, 'item.failed', 'commandExecution', {

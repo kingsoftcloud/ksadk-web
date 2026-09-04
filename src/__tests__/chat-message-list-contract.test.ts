@@ -19,6 +19,24 @@ describe('chat message list contracts', () => {
     expect(source).not.toMatch(/scrollRef\.current\.scrollTop\s*=\s*scrollRef\.current\.scrollHeight/);
   });
 
+  it('shows the jump control only when content remains below the viewport', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('distanceFromBottom');
+    expect(source).toContain('shouldShowScrollToBottom');
+    expect(source).not.toContain('scrollTop > 320');
+  });
+
+  it('keeps runtime diagnostics out of the conversation viewport', () => {
+    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+    const composerSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatComposer.tsx'), 'utf8');
+
+    expect(listSource).not.toContain('RunActivityBanner');
+    expect(listSource).not.toContain('activity.eventCount');
+    expect(listSource).not.toContain('估算 token');
+    expect(composerSource).toContain('<ContextUsageIndicator');
+  });
+
   it('bypasses the stickiness gate to pin to the bottom on initial session load', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
 
@@ -168,12 +186,10 @@ describe('chat message list contracts', () => {
 
   it('labels the streaming stop button as runtime cancel when available', () => {
     const composerSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatComposer.tsx'), 'utf8');
-    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 
     expect(composerSource).toContain('保留恢复点并结束本次执行');
     expect(composerSource).toContain("onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成'");
-    expect(listSource).toContain('aria-label="取消运行并保留恢复点"');
-    expect(listSource).toContain('取消运行并保留最近 checkpoint');
+    expect(composerSource).toContain('onCancelRemote();');
   });
 
   it('uses canonical event history as the transcript owner with projected messages as fallback', () => {

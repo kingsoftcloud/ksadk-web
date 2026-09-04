@@ -30,6 +30,19 @@ import {
 } from '../conversation/hosted.js';
 import { sharedInteractionStore } from '../interaction/index.js';
 
+const DEFAULT_RUN_ERROR_MESSAGE = '连接断开或生成出错，请重试';
+
+function userFacingRunError(error: Error): string {
+  const message = String(error.message || '').trim();
+  if (/runtime agent kernel is not ready/i.test(message)) {
+    return '云端运行时尚未就绪，请检查部署状态后重试';
+  }
+  if (!message || /failed to fetch|networkerror/i.test(message)) {
+    return DEFAULT_RUN_ERROR_MESSAGE;
+  }
+  return message.length <= 240 ? message : DEFAULT_RUN_ERROR_MESSAGE;
+}
+
 const TERMINAL_COMPLETE_STATUSES = new Set(['completed']);
 const TERMINAL_ERROR_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'incomplete']);
 
@@ -430,18 +443,20 @@ export function dispatchRunEventToStores(event: RunEvent) {
       }, 2400);
       break;
 
-    case 'error':
+    case 'error': {
+      const errorMessage = userFacingRunError(event.error);
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
       useStreamingStore.getState().updateActivity({
         sessionId: event.sessionId,
         status: 'failed',
-        phase: '连接断开或生成出错',
+        phase: '运行失败',
+        detail: errorMessage,
         countEvent: false,
       });
       if (!sessionIsOffscreen) {
         useStreamingStore.getState().setBanner({
           kind: 'error',
-          message: '连接断开或生成出错，请重试',
+          message: errorMessage,
           sessionId: event.sessionId,
         });
         ms.patchMessages((prev) => [
@@ -449,12 +464,13 @@ export function dispatchRunEventToStores(event: RunEvent) {
           {
             id: String(Date.now()),
             role: 'model',
-            content: '连接断开或生成出错。',
+            content: `运行失败：${errorMessage}`,
             timestamp: Date.now(),
           },
         ]);
       }
       break;
+    }
 
     case 'rate_limited':
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);

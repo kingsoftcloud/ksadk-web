@@ -162,6 +162,30 @@ function canonicalResult(): ConversationStreamResult {
   };
 }
 
+function canonicalResultWithUser(text: string): ConversationStreamResult {
+  const base = canonicalResult();
+  const user: ConversationItem = {
+    apiVersion: 'conversation.ksadk.io/v1',
+    kindVersion: 1,
+    itemId: 'canonical-user',
+    sourceEventIds: ['canonical-user-event'],
+    sessionId: 'session-canonical',
+    runId: 'run-canonical',
+    kind: 'user_message',
+    operation: 'completed',
+    lifecycle: 'completed',
+    visibility: 'public',
+    payloadSchemaRef: 'conversation.item.user_message/v1',
+    payload: { text },
+    nativeRef: {},
+  };
+  const state = {
+    items: [user, ...base.state.items],
+    appliedSources: [JSON.stringify([user.itemId, user.sourceEventIds[0]]), ...base.state.appliedSources],
+  };
+  return { ...base, state, presentation: projectConversationItems(state) };
+}
+
 describe('RunEngineImpl', () => {
   afterEach(async () => {
     await Promise.all([...activeEngines].map(waitForEngineIdle));
@@ -267,6 +291,55 @@ describe('RunEngineImpl', () => {
       runId: 'run-canonical',
       itemId: 'canonical-answer',
     });
+  });
+
+  it('replaces only the optimistic user row when canonical input arrives', () => {
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+    useMessageStore.getState().setMessages([
+      { id: 'historical-user', role: 'user', content: 'older prompt', timestamp: 1 },
+      { id: 'historical-answer', role: 'model', content: 'older answer', timestamp: 2 },
+      {
+        id: 'optimistic-user',
+        role: 'user',
+        content: 'new prompt',
+        timestamp: 3,
+        eventType: 'optimistic_user_message',
+      },
+    ]);
+
+    dispatchRunEventToStores({
+      type: 'conversation_snapshot',
+      sessionId: 'session-canonical',
+      result: canonicalResultWithUser('new prompt'),
+    });
+
+    expect(useMessageStore.getState().messages.map((message) => message.content)).toEqual([
+      'older prompt',
+      'older answer',
+      'new prompt',
+      'canonical answer',
+    ]);
+  });
+
+  it('does not erase historical user rows when a canonical snapshot has no optimistic row', () => {
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+    useMessageStore.getState().setMessages([
+      { id: 'historical-user', role: 'user', content: 'older prompt', timestamp: 1 },
+      { id: 'historical-answer', role: 'model', content: 'older answer', timestamp: 2 },
+    ]);
+
+    dispatchRunEventToStores({
+      type: 'conversation_snapshot',
+      sessionId: 'session-canonical',
+      result: canonicalResultWithUser('new prompt'),
+    });
+
+    expect(useMessageStore.getState().messages.map((message) => message.content)).toEqual([
+      'older prompt',
+      'older answer',
+      'new prompt',
+      'canonical answer',
+    ]);
   });
 
   it('keeps the existing Responses path only when the conversation surface endpoint is absent', async () => {
@@ -1097,6 +1170,23 @@ describe('RunEngineImpl', () => {
       status: 'waiting',
       detail: '正在接收流式事件',
     });
+  });
+
+  it('shows an actionable runtime admission error in the transcript', () => {
+    useSessionStore.getState().setCurrentSessionId('session-runtime-not-ready');
+
+    dispatchRunEventToStores({
+      type: 'error',
+      sessionId: 'session-runtime-not-ready',
+      error: new Error('runtime agent kernel is not ready'),
+    });
+
+    expect(useStreamingStore.getState().banner).toMatchObject({
+      kind: 'error',
+      message: '云端运行时尚未就绪，请检查部署状态后重试',
+    });
+    expect(useMessageStore.getState().messages.at(-1)?.content)
+      .toBe('运行失败：云端运行时尚未就绪，请检查部署状态后重试');
   });
 
   it('removes only a terminal answer mirrored at the tail of legacy reasoning', () => {

@@ -35,6 +35,7 @@ import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
 import { calculateVirtualMessageWindow } from '../../utils/message-virtualization.js';
+import { distanceFromBottom, shouldShowScrollToBottom } from '../../utils/chat-scroll.js';
 
 import type { RunActivity } from '../../stores/streaming.js';
 import type { SessionCheckpoint } from '../../stores/checkpoint.js';
@@ -124,131 +125,6 @@ function MeasuredMessageRow({
       style={{ position: 'absolute', top, left: 0, right: 0 }}
     >
       {children}
-    </div>
-  );
-}
-
-function formatElapsed(ms: number) {
-  const safe = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(safe / 60);
-  const seconds = safe % 60;
-  if (minutes <= 0) {
-    return `${seconds}s`;
-  }
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-}
-
-function formatLag(ms: number) {
-  if (ms < 1000) return '刚刚';
-  if (ms < 60_000) return `${Math.floor(ms / 1000)} 秒前`;
-  return `${Math.floor(ms / 60_000)} 分钟前`;
-}
-
-function formatCompactTokens(value?: number) {
-  if (!Number.isFinite(value) || !value || value <= 0) return '';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
-  return String(Math.round(value));
-}
-
-function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerContextIndicator }) {
-  const usedTokens = contextIndicator?.usedTokens;
-  const contextWindowTokens = contextIndicator?.contextWindowTokens;
-  const label = formatCompactTokens(usedTokens);
-  const windowLabel = formatCompactTokens(contextWindowTokens);
-
-  if (!label) return null;
-
-  const detail = [label, windowLabel].filter(Boolean).join('/');
-  const title = contextIndicator?.label || `估算 token ${detail}`;
-  return (
-    <span
-      key={label}
-      className="token-count-pulse hidden text-slate-400 dark:text-slate-500 sm:inline"
-      title={title}
-    >
-      估算 token {detail}
-    </span>
-  );
-}
-
-function RunActivityBanner({
-  activity,
-  contextIndicator,
-  onStopGeneration,
-  onCancelRemote,
-}: {
-  activity: RunActivity;
-  contextIndicator: ComposerContextIndicator;
-  onStopGeneration?: () => void;
-  onCancelRemote?: () => void;
-}) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const isActive = activity.status === 'connecting' || activity.status === 'running' || activity.status === 'waiting';
-  const alive = now - activity.lastEventAt < 20_000;
-
-  const icon =
-    activity.status === 'failed' ? (
-      <StopCircle className="h-3 w-3 text-rose-500" />
-    ) : activity.status === 'completed' ? (
-      <Check className="h-3 w-3 text-emerald-500" />
-    ) : activity.status === 'stopped' ? (
-      <ShieldCheck className="h-3 w-3 text-amber-500" />
-    ) : (
-      <RefreshCcw className="h-3 w-3 animate-spin text-slate-400" />
-    );
-
-  return (
-    <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/70 bg-white/90 px-2.5 py-1 text-[11px] leading-4 text-slate-500 shadow-sm shadow-slate-900/5 backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/90 dark:text-slate-400">
-        {icon}
-        <span className="max-w-[16rem] truncate text-slate-600 dark:text-slate-300" title={activity.detail || activity.phase}>
-          {activity.phase}
-        </span>
-        <span>
-          {activity.source === 'restore' ? '恢复' : '运行'} {formatElapsed(now - activity.startedAt)}
-        </span>
-        {isActive ? (
-          <span className={cn('inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full', alive ? 'bg-emerald-400' : 'bg-slate-300 dark:bg-slate-600')} title={alive ? '连接存活' : '连接超时'} />
-        ) : null}
-        <span className="text-slate-400 dark:text-slate-500">
-          {activity.eventCount} ev
-        </span>
-        <span className="hidden text-slate-400 dark:text-slate-500 sm:inline">
-          {formatLag(now - activity.lastEventAt)}
-        </span>
-        <AnimatedTokenCount contextIndicator={contextIndicator} />
-        {isActive && (onStopGeneration || onCancelRemote) ? (
-          <div className="flex flex-shrink-0 gap-1">
-            {onStopGeneration ? (
-              <button
-                type="button"
-                onClick={onStopGeneration}
-                className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-              >
-                <StopCircle className="h-3 w-3" />
-                停止
-              </button>
-            ) : null}
-            {onCancelRemote ? (
-              <button
-                type="button"
-                aria-label="取消运行并保留恢复点"
-                title="取消运行并保留最近 checkpoint"
-                onClick={onCancelRemote}
-                className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:text-slate-500 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
-              >
-                <XCircle className="h-3 w-3" />
-                取消
-              </button>
-            ) : null}
-          </div>
-        ) : null}
     </div>
   );
 }
@@ -1083,8 +959,16 @@ export function ChatMessageList({
   void checkpoints;
   void onResumeCheckpoint;
   void CheckpointPanel;
+  // Retain the shared component props for 0.3.x consumers. Runtime progress
+  // belongs to the last assistant message, while token usage and stop controls
+  // are already rendered by ChatComposer.
+  void activity;
+  void contextIndicator;
+  void onStopGeneration;
+  void onCancelRemote;
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [scrollHeight, setScrollHeight] = useState(0);
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
   const measuredHeightsRef = useRef(measuredHeights);
 
@@ -1095,6 +979,7 @@ export function ChatMessageList({
     const syncViewport = () => {
       setScrollTop(scroller.scrollTop);
       setViewportHeight(scroller.clientHeight);
+      setScrollHeight(scroller.scrollHeight);
     };
 
     syncViewport();
@@ -1105,6 +990,9 @@ export function ChatMessageList({
 
     const resizeObserver = new ResizeObserver(() => syncViewport());
     resizeObserver.observe(scroller);
+    if (scroller.firstElementChild instanceof HTMLElement) {
+      resizeObserver.observe(scroller.firstElementChild);
+    }
     return () => resizeObserver.disconnect();
   }, [scrollRef]);
 
@@ -1140,13 +1028,25 @@ export function ChatMessageList({
     if (scroller && top < scroller.scrollTop) {
       scroller.scrollTop += height - previousHeight;
       setScrollTop(scroller.scrollTop);
+      setScrollHeight(scroller.scrollHeight);
     }
   }, [scrollRef]);
+
+  const remainingDistance = distanceFromBottom({ scrollHeight, scrollTop, clientHeight: viewportHeight });
+  const showScrollToBottom = shouldShowScrollToBottom({
+    scrollHeight,
+    scrollTop,
+    clientHeight: viewportHeight,
+  });
 
   return (
     <div
       ref={scrollRef}
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => {
+        setScrollTop(event.currentTarget.scrollTop);
+        setViewportHeight(event.currentTarget.clientHeight);
+        setScrollHeight(event.currentTarget.scrollHeight);
+      }}
       className={cn(
         'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
@@ -1154,7 +1054,7 @@ export function ChatMessageList({
       )}
       data-slot="message-list"
     >
-      <div className={cn('mx-auto flex w-full max-w-[64rem] flex-col', activity ? 'pb-10 sm:pb-10' : 'pb-6 sm:pb-8')}>
+      <div className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
         ) : messages.length === 0 ? (
@@ -1192,10 +1092,11 @@ export function ChatMessageList({
         )}
       </div>
       <StatusBanner />
-      {/* wework 风格:滚走后显示回到底部圆钮 */}
-      {scrollTop > 320 ? (
+      {showScrollToBottom ? (
         <button
           type="button"
+          aria-label="回到底部"
+          data-distance-from-bottom={Math.round(remainingDistance)}
           onClick={() => {
             const scroller = scrollRef.current;
             if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
@@ -1205,16 +1106,6 @@ export function ChatMessageList({
         >
           <ArrowDown className="h-4 w-4" />
         </button>
-      ) : null}
-      {activity ? (
-        <div className="sticky bottom-1 z-20 mx-auto flex w-full max-w-[64rem] justify-end">
-          <RunActivityBanner
-            activity={activity}
-            contextIndicator={contextIndicator}
-            onStopGeneration={onStopGeneration}
-            onCancelRemote={onCancelRemote}
-          />
-        </div>
       ) : null}
     </div>
   );

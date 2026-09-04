@@ -138,6 +138,7 @@ export function useRunAgent(ctx: RunAgentContext) {
             role: 'user',
             content: trimmedText,
             timestamp: Date.now(),
+            eventType: 'optimistic_user_message',
             attachments: userAttachments.length ? userAttachments : undefined,
           },
         ]);

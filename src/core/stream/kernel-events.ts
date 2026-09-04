@@ -99,19 +99,74 @@ function toolPayload(parts: unknown[]): unknown {
   return text || null;
 }
 
+type ToolCallPart = {
+  callId: string;
+  name: string;
+  arguments: unknown;
+};
+
+type ToolResultPart = {
+  callId: string;
+  result: unknown;
+  isError: boolean;
+};
+
+function partPayload(part: unknown): Record<string, unknown> | null {
+  const record = asRecord(part);
+  if (!record) return null;
+  return asRecord(record.data) || record;
+}
+
+function partContentType(part: unknown): string {
+  const payload = partPayload(part);
+  return String(payload?.content_type || payload?.type || '').trim().toLowerCase();
+}
+
+function toolCallPart(parts: unknown[]): ToolCallPart | null {
+  for (const part of parts) {
+    const payload = partPayload(part);
+    if (!payload || partContentType(part) !== 'tool_call') continue;
+    const callId = String(payload.call_id || '').trim();
+    const name = String(payload.name || payload.tool_name || '').trim();
+    if (!callId && !name) continue;
+    return {
+      callId,
+      name,
+      arguments: payload.arguments ?? payload.args ?? {},
+    };
+  }
+  return null;
+}
+
+function toolResultPart(parts: unknown[]): ToolResultPart | null {
+  for (const part of parts) {
+    const payload = partPayload(part);
+    if (!payload || partContentType(part) !== 'tool_result') continue;
+    const callId = String(payload.call_id || payload.tool_call_id || '').trim();
+    const isError = payload.is_error === true || payload.error != null;
+    const result = payload.result ?? payload.output ?? payload.error ?? null;
+    return { callId, result, isError };
+  }
+  return null;
+}
+
 function runtimeItemMetadata(
   frame: KernelSessionEventFrame,
   operation: 'append' | 'replace' | 'completed',
   partId?: string,
+  logicalItemId?: string,
 ): Record<string, unknown> {
+  const sourceItemId = String(frame.item_id || '');
+  const itemId = String(logicalItemId || sourceItemId);
   return {
     RuntimeItem: {
       RunId: String(frame.run_id || ''),
       ScopeId: String(frame.scope_id || frame.run_id || ''),
-      ItemId: String(frame.item_id || ''),
+      ItemId: itemId,
       ...(partId ? { PartId: partId } : {}),
       Operation: operation,
       SourceEventId: String(frame.event_id || ''),
+      ...(sourceItemId && sourceItemId !== itemId ? { SourceItemId: sourceItemId } : {}),
     },
   };
 }
@@ -123,6 +178,7 @@ function runtimeItemMetadata(
  */
 export class KernelRunEventTranslator {
   private readonly textByPart = new Map<string, string>();
+  private readonly toolNameByCallId = new Map<string, string>();
   private readonly sessionId: string;
 
   constructor(sessionId: string) {
@@ -176,6 +232,24 @@ export class KernelRunEventTranslator {
 
     if (eventType === 'item.started') {
       const parts = frameParts(frame, 'initial');
+      if (frame.item_kind === 'tool_call') {
+        const call = toolCallPart(parts);
+        const callId = call?.callId || String(frame.item_id || '');
+        const name = call?.name || 'tool';
+        if (callId) this.toolNameByCallId.set(callId, name);
+        return {
+          ...base(),
+          EventType: 'tool_call',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'replace', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_args: call?.arguments ?? toolPayload(parts),
+          },
+        };
+      }
+      if (frame.item_kind === 'tool_result') return null;
       if (nativeKind === 'userMessage' || looksLikeUserMessage(parts)) return null;
       if (nativeKind === 'reasoning' || frame.item_kind === 'reasoning') return null;
       if (nativeKind === 'agentMessage' || (!nativeKind && frame.item_kind === 'message')) {
@@ -262,6 +336,42 @@ export class KernelRunEventTranslator {
 
     if (eventType === 'item.completed') {
       const parts = frameParts(frame, 'snapshot');
+      if (frame.item_kind === 'tool_call') {
+        const call = toolCallPart(parts);
+        const callId = call?.callId || String(frame.item_id || '');
+        const name = call?.name || this.toolNameByCallId.get(callId) || 'tool';
+        if (callId) this.toolNameByCallId.set(callId, name);
+        return {
+          ...base(),
+          EventType: 'tool_call',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'replace', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_args: call?.arguments ?? toolPayload(parts),
+          },
+        };
+      }
+      if (frame.item_kind === 'tool_result') {
+        const result = toolResultPart(parts);
+        const callId = result?.callId || String(frame.item_id || '');
+        const name = this.toolNameByCallId.get(callId) || nativeKind || 'tool';
+        const output = result?.isError
+          ? { error: result.result }
+          : result?.result ?? toolPayload(parts);
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_output: output,
+          },
+        };
+      }
       if (nativeKind === 'userMessage' || looksLikeUserMessage(parts)) {
         return {
           ...base(),

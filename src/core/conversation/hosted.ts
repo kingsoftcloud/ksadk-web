@@ -70,7 +70,7 @@ function blockStatus(item: ConversationItem): 'streaming' | 'done' | 'error' {
 function textMessage(item: ConversationItem): Message {
   const text = typeof item.payload.text === 'string' ? item.payload.text : '';
   if (item.kind === 'user_message') {
-    return { ...messageBase(item), role: 'user', content: text };
+    return { ...messageBase(item), role: 'user', content: text, eventType: 'user_message' };
   }
   const block: ProcessingBlock = item.kind === 'reasoning'
     ? {
@@ -361,12 +361,35 @@ export function mergeConversationRunMessages(
   // here used to produce the brief blank screen seen during slow/reordered
   // cloud streams.
   if (!projected.length) return previous;
+  // The canonical stream may contain a user_message item representing the
+  // turn input. Hosted UI marks the temporary row inserted by startDraft(),
+  // allowing this projection to replace exactly that row without mistaking an
+  // older unscoped user message for the current prompt.
+  const hasProjectedUser = projected.some((m) => m.role === 'user');
+  let cleanPrevious = previous;
+  if (hasProjectedUser) {
+    let optimisticUserIndex = -1;
+    for (let index = previous.length - 1; index >= 0; index -= 1) {
+      const message = previous[index];
+      if (message.role === 'user' && message.eventType === 'optimistic_user_message') {
+        optimisticUserIndex = index;
+        break;
+      }
+    }
+    if (optimisticUserIndex >= 0) {
+      cleanPrevious = [
+        ...previous.slice(0, optimisticUserIndex),
+        ...previous.slice(optimisticUserIndex + 1),
+      ];
+    }
+  }
+
   const belongsToRun = (message: Message) => (
     (message.eventType === EVENT_TYPE && message.runId === result.runId)
     || message.invocationId === result.runId
   );
-  const insertionIndex = previous.findIndex(belongsToRun);
-  const retained = previous.filter((message) => !belongsToRun(message));
+  const insertionIndex = cleanPrevious.findIndex(belongsToRun);
+  const retained = cleanPrevious.filter((message) => !belongsToRun(message));
   const index = insertionIndex < 0 ? retained.length : insertionIndex;
   return [
     ...retained.slice(0, index),

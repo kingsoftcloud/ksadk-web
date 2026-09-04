@@ -216,6 +216,10 @@ export class AgentEngineClient {
     }
 
     if (!response.ok) {
+      // Admission failures arrive before an SSE body exists. Parse the normal
+      // action envelope so callers keep the server's actionable error instead
+      // of collapsing every rejection into "Bad Gateway".
+      await parseActionResponse<never>(response);
       throw new ApiError(response.status, `流式请求失败: ${response.statusText}`);
     }
 

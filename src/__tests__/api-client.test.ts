@@ -112,4 +112,28 @@ describe('AgentEngine action response parsing', () => {
       globalThis.fetch = previousFetch;
     }
   });
+
+  it('keeps the upstream message from a rejected SSE admission response', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      Code: 502,
+      Message: 'runtime agent kernel is not ready',
+      Data: { serverCode: 'runtime_not_ready' },
+    }), {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    })) as typeof fetch;
+
+    try {
+      await expect(streamAction('RunAgent', { Stream: true }))
+        .rejects
+        .toMatchObject<ApiError>({
+          code: 502,
+          message: 'runtime agent kernel is not ready',
+        });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
 });
