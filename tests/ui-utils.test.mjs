@@ -12,70 +12,37 @@ test('estimateTextTokens gives CJK text a less optimistic estimate', () => {
   assert.equal(estimateTextTokens('Agent平台设计'), 6);
 });
 
-test('buildComposerContextIndicator shows warning near threshold and compressing when checkpoint is active', () => {
-  const warningIndicator = buildComposerContextIndicator({
-    messages: [
-      {
-        role: 'user',
-        content: '你'.repeat(160),
-      },
-    ],
-    draftInput: '',
-    selectedModel: {
-      id: 'glm-5.1',
-      context_window_tokens: 200,
-      auto_compact_threshold_percentage: 80,
-    },
+test('context uses the runtime snapshot, not transcript length or billing totals', () => {
+  const indicator = buildComposerContextIndicator({
+    messages: [{ role: 'user', content: '你'.repeat(44000) }],
+    selectedModel: { id: 'model', input_budget_tokens: 32000 },
+    contextUsage: { model: 'model', used_tokens: 8100, source: 'last_request' },
   });
-  assert.equal(warningIndicator?.phase, 'warning');
-  assert.match(warningIndicator?.label || '', /即将压缩/);
-  assert.equal(warningIndicator?.usedTokens, 160);
-  assert.equal(warningIndicator?.contextWindowTokens, 200);
-  assert.equal(warningIndicator?.percent, 80);
-
-  const compressingIndicator = buildComposerContextIndicator({
-    messages: [
-      {
-        role: 'system',
-        eventType: 'context_checkpoint',
-        status: 'running',
-        summary: 'Earlier conversation summary',
-      },
-    ],
-    draftInput: '',
-    selectedModel: {
-      id: 'glm-5.1',
-      context_window_tokens: 200000,
-    },
-  });
-  assert.deepEqual(compressingIndicator, {
-    label: '正在压缩上下文…',
-    phase: 'compressing',
-    usedTokens: 7,
-    contextWindowTokens: 200000,
-    percent: 0,
-  });
+  assert.equal(indicator.usedTokens, 8100);
+  assert.equal(indicator.percent, undefined);
+  assert.equal(indicator.contextWindowTokens, undefined);
+  assert.equal(indicator.label, '上次请求输入');
 });
 
-test('buildComposerContextIndicator exposes token counts for compact run status', () => {
+test('context uses a declared model window and does not promise automatic compaction', () => {
   const indicator = buildComposerContextIndicator({
-    messages: [
-      { role: 'user', content: '你好世界' },
-      { role: 'model', content: 'hello world' },
-    ],
-    draftInput: 'abcde',
-    selectedModel: {
-      id: 'qwen3.6-plus',
-      limits: {
-        context_window_tokens: 200000,
-      },
-    },
+    selectedModel: { id: 'model', context_window_tokens: 10000 },
+    contextUsage: { model: 'model', used_tokens: 9000, source: 'runtime' },
   });
+  assert.equal(indicator.percent, 90);
+  assert.equal(indicator.phase, 'warning');
+  assert.doesNotMatch(indicator.label, /即将压缩/);
+});
 
-  assert.equal(indicator?.phase, 'normal');
-  assert.equal(indicator?.usedTokens, 9);
-  assert.equal(indicator?.contextWindowTokens, 200000);
-  assert.match(indicator?.label || '', /估算上下文/);
+test('context remains unknown without a current snapshot or after switching models', () => {
+  for (const contextUsage of [undefined, { model: 'old', used_tokens: 44000 }]) {
+    const indicator = buildComposerContextIndicator({
+      selectedModel: { id: 'new' }, contextUsage,
+      messages: [{ role: 'user', content: '你'.repeat(44000) }],
+    });
+    assert.equal(indicator.usedTokens, undefined);
+    assert.equal(indicator.percent, undefined);
+  }
 });
 
 test('preprocessMarkdown keeps GFM table rows on separate lines for inline table blobs', () => {

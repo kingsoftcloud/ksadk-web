@@ -21,6 +21,7 @@ import type { RuntimeExecutionMode } from '../../core/run/types.js';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 
 export type ConnectedComposerProps = {
+  onCompactContext?: () => Promise<void>;
   composerMaxHeight: number;
   submitDraft: (
     text: string,
@@ -45,6 +46,7 @@ export type ConnectedComposerProps = {
 };
 
 export function ConnectedComposer({
+  onCompactContext,
   composerMaxHeight,
   submitDraft,
   stopGeneration,
@@ -68,6 +70,7 @@ export function ConnectedComposer({
   const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
   const queuedDrafts = useUIStore((s: UIStore) => s.queuedDrafts);
   const messages = useMessageStore(s => s.messages);
+  const contextUsage = useSessionStore(s => s.sessions.find(item => item.SessionId === currentSessionId)?.ContextUsage);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
   const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
   const setThinkingMode = useModelStore((s: ModelStore) => s.setThinkingMode);
@@ -83,8 +86,9 @@ export function ConnectedComposer({
         messages,
         draftInput: input,
         selectedModel: selectedModelMetadata,
+        contextUsage,
       }) as ComposerContextIndicator,
-    [input, messages, selectedModelMetadata],
+    [input, messages, selectedModelMetadata, contextUsage],
   );
   const executionModeSupport = useMemo<RuntimeExecutionModeSupport>(() => ({
     plan: Boolean(runtimeCapabilityMatrix?.plan?.supported),
@@ -149,6 +153,8 @@ export function ConnectedComposer({
         />
       ) : null}
       <ChatComposer
+      onCompactContext={currentSessionId ? onCompactContext : undefined}
+      key={currentSessionId || "new-session"}
       attachments={attachments}
       composerContextIndicator={composerContextIndicator}
       composerMaxHeight={composerMaxHeight}

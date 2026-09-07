@@ -467,6 +467,12 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
               interactionRecords={interactionRecords}
             />
         <ConnectedComposer
+          onCompactContext={uiCapabilities.ContextCompaction && api.compactSession ? async () => {
+            if (!currentSessionId || !api.compactSession) return;
+            const result = await api.compactSession(agentId, currentSessionId);
+            if (result.Status !== 'completed') throw new Error('运行时尚未确认压缩完成');
+            await fetchSessions(agentId, currentSessionId);
+          } : undefined}
           composerMaxHeight={composerMaxHeight}
           submitDraft={submitDraft}
           stopGeneration={handleStopGeneration}

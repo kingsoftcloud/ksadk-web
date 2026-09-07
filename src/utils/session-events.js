@@ -164,6 +164,9 @@ function normalizeRuntimeSessionEvents(events) {
 
 export function sessionEventRunStatus(event) {
   const eventType = String(event?.EventType || '').trim();
+  // Tool/item completion is not a terminal run. In particular, a parallel
+  // command may finish while an MCP approval is still waiting for the user.
+  if (eventType !== 'run_status' && !eventType.startsWith('run.')) return '';
   const payload = runtimePayload(event);
   return String(
     event?.Content?.status

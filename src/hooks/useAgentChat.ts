@@ -263,6 +263,15 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     if (currentSessionIdRef.current) await loadSession(currentSessionIdRef.current);
   }, [agentIdRef, currentSessionIdRef, fetchSessions, loadSession]);
 
+  const compactContext = useCallback(async () => {
+    if (!currentSessionId || !api.compactSession || !uiCapabilities.ContextCompaction) {
+      throw new Error('当前会话尚不支持手动压缩');
+    }
+    const result = await api.compactSession(agentId, currentSessionId);
+    if (result.Status !== 'completed') throw new Error('运行时尚未确认压缩完成');
+    await fetchSessions(agentId, currentSessionId);
+  }, [api, agentId, currentSessionId, uiCapabilities.ContextCompaction, fetchSessions]);
+
   return {
     bootstrapStatus,
     bootstrapErrorMessage,
@@ -283,6 +292,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     refresh,
     messages,
     activity,
+    compactContext,
     isStreaming,
     queuedDrafts,
     send,

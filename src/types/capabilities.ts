@@ -28,6 +28,7 @@ export type UiCapabilities = {
   Approval?: boolean;
   ApprovalPolicy?: ApprovalPolicyCapability;
   Thinking?: boolean;
+  ContextCompaction?: boolean;
   StopRun?: boolean;
   ResumeRun?: boolean;
   MCP?: boolean;

@@ -7,7 +7,9 @@ import type {
   RefObject,
 } from 'react';
 
-import { ArrowUp, Paperclip, Square } from 'lucide-react';
+import { useState } from 'react';
+
+import { ArrowUp, FileText, Paperclip, Square } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useModelStore } from '@/stores/model.js';
@@ -23,6 +25,7 @@ import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
 export type ChatComposerProps = {
+  onCompactContext?: () => Promise<void>;
   attachments: File[];
   composerContextIndicator: ComposerContextIndicator;
   composerMaxHeight: number;
@@ -50,6 +53,7 @@ export type ChatComposerProps = {
 };
 
 export function ChatComposer({
+  onCompactContext,
   attachments,
   composerContextIndicator,
   composerMaxHeight,
@@ -75,6 +79,11 @@ export function ChatComposer({
   textareaRef,
   className,
 }: ChatComposerProps) {
+  const [isCompacting, setIsCompacting] = useState(false);
+  const compactContext = onCompactContext ? async () => {
+    setIsCompacting(true);
+    try { await onCompactContext(); } finally { setIsCompacting(false); }
+  } : undefined;
   const placeholderText = executionMode === 'goal'
     ? '描述需要持续完成的目标…'
     : executionMode === 'plan'
@@ -108,6 +117,7 @@ export function ChatComposer({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isCompacting) return;
     if (isStreaming) {
       if (onCancelRemote) {
         onCancelRemote();
@@ -134,6 +144,12 @@ export function ChatComposer({
       data-slot="composer"
     >
       <div className="mx-auto w-full max-w-[64rem]">
+        {isCompacting && (
+          <div role="status" className="mb-3 flex items-center gap-2 px-2 text-sm text-text-muted">
+            <FileText size={16} aria-hidden="true" />
+            <span className="waiting-thinking-text">正在压缩上下文</span>
+          </div>
+        )}
         {queuedDrafts.length > 0 ? (
           <div className="mb-2 rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2 text-xs text-neutral-900 shadow-sm dark:border-neutral-900/60 dark:bg-neutral-950/30 dark:text-neutral-100">
             <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -253,7 +269,7 @@ export function ChatComposer({
                 </div>
 
                 <div className="flex min-w-0 items-center gap-1.5">
-                  {composerContextIndicator ? <ContextUsageIndicator indicator={composerContextIndicator} /> : null}
+                  {composerContextIndicator ? <ContextUsageIndicator indicator={composerContextIndicator} onCompact={compactContext} disabled={isStreaming} /> : null}
 
                   {availableModels.length > 0 ? (
                     <ModelSettingsMenu
@@ -268,7 +284,7 @@ export function ChatComposer({
 
                   <button
                     type="submit"
-                    disabled={!isStreaming && !canSubmit}
+                    disabled={isCompacting || (!isStreaming && !canSubmit)}
                     className={cn(
                       'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
                       isStreaming

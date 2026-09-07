@@ -1,4 +1,5 @@
 export interface ApiFacade {
+  compactSession?(agentId: string, sessionId: string): Promise<{ Status: string }>;
   // Session
   listSessions(agentId: string, opts?: { page?: number; pageSize?: number; signal?: AbortSignal }): Promise<{
     Sessions: unknown[];

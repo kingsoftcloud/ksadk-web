@@ -197,6 +197,7 @@ export function normalizeCapabilities(bootstrap) {
     Approval: normalizeEnabled(rawCapabilities.Approval, approvalPolicyAdvertised),
     RuntimeCapabilityMatrix: runtimeCapabilityMatrix,
     InteractionV1: interactionV1,
+    ContextCompaction: rawCapabilities.ContextCompaction === true,
     HostedChat: {
       Enabled: hostedChatEnabled,
       ApiFormats: normalizeApiFormats(hostedChat.ApiFormats || apiFormats),

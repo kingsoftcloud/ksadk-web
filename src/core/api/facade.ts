@@ -33,6 +33,12 @@ export class ApiFacadeImpl implements ApiFacade {
     this.client = new AgentEngineClient(options);
   }
 
+  async compactSession(agentId: string, sessionId: string) {
+    return this.client.postJsonAction<{ Status: string }>('CompactSession', {
+      AgentId: agentId, SessionId: sessionId,
+    });
+  }
+
   async listSessions(agentId: string, opts?: { page?: number; pageSize?: number; signal?: AbortSignal }) {
     const data = await this.client.postJsonAction<ListSessionsData>('ListSessions', {
       AgentId: agentId,
