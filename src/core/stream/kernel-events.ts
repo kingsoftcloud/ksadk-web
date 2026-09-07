@@ -99,19 +99,74 @@ function toolPayload(parts: unknown[]): unknown {
   return text || null;
 }
 
+type ToolCallPart = {
+  callId: string;
+  name: string;
+  arguments: unknown;
+};
+
+type ToolResultPart = {
+  callId: string;
+  result: unknown;
+  isError: boolean;
+};
+
+function partPayload(part: unknown): Record<string, unknown> | null {
+  const record = asRecord(part);
+  if (!record) return null;
+  return asRecord(record.data) || record;
+}
+
+function partContentType(part: unknown): string {
+  const payload = partPayload(part);
+  return String(payload?.content_type || payload?.type || '').trim().toLowerCase();
+}
+
+function toolCallPart(parts: unknown[]): ToolCallPart | null {
+  for (const part of parts) {
+    const payload = partPayload(part);
+    if (!payload || partContentType(part) !== 'tool_call') continue;
+    const callId = String(payload.call_id || '').trim();
+    const name = String(payload.name || payload.tool_name || '').trim();
+    if (!callId && !name) continue;
+    return {
+      callId,
+      name,
+      arguments: payload.arguments ?? payload.args ?? {},
+    };
+  }
+  return null;
+}
+
+function toolResultPart(parts: unknown[]): ToolResultPart | null {
+  for (const part of parts) {
+    const payload = partPayload(part);
+    if (!payload || partContentType(part) !== 'tool_result') continue;
+    const callId = String(payload.call_id || payload.tool_call_id || '').trim();
+    const isError = payload.is_error === true || payload.error != null;
+    const result = payload.result ?? payload.output ?? payload.error ?? null;
+    return { callId, result, isError };
+  }
+  return null;
+}
+
 function runtimeItemMetadata(
   frame: KernelSessionEventFrame,
   operation: 'append' | 'replace' | 'completed',
   partId?: string,
+  logicalItemId?: string,
 ): Record<string, unknown> {
+  const sourceItemId = String(frame.item_id || '');
+  const itemId = String(logicalItemId || sourceItemId);
   return {
     RuntimeItem: {
       RunId: String(frame.run_id || ''),
       ScopeId: String(frame.scope_id || frame.run_id || ''),
-      ItemId: String(frame.item_id || ''),
+      ItemId: itemId,
       ...(partId ? { PartId: partId } : {}),
       Operation: operation,
       SourceEventId: String(frame.event_id || ''),
+      ...(sourceItemId && sourceItemId !== itemId ? { SourceItemId: sourceItemId } : {}),
     },
   };
 }
@@ -123,6 +178,9 @@ function runtimeItemMetadata(
  */
 export class KernelRunEventTranslator {
   private readonly textByPart = new Map<string, string>();
+  private readonly toolNameByCallId = new Map<string, string>();
+  private readonly toolCallByItemId = new Map<string, { callId: string; name: string }>();
+  private readonly toolResultByItemId = new Map<string, unknown>();
   private readonly sessionId: string;
 
   constructor(sessionId: string) {
@@ -176,6 +234,27 @@ export class KernelRunEventTranslator {
 
     if (eventType === 'item.started') {
       const parts = frameParts(frame, 'initial');
+      if (frame.item_kind === 'tool_call') {
+        const call = toolCallPart(parts);
+        const callId = call?.callId || String(frame.item_id || '');
+        const name = call?.name || 'tool';
+        if (callId) this.toolNameByCallId.set(callId, name);
+        if (frame.item_id) {
+          this.toolCallByItemId.set(String(frame.item_id), { callId, name });
+        }
+        return {
+          ...base(),
+          EventType: 'tool_call',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'replace', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_args: call?.arguments ?? toolPayload(parts),
+          },
+        };
+      }
+      if (frame.item_kind === 'tool_result') return null;
       if (nativeKind === 'userMessage' || looksLikeUserMessage(parts)) return null;
       if (nativeKind === 'reasoning' || frame.item_kind === 'reasoning') return null;
       if (nativeKind === 'agentMessage' || (!nativeKind && frame.item_kind === 'message')) {
@@ -204,6 +283,28 @@ export class KernelRunEventTranslator {
 
     if (eventType === 'item.updated') {
       const parts = frameParts(frame, 'update');
+      if (frame.item_kind === 'tool_call') {
+        const result = toolResultPart(parts);
+        if (!result) return null;
+        const remembered = this.toolCallByItemId.get(String(frame.item_id || ''));
+        const callId = result.callId || remembered?.callId || String(frame.item_id || '');
+        const name = remembered?.name || this.toolNameByCallId.get(callId) || 'tool';
+        const output = result.isError
+          ? { error: result.result }
+          : result.result;
+        if (frame.item_id) this.toolResultByItemId.set(String(frame.item_id), output);
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_output: output,
+          },
+        };
+      }
       const part = asRecord(parts[0]);
       const partId = String(part?.part_id || frame.item_id || seq);
       const op = String(frame.op || 'replace');
@@ -262,6 +363,62 @@ export class KernelRunEventTranslator {
 
     if (eventType === 'item.completed') {
       const parts = frameParts(frame, 'snapshot');
+      if (frame.item_kind === 'tool_call') {
+        const call = toolCallPart(parts);
+        const result = toolResultPart(parts);
+        const remembered = this.toolCallByItemId.get(String(frame.item_id || ''));
+        const callId = result?.callId || call?.callId || remembered?.callId || String(frame.item_id || '');
+        const name = call?.name || remembered?.name || this.toolNameByCallId.get(callId) || 'tool';
+        if (callId) this.toolNameByCallId.set(callId, name);
+        // Codex commandExecution completes one canonical tool_call item with
+        // both the original call part and its terminal result part. Treat the
+        // mixed snapshot as the result; replaying it as another tool_call left
+        // completed commands permanently marked as running after refresh.
+        if (result) {
+          const output = result.isError ? { error: result.result } : result.result;
+          return {
+            ...base(),
+            EventType: 'tool_result',
+            Metadata: {
+              ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+              call_id: callId,
+              tool_name: name,
+              run_id: runId,
+              tool_output: output,
+            },
+          };
+        }
+        return {
+          ...base(),
+          EventType: 'tool_call',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'replace', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_args: call?.arguments ?? toolPayload(parts),
+          },
+        };
+      }
+      if (frame.item_kind === 'tool_result') {
+        const result = toolResultPart(parts);
+        const callId = result?.callId || String(frame.item_id || '');
+        const name = this.toolNameByCallId.get(callId) || nativeKind || 'tool';
+        const output = result?.isError
+          ? { error: result.result }
+          : result?.result ?? toolPayload(parts);
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_output: output,
+          },
+        };
+      }
       if (nativeKind === 'userMessage' || looksLikeUserMessage(parts)) {
         return {
           ...base(),
@@ -306,6 +463,24 @@ export class KernelRunEventTranslator {
     }
 
     if (eventType === 'item.failed') {
+      if (frame.item_kind === 'tool_call') {
+        const remembered = this.toolCallByItemId.get(String(frame.item_id || ''));
+        const callId = remembered?.callId || String(frame.item_id || '');
+        const name = remembered?.name || this.toolNameByCallId.get(callId) || 'tool';
+        const detailedOutput = this.toolResultByItemId.get(String(frame.item_id || ''));
+        return {
+          ...base(),
+          EventType: 'tool_result',
+          Metadata: {
+            ...runtimeItemMetadata(frame, 'completed', undefined, callId),
+            call_id: callId,
+            tool_name: name,
+            run_id: runId,
+            tool_output: detailedOutput
+              ?? { error: asRecord(frame.error) || frame.error || 'item failed' },
+          },
+        };
+      }
       if (nativeKind && nativeKind !== 'notification' && nativeKind !== 'agentMessage' && nativeKind !== 'reasoning') {
         return {
           ...base(),

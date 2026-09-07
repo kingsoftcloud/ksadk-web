@@ -78,51 +78,28 @@ export function resolveAutoCompactThresholdPercent(model) {
   return coercePositiveNumber(model.auto_compact_threshold_percentage) ?? 84;
 }
 
-export function buildComposerContextIndicator({ messages, draftInput, selectedModel }) {
-  const contextWindowTokens = resolveContextWindowTokens(selectedModel);
-  if (!contextWindowTokens) {
-    return null;
-  }
-
-  const activeCompaction = [...(messages || [])].reverse().find((message) => (
-    message?.role === 'system'
-    && message?.eventType === 'context_checkpoint'
-    && message?.status === 'running'
-  ));
-  if (activeCompaction) {
-    const usedTokens = estimateMessageContextTokens(activeCompaction);
-    return {
-      label: '正在压缩上下文…',
-      phase: 'compressing',
-      usedTokens,
-      contextWindowTokens,
-      percent: Math.min(100, Math.max(0, Math.round((usedTokens / contextWindowTokens) * 100))),
-    };
-  }
-
-  const totalTokens = (messages || []).reduce((sum, message) => {
-    return sum + estimateMessageContextTokens(message);
-  }, 0) + estimateTextTokens(draftInput || '');
-  if (totalTokens <= 0) {
-    return null;
-  }
-
-  const percent = Math.min(100, Math.max(0, Math.round((totalTokens / contextWindowTokens) * 100)));
-  const warningThreshold = resolveAutoCompactThresholdPercent(selectedModel);
-  if (percent >= warningThreshold) {
-    return {
-      label: `估算上下文 ${percent}% · 即将压缩`,
-      phase: 'warning',
-      percent,
-      usedTokens: totalTokens,
-      contextWindowTokens,
-    };
-  }
+export function buildComposerContextIndicator({ selectedModel, contextUsage }) {
+  // A transcript includes history already compacted by the runtime. Neither
+  // its character count nor cumulative billing usage measures active context.
+  const usage = contextUsage && (!contextUsage.model || contextUsage.model === selectedModel?.id)
+    ? contextUsage : null;
+  const usedTokens = coercePositiveNumber(usage?.used_tokens);
+  const runtimeWindow = coercePositiveNumber(usage?.context_window_tokens);
+  const contextWindowTokens = runtimeWindow ?? resolveContextWindowTokens(selectedModel);
+  const windowInfo = {
+    contextWindowTokens: contextWindowTokens ?? undefined,
+    contextWindowSource: contextWindowTokens ? (runtimeWindow ? 'runtime' : 'model') : undefined,
+  };
+  const label = usage?.source === 'last_request' ? '上次请求输入' : '上下文占用';
+  if (!usedTokens) return { label: '上下文用量暂不可用', phase: 'default', ...windowInfo };
+  const percent = contextWindowTokens
+    ? Math.round(usedTokens / contextWindowTokens * 100) : undefined;
   return {
-    label: `估算上下文 ${percent}%`,
-    phase: 'normal',
+    label,
+    phase: percent !== undefined && percent >= resolveAutoCompactThresholdPercent(selectedModel)
+      ? 'warning' : 'normal',
     percent,
-    usedTokens: totalTokens,
-    contextWindowTokens,
+    usedTokens,
+    ...windowInfo,
   };
 }

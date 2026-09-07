@@ -10,7 +10,6 @@ import {
 } from 'react';
 
 import {
-  ArrowDown,
   Bot,
   Check,
   ChevronDown,
@@ -35,6 +34,8 @@ import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
 import { calculateVirtualMessageWindow } from '../../utils/message-virtualization.js';
+import { distanceFromBottom, shouldShowScrollToBottom } from '../../utils/chat-scroll.js';
+import { continuesAssistantTurn } from '../../utils/chat-message-grouping.js';
 
 import type { RunActivity } from '../../stores/streaming.js';
 import type { SessionCheckpoint } from '../../stores/checkpoint.js';
@@ -44,8 +45,10 @@ import { A2UIActivityMessage } from './A2UIActivityMessage';
 import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
 import type { Interaction } from '../../core/interaction/types.js';
 
-type ChatMessageListProps = {
+export type ChatMessageListProps = {
   agentName: string;
+  /** Host-owned welcome surface; null suppresses it. */
+  emptyState?: ReactNode;
   isMobile: boolean;
   isStreaming: boolean;
   activity: RunActivity | null;
@@ -68,11 +71,13 @@ type ChatMessageListProps = {
   onDeleteFeedback: (message: Message) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  onScrollToBottom?: () => void;
   checkpoints?: SessionCheckpoint[];
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   /** Interaction/v1 records for the current session; anchors replace inline buttons. */
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  className?: string;
 };
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
@@ -89,8 +94,8 @@ function approvalLevelLabel(level?: string) {
 function approvalLevelTone(level?: string) {
   const normalized = String(level || '').trim().toLowerCase();
   return normalized === 'elevated'
-    ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200'
-    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200';
+    ? 'border-[var(--ksadk-approval-elevated-border)] bg-[var(--ksadk-approval-elevated-background)] text-[var(--ksadk-approval-elevated-foreground)]'
+    : 'border-[var(--ksadk-approval-border)] bg-[var(--ksadk-approval-background)] text-[var(--ksadk-approval-foreground)]';
 }
 
 function MeasuredMessageRow({
@@ -123,131 +128,6 @@ function MeasuredMessageRow({
       style={{ position: 'absolute', top, left: 0, right: 0 }}
     >
       {children}
-    </div>
-  );
-}
-
-function formatElapsed(ms: number) {
-  const safe = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(safe / 60);
-  const seconds = safe % 60;
-  if (minutes <= 0) {
-    return `${seconds}s`;
-  }
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-}
-
-function formatLag(ms: number) {
-  if (ms < 1000) return '刚刚';
-  if (ms < 60_000) return `${Math.floor(ms / 1000)} 秒前`;
-  return `${Math.floor(ms / 60_000)} 分钟前`;
-}
-
-function formatCompactTokens(value?: number) {
-  if (!Number.isFinite(value) || !value || value <= 0) return '';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
-  return String(Math.round(value));
-}
-
-function AnimatedTokenCount({ contextIndicator }: { contextIndicator: ComposerContextIndicator }) {
-  const usedTokens = contextIndicator?.usedTokens;
-  const contextWindowTokens = contextIndicator?.contextWindowTokens;
-  const label = formatCompactTokens(usedTokens);
-  const windowLabel = formatCompactTokens(contextWindowTokens);
-
-  if (!label) return null;
-
-  const detail = [label, windowLabel].filter(Boolean).join('/');
-  const title = contextIndicator?.label || `估算 token ${detail}`;
-  return (
-    <span
-      key={label}
-      className="token-count-pulse hidden text-slate-400 dark:text-slate-500 sm:inline"
-      title={title}
-    >
-      估算 token {detail}
-    </span>
-  );
-}
-
-function RunActivityBanner({
-  activity,
-  contextIndicator,
-  onStopGeneration,
-  onCancelRemote,
-}: {
-  activity: RunActivity;
-  contextIndicator: ComposerContextIndicator;
-  onStopGeneration?: () => void;
-  onCancelRemote?: () => void;
-}) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const isActive = activity.status === 'connecting' || activity.status === 'running' || activity.status === 'waiting';
-  const alive = now - activity.lastEventAt < 20_000;
-
-  const icon =
-    activity.status === 'failed' ? (
-      <StopCircle className="h-3 w-3 text-rose-500" />
-    ) : activity.status === 'completed' ? (
-      <Check className="h-3 w-3 text-emerald-500" />
-    ) : activity.status === 'stopped' ? (
-      <ShieldCheck className="h-3 w-3 text-amber-500" />
-    ) : (
-      <RefreshCcw className="h-3 w-3 animate-spin text-slate-400" />
-    );
-
-  return (
-    <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/70 bg-white/90 px-2.5 py-1 text-[11px] leading-4 text-slate-500 shadow-sm shadow-slate-900/5 backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/90 dark:text-slate-400">
-        {icon}
-        <span className="max-w-[16rem] truncate text-slate-600 dark:text-slate-300" title={activity.detail || activity.phase}>
-          {activity.phase}
-        </span>
-        <span>
-          {activity.source === 'restore' ? '恢复' : '运行'} {formatElapsed(now - activity.startedAt)}
-        </span>
-        {isActive ? (
-          <span className={cn('inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full', alive ? 'bg-emerald-400' : 'bg-slate-300 dark:bg-slate-600')} title={alive ? '连接存活' : '连接超时'} />
-        ) : null}
-        <span className="text-slate-400 dark:text-slate-500">
-          {activity.eventCount} ev
-        </span>
-        <span className="hidden text-slate-400 dark:text-slate-500 sm:inline">
-          {formatLag(now - activity.lastEventAt)}
-        </span>
-        <AnimatedTokenCount contextIndicator={contextIndicator} />
-        {isActive && (onStopGeneration || onCancelRemote) ? (
-          <div className="flex flex-shrink-0 gap-1">
-            {onStopGeneration ? (
-              <button
-                type="button"
-                onClick={onStopGeneration}
-                className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-              >
-                <StopCircle className="h-3 w-3" />
-                停止
-              </button>
-            ) : null}
-            {onCancelRemote ? (
-              <button
-                type="button"
-                aria-label="取消运行并保留恢复点"
-                title="取消运行并保留最近 checkpoint"
-                onClick={onCancelRemote}
-                className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:text-slate-500 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
-              >
-                <XCircle className="h-3 w-3" />
-                取消
-              </button>
-            ) : null}
-          </div>
-        ) : null}
     </div>
   );
 }
@@ -531,10 +411,10 @@ function MessageAttachments({
 function SystemMessage({ message }: { message: Message }) {
   return (
     <div className="w-full px-0 py-2 sm:px-4">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+      <div className="mx-auto max-w-3xl rounded-xl border border-neutral-200/70 bg-neutral-50/60 px-4 py-3 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900/40 dark:text-neutral-300">
         <div className="flex items-center gap-2 font-medium">
           {message.status === 'running' ? (
-            <RefreshCcw className="h-4 w-4 animate-spin text-amber-600 dark:text-amber-300" />
+            <RefreshCcw className="h-4 w-4 animate-spin text-neutral-600 dark:text-neutral-300" />
           ) : message.status === 'failed' ? (
             <StopCircle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
           ) : (
@@ -543,13 +423,13 @@ function SystemMessage({ message }: { message: Message }) {
           <span>{message.content}</span>
         </div>
         {message.compactedUntilSeqId ? (
-          <div className="mt-1 text-xs text-amber-700/80 dark:text-amber-200/80">
+          <div className="mt-1 text-xs text-neutral-700/80 dark:text-neutral-200/80">
             已折叠到会话事件 #{message.compactedUntilSeqId}
           </div>
         ) : null}
         {message.summary ? (
-          <details className="mt-3 rounded-xl border border-amber-200/80 bg-white/70 px-3 py-2 dark:border-amber-900/60 dark:bg-slate-950/40">
-            <summary className="cursor-pointer select-none text-xs font-medium text-amber-800 dark:text-amber-200">
+          <details className="mt-3 rounded-xl border border-neutral-200/80 bg-white/70 px-3 py-2 dark:border-neutral-900/60 dark:bg-slate-950/40">
+            <summary className="cursor-pointer select-none text-xs font-medium text-neutral-800 dark:text-neutral-200">
               查看压缩摘要
             </summary>
             <div className="mt-2 text-[13px] leading-relaxed text-slate-700 dark:text-slate-200">
@@ -759,6 +639,7 @@ function ChatMessage({
   isMobile,
   isStreaming,
   isLastMessage,
+  showAgentHeader,
   message,
   onDeleteFeedback,
   onOpenAttachmentPreview,
@@ -772,6 +653,7 @@ function ChatMessage({
   isMobile: boolean;
   isStreaming: boolean;
   isLastMessage: boolean;
+  showAgentHeader: boolean;
   message: Message;
   interactionRecords?: readonly Interaction[];
   onDeleteFeedback: (message: Message) => void;
@@ -812,10 +694,12 @@ function ChatMessage({
 
   return (
     <div className="group mx-auto mb-3 w-full max-w-3xl px-6">
-      <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
-        <Bot className="w-3.5 h-3.5" />
-        <span>{agentName}</span>
-      </div>
+      {showAgentHeader ? (
+        <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
+          <Bot className="w-3.5 h-3.5" />
+          <span>{agentName}</span>
+        </div>
+      ) : null}
 
       {message.attachments?.length ? (
         <MessageAttachments
@@ -876,7 +760,7 @@ function ChatMessage({
               className={cn(
                 'group/details mb-2 overflow-hidden rounded-md border text-sm transition-colors',
                 tool.status === 'paused'
-                  ? 'border-amber-200/80 bg-amber-50/25 text-slate-700 dark:border-amber-900/60 dark:bg-amber-950/10 dark:text-slate-200'
+                  ? 'border-neutral-200/80 bg-neutral-50/25 text-slate-700 dark:border-neutral-900/60 dark:bg-neutral-950/10 dark:text-slate-200'
                   : tool.status === 'error'
                     ? 'border-rose-200/80 bg-rose-50/25 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/10 dark:text-rose-200'
                     : 'border-slate-200/80 bg-slate-50/40 text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300',
@@ -887,7 +771,7 @@ function ChatMessage({
                   {tool.status === 'running' ? (
                     <RefreshCcw className="h-4 w-4 animate-spin text-slate-500" />
                   ) : tool.status === 'paused' ? (
-                    <ShieldCheck className="h-4 w-4 text-amber-500" />
+                    <ShieldCheck className="h-4 w-4 text-neutral-500" />
                   ) : tool.status === 'error' ? (
                     <XCircle className="h-4 w-4 text-rose-500" />
                   ) : (
@@ -900,6 +784,8 @@ function ChatMessage({
                         ? '已批准：'
                         : tool.approvalStatus === 'rejected'
                           ? '已拒绝：'
+                          : tool.approvalStatus === 'cancelled'
+                            ? '已取消：'
                       : tool.status === 'error'
                         ? '工具调用失败：'
                         : '工具调用：'}
@@ -911,7 +797,7 @@ function ChatMessage({
                 className={cn(
                   'flex flex-col gap-3 border-t px-3 py-3 font-mono text-[13px] leading-relaxed',
                   tool.status === 'paused'
-                    ? 'border-amber-200/70 dark:border-amber-900/60'
+                    ? 'border-neutral-200/70 dark:border-neutral-900/60'
                     : tool.status === 'error'
                       ? 'border-rose-200/70 dark:border-rose-900/60'
                       : 'border-slate-200/70 dark:border-slate-800',
@@ -924,6 +810,8 @@ function ChatMessage({
                         ? '已批准该工具调用。'
                         : tool.approvalStatus === 'rejected'
                           ? '已拒绝该工具调用。'
+                          : tool.approvalStatus === 'cancelled'
+                            ? '已取消该工具调用。'
                           : tool.approvalMessage || '该工具调用需要人工确认后继续。'}
                     </div>
                     {tool.approvalLevel ? (
@@ -935,7 +823,7 @@ function ChatMessage({
                       </div>
                     ) : null}
                     {tool.serverLabel ? (
-                      <div className="mt-1 text-xs text-amber-700/80 dark:text-amber-200/80">
+                      <div className="mt-1 text-xs text-neutral-700/80 dark:text-neutral-200/80">
                         MCP Server: {tool.serverLabel}
                       </div>
                     ) : null}
@@ -989,7 +877,11 @@ function ChatMessage({
                         ) : (
                           <XCircle className="h-3.5 w-3.5 text-rose-500" />
                         )}
-                        {tool.approvalStatus === 'approved' ? '已批准' : '已拒绝'}
+                        {tool.approvalStatus === 'approved'
+                          ? '已批准'
+                          : tool.approvalStatus === 'cancelled'
+                            ? '已取消'
+                            : '已拒绝'}
                       </div>
                     )}
                   </div>
@@ -1029,8 +921,11 @@ function ChatMessage({
       <div className="w-full break-words">
         {message.content ? (
           <MessageMarkdown content={message.content} />
-        ) : isStreaming && isLastMessage && !message.reasoning && !message.tools ? (
-          <span className="ml-1 mt-2 inline-block h-4 w-2 animate-pulse rounded-sm bg-emerald-500 align-middle opacity-80 shadow-sm" />
+        ) : (isStreaming && isLastMessage && !message.reasoning && !message.tools)
+          || message.eventType === 'optimistic_assistant_placeholder' ? (
+          <span className="relative mt-1 inline-flex h-4 w-4 items-center justify-center" role="status" aria-label="正在生成">
+            <span className="waiting-generation-breathe h-2.5 w-2.5 rounded-full" />
+          </span>
         ) : null}
       </div>
         </>
@@ -1058,6 +953,7 @@ function ChatMessage({
 
 export function ChatMessageList({
   agentName,
+  emptyState,
   isMobile,
   isStreaming,
   activity,
@@ -1072,17 +968,27 @@ export function ChatMessageList({
   onSubmitAguiAction,
   onStopGeneration,
   onCancelRemote,
+  onScrollToBottom,
   checkpoints = [],
   onResumeCheckpoint,
   interactionRecords,
   scrollRef,
+  className,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
   void checkpoints;
   void onResumeCheckpoint;
   void CheckpointPanel;
+  // Retain the shared component props for 0.3.x consumers. Runtime progress
+  // belongs to the last assistant message, while token usage and stop controls
+  // are already rendered by ChatComposer.
+  void activity;
+  void contextIndicator;
+  void onStopGeneration;
+  void onCancelRemote;
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [scrollHeight, setScrollHeight] = useState(0);
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
   const measuredHeightsRef = useRef(measuredHeights);
 
@@ -1093,6 +999,7 @@ export function ChatMessageList({
     const syncViewport = () => {
       setScrollTop(scroller.scrollTop);
       setViewportHeight(scroller.clientHeight);
+      setScrollHeight(scroller.scrollHeight);
     };
 
     syncViewport();
@@ -1103,6 +1010,9 @@ export function ChatMessageList({
 
     const resizeObserver = new ResizeObserver(() => syncViewport());
     resizeObserver.observe(scroller);
+    if (scroller.firstElementChild instanceof HTMLElement) {
+      resizeObserver.observe(scroller.firstElementChild);
+    }
     return () => resizeObserver.disconnect();
   }, [scrollRef]);
 
@@ -1138,23 +1048,37 @@ export function ChatMessageList({
     if (scroller && top < scroller.scrollTop) {
       scroller.scrollTop += height - previousHeight;
       setScrollTop(scroller.scrollTop);
+      setScrollHeight(scroller.scrollHeight);
     }
   }, [scrollRef]);
+
+  const remainingDistance = distanceFromBottom({ scrollHeight, scrollTop, clientHeight: viewportHeight });
+  const showScrollToBottom = shouldShowScrollToBottom({
+    scrollHeight,
+    scrollTop,
+    clientHeight: viewportHeight,
+  });
 
   return (
     <div
       ref={scrollRef}
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => {
+        setScrollTop(event.currentTarget.scrollTop);
+        setViewportHeight(event.currentTarget.clientHeight);
+        setScrollHeight(event.currentTarget.scrollHeight);
+      }}
       className={cn(
         'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
+        className,
       )}
+      data-slot="message-list"
     >
-      <div className={cn('mx-auto flex w-full max-w-[64rem] flex-col', activity ? 'pb-10 sm:pb-10' : 'pb-6 sm:pb-8')}>
+      <div className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
         ) : messages.length === 0 ? (
-        <EmptyState agentName={agentName} />
+        emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <div style={{ height: virtualWindow.totalHeight }} className="relative">
             {visibleItems.map((entry) => (
@@ -1172,11 +1096,12 @@ export function ChatMessageList({
                     isMobile={isMobile}
                     isStreaming={isStreaming}
                     isLastMessage={entry.index === messages.length - 1}
+                    showAgentHeader={!continuesAssistantTurn(messages[entry.index - 1], entry.item)}
                     message={entry.item}
                     onDeleteFeedback={onDeleteFeedback}
                     onOpenAttachmentPreview={onOpenAttachmentPreview}
                     onRespondToApproval={onRespondToApproval}
-          interactionRecords={interactionRecords}
+                    interactionRecords={interactionRecords}
                     onRespondToAguiApproval={onRespondToAguiApproval}
                     onSubmitFeedback={onSubmitFeedback}
                     onSubmitAguiAction={onSubmitAguiAction}
@@ -1188,29 +1113,36 @@ export function ChatMessageList({
         )}
       </div>
       <StatusBanner />
-      {/* wework 风格:滚走后显示回到底部圆钮 */}
-      {scrollTop > 320 ? (
+      {showScrollToBottom ? (
         <button
           type="button"
+          aria-label="回到底部"
+          data-distance-from-bottom={Math.round(remainingDistance)}
           onClick={() => {
+            if (onScrollToBottom) {
+              onScrollToBottom();
+              return;
+            }
             const scroller = scrollRef.current;
-            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
           }}
           className="sticky bottom-4 left-1/2 z-20 mx-auto flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
           title="回到底部"
         >
-          <ArrowDown className="h-4 w-4" />
+          {isStreaming ? (
+            <span aria-hidden="true" className="flex items-center gap-0.5" data-scroll-indicator="streaming">
+              {[0, 1, 2].map((index) => (
+                <span
+                  key={index}
+                  className="h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none"
+                  style={{ animationDelay: `${index * 120}ms` }}
+                />
+              ))}
+            </span>
+          ) : (
+            <ChevronDown aria-hidden="true" className="h-5 w-5" data-scroll-indicator="idle" />
+          )}
         </button>
-      ) : null}
-      {activity ? (
-        <div className="sticky bottom-1 z-20 mx-auto flex w-full max-w-[64rem] justify-end">
-          <RunActivityBanner
-            activity={activity}
-            contextIndicator={contextIndicator}
-            onStopGeneration={onStopGeneration}
-            onCancelRemote={onCancelRemote}
-          />
-        </div>
       ) : null}
     </div>
   );

@@ -7,7 +7,9 @@ import type {
   RefObject,
 } from 'react';
 
-import { ArrowUp, Paperclip, Square } from 'lucide-react';
+import { useState } from 'react';
+
+import { ArrowUp, FileText, Paperclip, Square } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useModelStore } from '@/stores/model.js';
@@ -22,7 +24,8 @@ import { ModelSettingsMenu } from './ModelSettingsMenu';
 import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
-type ChatComposerProps = {
+export type ChatComposerProps = {
+  onCompactContext?: () => Promise<void>;
   attachments: File[];
   composerContextIndicator: ComposerContextIndicator;
   composerMaxHeight: number;
@@ -46,9 +49,11 @@ type ChatComposerProps = {
   onCancelRemote?: () => void;
   onSubmit: (text: string, attachments: File[]) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  className?: string;
 };
 
 export function ChatComposer({
+  onCompactContext,
   attachments,
   composerContextIndicator,
   composerMaxHeight,
@@ -72,7 +77,13 @@ export function ChatComposer({
   onCancelRemote,
   onSubmit,
   textareaRef,
+  className,
 }: ChatComposerProps) {
+  const [isCompacting, setIsCompacting] = useState(false);
+  const compactContext = onCompactContext ? async () => {
+    setIsCompacting(true);
+    try { await onCompactContext(); } finally { setIsCompacting(false); }
+  } : undefined;
   const placeholderText = executionMode === 'goal'
     ? '描述需要持续完成的目标…'
     : executionMode === 'plan'
@@ -106,6 +117,7 @@ export function ChatComposer({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isCompacting) return;
     if (isStreaming) {
       if (onCancelRemote) {
         onCancelRemote();
@@ -127,13 +139,22 @@ export function ChatComposer({
   };
 
   return (
-    <div className="relative z-10 flex-shrink-0 bg-background/95 px-3 py-3 backdrop-blur sm:px-4 sm:py-3">
+    <div
+      className={cn('relative z-10 flex-shrink-0 bg-background/95 px-3 py-3 backdrop-blur sm:px-4 sm:py-3', className)}
+      data-slot="composer"
+    >
       <div className="mx-auto w-full max-w-[64rem]">
+        {isCompacting && (
+          <div role="status" className="mb-3 flex items-center gap-2 px-2 text-sm text-text-muted">
+            <FileText size={16} aria-hidden="true" />
+            <span className="waiting-thinking-text">正在压缩上下文</span>
+          </div>
+        )}
         {queuedDrafts.length > 0 ? (
-          <div className="mb-2 rounded-2xl border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="mb-2 rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2 text-xs text-neutral-900 shadow-sm dark:border-neutral-900/60 dark:bg-neutral-950/30 dark:text-neutral-100">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="font-semibold">发送队列 · {queuedDrafts.length}</span>
-              <span className="text-amber-700/75 dark:text-amber-200/75">当前回复完成后依次发送</span>
+              <span className="text-neutral-700/75 dark:text-neutral-200/75">当前回复完成后依次发送</span>
             </div>
             <div className="flex flex-col gap-1">
               {queuedDrafts.slice(0, 3).map((draft, index) => {
@@ -143,14 +164,14 @@ export function ChatComposer({
                     key={`${index}-${preview}-${draft.attachments.length}`}
                     className="flex items-center gap-2 rounded-xl bg-background/70 px-2 py-1.5"
                   >
-                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-[10px] text-amber-700 dark:bg-amber-900/50 dark:text-amber-100">
+                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-neutral-100 font-mono text-[10px] text-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-100">
                       {index + 1}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-text-secondary">
                       {preview}
                     </span>
                     {draft.attachments.length > 0 ? (
-                      <span className="flex-shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/50 dark:text-amber-100">
+                      <span className="flex-shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] text-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-100">
                         {draft.attachments.length} 附件
                       </span>
                     ) : null}
@@ -158,7 +179,7 @@ export function ChatComposer({
                 );
               })}
               {queuedDrafts.length > 3 ? (
-                <div className="px-2 pt-0.5 text-[11px] text-amber-700/80 dark:text-amber-200/80">
+                <div className="px-2 pt-0.5 text-[11px] text-neutral-700/80 dark:text-neutral-200/80">
                   还有 {queuedDrafts.length - 3} 条等待发送
                 </div>
               ) : null}
@@ -248,7 +269,7 @@ export function ChatComposer({
                 </div>
 
                 <div className="flex min-w-0 items-center gap-1.5">
-                  {composerContextIndicator ? <ContextUsageIndicator indicator={composerContextIndicator} /> : null}
+                  {composerContextIndicator ? <ContextUsageIndicator indicator={composerContextIndicator} onCompact={compactContext} disabled={isStreaming} /> : null}
 
                   {availableModels.length > 0 ? (
                     <ModelSettingsMenu
@@ -263,7 +284,7 @@ export function ChatComposer({
 
                   <button
                     type="submit"
-                    disabled={!isStreaming && !canSubmit}
+                    disabled={isCompacting || (!isStreaming && !canSubmit)}
                     className={cn(
                       'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
                       isStreaming

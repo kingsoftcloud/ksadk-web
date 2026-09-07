@@ -40,11 +40,16 @@ describe('ChatComposer interaction contract', () => {
     expect(composerSource).toContain('<ModelSettingsMenu');
     expect(composerSource).toContain("'flex h-9 w-9 shrink-0 items-center justify-center rounded-full");
     expect(modelMenuSource).not.toContain('<select');
-    expect(modelMenuSource).toContain('rounded-xl bg-muted/80');
-    expect(modelMenuSource).toContain("type SettingsPanel = 'model' | 'reasoning'");
+    expect(modelMenuSource).toContain('var(--ksadk-menu-trigger-background');
+    expect(modelMenuSource).toContain('var(--ksadk-menu-background');
+    expect(modelMenuSource).not.toContain("type SettingsPanel = 'model' | 'reasoning'");
+    expect(modelMenuSource).toContain('role="menuitemradio"');
+    expect(modelMenuSource).toContain("<span className=\"text-[11px] font-medium text-text-muted\">推理</span>");
     expect(permissionSource).toContain("value: 'ask'");
     expect(permissionSource).toContain("value: 'risk'");
     expect(permissionSource).toContain("value: 'full'");
+    expect(permissionSource).toContain("'flex h-10 w-full items-center");
+    expect(permissionSource).not.toContain('本次会话的默认审批规则</div>');
   });
 
   it('hides unsupported controls and never sends unsupported thinking options', () => {
@@ -58,7 +63,7 @@ describe('ChatComposer interaction contract', () => {
     expect(runSource).toContain("thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto'");
   });
 
-  it('shows goal and plan only from explicit typed runtime capabilities', () => {
+  it('shows goal and plan from typed runtime capabilities', () => {
     const appSource = readSource('App.tsx');
     const composerSource = readSource('components/chat/ChatComposer.tsx');
     const actionMenuSource = readSource('components/chat/ExecutionModeMenu.tsx');
@@ -69,6 +74,7 @@ describe('ChatComposer interaction contract', () => {
     expect(actionMenuSource).not.toContain('Agent Loop');
     expect(actionMenuSource).toContain('计划模式');
     expect(actionMenuSource).toContain('设定目标');
+    expect(actionMenuSource).toContain('--ksadk-popover');
     expect(actionMenuSource).not.toContain('速度');
     expect(runSource).toContain('goal_objective');
     expect(runSource).toContain('collaboration_mode');

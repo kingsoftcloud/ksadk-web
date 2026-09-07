@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.5 - 2026-09-07
+
+- Add an instance-scoped `AgentEngineClient` and `ApiFacadeImpl` so Studio and
+  other embedded hosts can inject their authenticated fetch function and bind
+  every action, stream, upload, and replay request to one Agent without global
+  fetch mutation or cookie-based target selection.
+- Export `useAgentChat`, `AgentConversationTimeline`, and
+  `AgentConversationComposer` as the shared conversation composition layer.
+  Local Studio Agents, Studio cloud Agents, remote LangGraph deployments, and
+  Hosted UI now reuse the same session replay, streaming, reasoning, approval,
+  HITL, and composer behavior while keeping their own outer product shell.
+- Export fine-grained message, processing, interaction, Markdown, attachment,
+  and composer controls. The main composition surfaces accept `className` and
+  expose stable `data-slot` selectors for consumer styling.
+- Scope the library stylesheet under `.ksadk-web` and remove document-level
+  resets from the embeddable CSS entrypoint, allowing consumer theme variables
+  and later CSS rules to override the shared defaults safely.
+- Preserve historical Hosted Agents through the existing capability-driven
+  transport negotiation: canonical Conversation v1 is used when advertised,
+  while a missing surface keeps the Responses / AG-UI compatibility path.
+
+- Restore paginated durable conversation history, native tool results and question answers across refreshes.
+- Show runtime context usage with model-catalog window metadata, hover and click disclosure, and manual compaction progress.
+- Use neutral cancellation and waiting surfaces, visible thinking animations, and host-provided welcome content.
+
 ## 0.3.4 - 2026-08-31
 
 - Normalize the real RuntimeEvent/v2 wire shape before presentation: consume

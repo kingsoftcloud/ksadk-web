@@ -250,7 +250,7 @@ test('approve sends exactly one SubmitInteraction and replay never resubmits', a
   await page.reload();
   const tray = page.getByTestId('interaction-tray');
   await expect(tray).toBeVisible();
-  await expect(page.getByTestId('interaction-tray-title')).toHaveText('人工确认');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('问题');
   expect(state.submits).toHaveLength(0);
 
   // Double click: exactly one submit leaves the client.
@@ -353,7 +353,7 @@ test('structured form submits the full response payload', async ({ page }) => {
 
   await page.reload();
   await expect(page.getByTestId('interaction-schema-form')).toBeVisible();
-  await page.getByTestId('interaction-field-deploy_target').selectOption('online');
+  await page.getByRole('radio', { name: '2 online', exact: true }).check();
   await page.getByTestId('interaction-field-note').fill('发布 0.3.2');
   await page.getByTestId('interaction-submit').click();
 
@@ -453,6 +453,7 @@ test('unknown A2UI wire version falls back safely and never approves', async ({ 
     events: () => [
       requestedEvent({
         interactionId: 'int-a2ui',
+        kind: 'structured_input',
         presentation: {
           a2ui: {
             wire_version: '1.0',
@@ -514,15 +515,16 @@ test('multiple pending interactions queue in one tray with count badge and switc
   const trays = page.getByTestId('interaction-tray');
   await expect(trays).toHaveCount(1);
   await expect(trays).toHaveAttribute('data-interaction-count', '2');
-  await expect(page.getByTestId('interaction-tray-count')).toHaveText('1/2');
-  await expect(page.getByTestId('interaction-tray-title')).toHaveText('删除文件');
+  await expect(page.getByTestId('interaction-tray-count')).toHaveText('1 of 2');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('问题');
+  await expect(page.getByText('确认删除 demo.txt？')).toBeVisible();
   // Only the current item's action buttons are rendered.
   await expect(page.getByTestId('interaction-approve')).toHaveCount(1);
 
   // Switch to the second item.
   await page.getByTestId('interaction-tray-next').click();
-  await expect(page.getByTestId('interaction-tray-count')).toHaveText('2/2');
-  await expect(page.getByTestId('interaction-tray-title')).toHaveText('执行命令');
+  await expect(page.getByTestId('interaction-tray-count')).toHaveText('2 of 2');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('问题');
   await expect(page.getByTestId('interaction-tray-prev')).toBeEnabled();
   await expect(page.getByTestId('interaction-tray-next')).toBeDisabled();
 });
@@ -676,4 +678,37 @@ test('legacy capabilities do not expose Runtime v2 execution controls', async ({
   await expect(page.getByText('Agent Loop')).toHaveCount(0);
   await expect(page.getByText('计划模式')).toHaveCount(0);
   await expect(page.getByText('设定目标')).toHaveCount(0);
+});
+
+test('native multi-select preserves custom feedback and Enter never submits an empty answer', async ({ page }) => {
+  const state = {
+    submits: [], resolvedIds: new Set(), sessionCreated: false,
+    events: () => [requestedEvent({
+      interactionId: 'native-question', kind: 'structured_input',
+      requestSchema: {
+        type: 'object', required: ['scope'], properties: {
+          scope: { type: 'array', title: '范围', description: '请选择检查范围',
+            items: { type: 'string' }, minItems: 1,
+            'x-codex-is-other': true,
+            'x-codex-options': [{ label: '前端' }, { label: '服务端' }],
+          },
+        },
+      },
+    })],
+  };
+  await installFixture(page, state);
+  await createSession(page);
+  await page.reload();
+  await expect(page.getByTestId('interaction-schema-form')).toBeVisible();
+  await page.getByTestId('interaction-submit').click();
+  expect(state.submits).toHaveLength(0);
+  await page.getByRole('checkbox', { name: /前端/ }).check();
+  await page.getByRole('checkbox', { name: /服务端/ }).check();
+  const custom = page.getByRole('textbox', { name: '范围：自定义回答' });
+  await custom.fill('请改成 echo 你好');
+  await page.screenshot({ path: '/tmp/studio-native-question-card.png' });
+  await custom.press('Enter');
+  await expect.poll(() => state.submits.length).toBe(1);
+  expect(state.submits[0].Action).toBe('submit');
+  expect(state.submits[0].Response).toEqual({ scope: ['前端', '服务端', '请改成 echo 你好'] });
 });

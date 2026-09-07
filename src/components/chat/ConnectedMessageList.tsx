@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useMessageStore } from '../../stores/message.js';
@@ -16,8 +16,10 @@ import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 
-type ConnectedMessageListProps = {
+export type ConnectedMessageListProps = {
   agentName: string;
+  /** Replace the welcome surface without replacing the conversation renderer. */
+  emptyState?: ReactNode;
   isMobile: boolean;
   onDeleteFeedback: (message: Message) => void;
   onSubmitFeedback: (options: { message: Message; rating: 'up' | 'down'; comment?: string }) => void;
@@ -30,10 +32,12 @@ type ConnectedMessageListProps = {
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
   interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
+  className?: string;
 };
 
 export function ConnectedMessageList({
   agentName,
+  emptyState,
   isMobile,
   onDeleteFeedback,
   onSubmitFeedback,
@@ -46,6 +50,7 @@ export function ConnectedMessageList({
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
   interactionRecords,
+  className,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -70,6 +75,7 @@ export function ConnectedMessageList({
   const loadingOlderRef = useRef(false);
   const olderLoadTokenRef = useRef<symbol | null>(null);
   const needsInitialScrollRef = useRef(true);
+  const previousLastMessageIdRef = useRef('');
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -83,6 +89,33 @@ export function ConnectedMessageList({
       }) as ComposerContextIndicator,
     [input, messages, selectedModelMetadata],
   );
+
+  const scrollToBottom = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    stickToBottomRef.current = true;
+    userDetachedFromBottomRef.current = false;
+    const previousScrollBehavior = node.style.scrollBehavior;
+    node.style.scrollBehavior = 'auto';
+    let frameCount = 0;
+    let stableCount = 0;
+    let lastScrollHeight = -1;
+    const pin = () => {
+      if (scrollRef.current !== node) return;
+      node.scrollTop = node.scrollHeight;
+      previousScrollTopRef.current = node.scrollTop;
+      node.dispatchEvent(new Event('scroll'));
+      stableCount = node.scrollHeight === lastScrollHeight ? stableCount + 1 : 0;
+      lastScrollHeight = node.scrollHeight;
+      frameCount += 1;
+      if (stableCount >= 3 || frameCount >= 12) {
+        node.style.scrollBehavior = previousScrollBehavior;
+        return;
+      }
+      requestAnimationFrame(pin);
+    };
+    pin();
+  }, []);
 
   useEffect(() => {
     isStreamingRef.current = isStreaming;
@@ -100,7 +133,24 @@ export function ConnectedMessageList({
     previousScrollTopRef.current = 0;
     loadingOlderRef.current = false;
     olderLoadTokenRef.current = null;
+    previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
+
+  // Sending a new user turn always returns the viewport to the live edge.
+  // This is an explicit user action, so it overrides a previous manual
+  // detachment and makes the jump indicator disappear immediately.
+  useEffect(() => {
+    const lastMessage = messages.at(-1);
+    const previousId = previousLastMessageIdRef.current;
+    previousLastMessageIdRef.current = String(lastMessage?.id || '');
+    if (
+      lastMessage?.role === 'user'
+      && lastMessage.id !== previousId
+      && !needsInitialScrollRef.current
+    ) {
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -113,6 +163,8 @@ export function ConnectedMessageList({
       previousScrollTopRef.current = scroller.scrollTop;
 
       if (
+        !needsInitialScrollRef.current &&
+        scrolledUp &&
         scroller.scrollTop < 200 &&
         currentSessionId &&
         currentMessageHistory?.hasMore &&
@@ -178,6 +230,28 @@ export function ConnectedMessageList({
 
   useEffect(() => {
     const scroller = scrollRef.current;
+    if (!scroller || typeof ResizeObserver === 'undefined') return undefined;
+
+    // Markdown, virtual row measurement and async code highlighting can grow
+    // the content after the initial message render. Keep following that growth
+    // only while the reader is attached to the bottom; a manual upward scroll
+    // flips stickToBottomRef and leaves the viewport alone.
+    const keepAttachedToBottom = () => {
+      if (!needsInitialScrollRef.current && !stickToBottomRef.current) return;
+      scroller.scrollTop = scroller.scrollHeight;
+      previousScrollTopRef.current = scroller.scrollTop;
+      scroller.dispatchEvent(new Event('scroll'));
+    };
+    const observer = new ResizeObserver(keepAttachedToBottom);
+    observer.observe(scroller);
+    if (scroller.firstElementChild instanceof HTMLElement) {
+      observer.observe(scroller.firstElementChild);
+    }
+    return () => observer.disconnect();
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
     if (!scroller) return;
 
     // Initial session load: bypass the stickiness gate. The gate is unreliable
@@ -185,8 +259,8 @@ export function ConnectedMessageList({
     // against the freshly-injected history's large scrollHeight, flips
     // stickToBottomRef to false before this effect can scroll. Virtualization
     // also means scrollHeight grows across frames as off-screen rows are
-    // measured, so we pin to bottom on every scrollHeight change via
-    // ResizeObserver until it stabilizes (or a 2s timeout elapses).
+    // measured, so we pin to bottom on every scrollHeight change until it
+    // stabilizes (or a 2s timeout elapses).
     if (messages.length > 0 && needsInitialScrollRef.current) {
       const sessionAtStart = useSessionStore.getState().currentSessionId;
       const node = scrollRef.current;
@@ -203,9 +277,21 @@ export function ConnectedMessageList({
       let lastScrollHeight = node?.scrollHeight ?? -1;
       let finished = false;
       let pendingRaf = 0;
+      const pinToBottom = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+        previousScrollTopRef.current = el.scrollTop;
+        // Programmatic scrollTop updates are not guaranteed to dispatch a
+        // scroll event before React reads ChatMessageList's viewport state.
+        // Dispatch one explicitly so the bottom-arrow calculation observes
+        // the same final position as the stickiness controller.
+        el.dispatchEvent(new Event('scroll'));
+      };
       const finish = () => {
         if (finished) return;
         finished = true;
+        pinToBottom();
         if (node) node.style.scrollBehavior = prevScrollBehavior;
         stickToBottomRef.current = true;
         userDetachedFromBottomRef.current = false;
@@ -221,8 +307,7 @@ export function ConnectedMessageList({
         if (!el) return;
         if (el.scrollHeight !== lastScrollHeight) {
           lastScrollHeight = el.scrollHeight;
-          el.scrollTop = el.scrollHeight;
-          previousScrollTopRef.current = el.scrollTop;
+          pinToBottom();
           stableCount = 0;
         } else {
           stableCount += 1;
@@ -240,7 +325,15 @@ export function ConnectedMessageList({
       return () => {
         cancelAnimationFrame(pendingRaf);
         window.clearTimeout(timeoutId);
-        finish();
+        if (useSessionStore.getState().currentSessionId !== sessionAtStart) {
+          finish();
+          return;
+        }
+        // The durable message fallback is replaced by canonical RuntimeEvent
+        // history shortly after a cold switch. Keep the initial-pin intent
+        // alive across that same-session effect restart; otherwise cleanup
+        // marks the list settled before virtual rows finish measuring.
+        if (node) node.style.scrollBehavior = prevScrollBehavior;
       };
     }
 
@@ -262,6 +355,7 @@ export function ConnectedMessageList({
   return (
     <>
       <ChatMessageList
+        emptyState={emptyState}
         agentName={agentName}
         isMobile={isMobile}
         isStreaming={isStreaming}
@@ -274,6 +368,7 @@ export function ConnectedMessageList({
         onRespondToApproval={onRespondToApproval}
         onRespondToAguiApproval={onRespondToAguiApproval}
         interactionRecords={interactionRecords}
+        onScrollToBottom={scrollToBottom}
         onSubmitFeedback={onSubmitFeedback}
         onSubmitAguiAction={onSubmitAguiAction}
         onStopGeneration={onStopGeneration}
@@ -281,6 +376,7 @@ export function ConnectedMessageList({
         checkpoints={checkpointResumeEnabled ? checkpoints : []}
         onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}
+        className={className}
       />
       <AttachmentPreview
         attachment={previewAttachment}

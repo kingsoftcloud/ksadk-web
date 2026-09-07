@@ -164,6 +164,9 @@ function normalizeRuntimeSessionEvents(events) {
 
 export function sessionEventRunStatus(event) {
   const eventType = String(event?.EventType || '').trim();
+  // Tool/item completion is not a terminal run. In particular, a parallel
+  // command may finish while an MCP approval is still waiting for the user.
+  if (eventType !== 'run_status' && !eventType.startsWith('run.')) return '';
   const payload = runtimePayload(event);
   return String(
     event?.Content?.status
@@ -499,8 +502,15 @@ function toolMessageFromSessionEvent(event) {
       || textFromUnknown(event.Content?.parts)
       || 'tool',
   ).trim() || 'tool';
+  const callId = String(
+    event.Metadata?.call_id
+      || event.Metadata?.callId
+      || event.Metadata?.RuntimeItem?.ToolCallId
+      || '',
+  ).trim();
   const existing = {
     name,
+    ...(callId ? { callId } : {}),
     args: '',
     status: 'running',
   };
@@ -865,7 +875,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     }
   };
 
-  const takePendingTools = (invocationId) => {
+  const takePendingTools = (invocationId, fallbackRunStatus = '') => {
     const normalizedInvocationId = String(invocationId || '').trim();
     if (!normalizedInvocationId) {
       return {};
@@ -878,7 +888,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     return {
       tools: settleToolMapsForRunStatus(
         pendingTools.tools,
-        latestRunStatusByInvocation.get(normalizedInvocationId),
+        latestRunStatusByInvocation.get(normalizedInvocationId) || fallbackRunStatus,
       ),
     };
   };
@@ -971,7 +981,10 @@ export function buildMessagesFromSessionEvents(events = []) {
       }
       pushMessage({
         ...message,
-        ...takePendingTools(invocationId),
+        ...takePendingTools(
+          invocationId,
+          message.eventType === 'assistant_message' ? 'completed' : '',
+        ),
         reasoning: mergeReasoningText(pendingReasoning.reasoning, message.reasoning),
       });
       pendingReasoning = null;
@@ -989,7 +1002,10 @@ export function buildMessagesFromSessionEvents(events = []) {
       }
       pushMessage({
         ...message,
-        ...takePendingTools(invocationId),
+        ...takePendingTools(
+          invocationId,
+          message.eventType === 'assistant_message' ? 'completed' : '',
+        ),
       });
       continue;
     }

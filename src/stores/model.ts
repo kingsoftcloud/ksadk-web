@@ -17,6 +17,7 @@ export type ModelActions = {
   setModelSource: (source: string) => void;
   setModelCatalogLoaded: (loaded: boolean) => void;
   setThinkingMode: (mode: ThinkingMode) => void;
+  resetCatalog: () => void;
 };
 
 function upsertModelOptions(current: ModelCatalogItem[], incoming: ModelCatalogItem[]): ModelCatalogItem[] {
@@ -46,4 +47,10 @@ export const useModelStore = create<ModelStore>()((set) => ({
   setModelSource: (source) => set({ modelSource: source }),
   setModelCatalogLoaded: (loaded) => set({ modelCatalogLoaded: loaded }),
   setThinkingMode: (mode) => set({ thinkingMode: mode }),
+  resetCatalog: () => set({
+    availableModels: [],
+    selectedModel: '',
+    modelSource: '',
+    modelCatalogLoaded: false,
+  }),
 }));

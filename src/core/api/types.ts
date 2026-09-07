@@ -1,4 +1,5 @@
 export interface ApiFacade {
+  compactSession?(agentId: string, sessionId: string): Promise<{ Status: string }>;
   // Session
   listSessions(agentId: string, opts?: { page?: number; pageSize?: number; signal?: AbortSignal }): Promise<{
     Sessions: unknown[];
@@ -93,7 +94,7 @@ export interface ApiFacade {
 
   // Models & Bootstrap
   listAgentModels(agentId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
-  getAgentUiBootstrap(opts?: { signal?: AbortSignal }): Promise<unknown>;
+  getAgentUiBootstrap(agentId?: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
 
   // Upload
   uploadFile(formData: FormData, opts?: { signal?: AbortSignal }): Promise<{ FileData: { fileUri: string; displayName: string; mimeType: string } }>;

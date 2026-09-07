@@ -54,3 +54,16 @@ export function normalizeA2uiOperations(
     };
   });
 }
+
+/** Read-only recovery for the retired Codex question form, absent from basicCatalog. */
+export function legacyQuestionSummary(operations: Array<Record<string, unknown>>): string[] | null {
+  for (const operation of operations) {
+    const update = operation.updateComponents as { components?: Array<Record<string, unknown>> } | undefined;
+    const components = update?.components;
+    if (!Array.isArray(components) || !components.some((item) => item.component === 'Form' && item.id === 'form')) continue;
+    const questions = components.filter((item) => item.component === 'MultipleChoice');
+    if (!questions.length) continue;
+    return questions.map((question) => String(question.description || question.label || question.id));
+  }
+  return null;
+}

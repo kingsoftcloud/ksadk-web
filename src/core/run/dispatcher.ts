@@ -10,6 +10,7 @@ import {
 import { useMessageStore } from '../../stores/message.js';
 import {
   ingestApprovalRequestedEvent,
+  ingestApprovalResolvedEvent,
   ingestSessionEventRecord,
 } from '../interaction/index.js';
 import { useStreamingStore } from '../../stores/streaming.js';
@@ -30,6 +31,19 @@ import {
 } from '../conversation/hosted.js';
 import { sharedInteractionStore } from '../interaction/index.js';
 
+const DEFAULT_RUN_ERROR_MESSAGE = '连接断开或生成出错，请重试';
+
+function userFacingRunError(error: Error): string {
+  const message = String(error.message || '').trim();
+  if (/runtime agent kernel is not ready/i.test(message)) {
+    return '云端运行时尚未就绪，请检查部署状态后重试';
+  }
+  if (!message || /failed to fetch|networkerror/i.test(message)) {
+    return DEFAULT_RUN_ERROR_MESSAGE;
+  }
+  return message.length <= 240 ? message : DEFAULT_RUN_ERROR_MESSAGE;
+}
+
 const TERMINAL_COMPLETE_STATUSES = new Set(['completed']);
 const TERMINAL_ERROR_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled', 'aborted', 'incomplete']);
 
@@ -42,11 +56,32 @@ function ensureAssistantMessage(id: string, invocationId?: string) {
         ? prev.map((message) => message.id === id ? { ...message, invocationId } : message)
         : prev;
     }
+    let optimisticIndex = -1;
+    for (let index = prev.length - 1; index >= 0; index -= 1) {
+      if (prev[index]?.eventType === 'optimistic_assistant_placeholder') {
+        optimisticIndex = index;
+        break;
+      }
+    }
+    if (optimisticIndex >= 0) {
+      return prev.map((message, index) => index === optimisticIndex
+        ? {
+            ...message,
+            id,
+            eventType: undefined,
+            invocationId,
+          }
+        : message);
+    }
     return [
       ...prev,
       { id, role: 'model', content: '', timestamp: Date.now(), reasoning: '', invocationId },
     ];
   });
+}
+
+function removeOptimisticAssistantMessages(messages: Message[]): Message[] {
+  return messages.filter((message) => message.eventType !== 'optimistic_assistant_placeholder');
 }
 
 function settleRunningToolsForTerminalStatus(status: string) {
@@ -194,11 +229,13 @@ export function dispatchRunEventToStores(event: RunEvent) {
           if (msg.id !== event.messageId) return msg;
           const current = msg.tools?.[event.name];
           const currentApprovalResolved = current?.approvalStatus === 'approved'
-            || current?.approvalStatus === 'rejected';
+            || current?.approvalStatus === 'rejected'
+            || current?.approvalStatus === 'cancelled';
           const requestedStatus = event.status as NonNullable<Message['tools']>[string]['status'];
           // Approval is an audit state, not the tool outcome. A granted tool
           // still needs to enter running and may subsequently fail.
           const status = current?.approvalStatus === 'rejected'
+            || current?.approvalStatus === 'cancelled'
             ? 'completed'
             : current?.status === 'error' && requestedStatus !== 'error'
               ? 'error'
@@ -260,6 +297,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ingestApprovalRequestedEvent({
         approvalRequestId: event.approvalRequestId,
         protocol: event.protocol,
+        runId: event.runId,
         name: event.name,
         message: event.message,
         args: event.args,
@@ -271,7 +309,8 @@ export function dispatchRunEventToStores(event: RunEvent) {
           if (msg.id !== event.messageId) return msg;
           const existing = msg.tools?.[event.approvalRequestId];
           const alreadyResolved = existing?.approvalStatus === 'approved'
-            || existing?.approvalStatus === 'rejected';
+            || existing?.approvalStatus === 'rejected'
+            || existing?.approvalStatus === 'cancelled';
           const approvalExtra = {
             approvalRequestId: event.approvalRequestId,
             approvalProtocol: event.protocol,
@@ -305,6 +344,12 @@ export function dispatchRunEventToStores(event: RunEvent) {
     }
 
     case 'approval_resolved':
+      ingestApprovalResolvedEvent({
+        approvalRequestId: event.approvalRequestId,
+        decision: event.decision,
+        revision: event.revision,
+        sessionId: event.sessionId,
+      });
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (!msg.tools) return msg;
@@ -313,7 +358,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
             Object.entries(msg.tools).map(([key, tool]) => {
               if (tool.approvalRequestId !== event.approvalRequestId) return [key, tool];
               changed = true;
-              const status = event.decision === 'rejected'
+              const status = event.decision === 'rejected' || event.decision === 'cancelled'
                 ? 'completed' as const
                 : tool.status === 'paused'
                   ? 'running' as const
@@ -333,7 +378,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
               if (block.type !== 'tool' || block.extra?.approvalRequestId !== event.approvalRequestId) {
                 return block;
               }
-              const status = event.decision === 'rejected'
+              const status = event.decision === 'rejected' || event.decision === 'cancelled'
                 ? 'completed' as const
                 : block.status === 'paused'
                   ? 'running' as const
@@ -397,7 +442,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
       // thinking 块一直卡在 streaming,显示"思考中"不完成,要刷新才好。
       if (!sessionIsOffscreen) {
         useMessageStore.getState().patchMessages((prev) =>
-          prev.map((msg) => {
+          removeOptimisticAssistantMessages(prev).map((msg) => {
             const belongsToEndedRun = !event.runId
               || msg.runId === event.runId
               || msg.invocationId === event.runId;
@@ -430,31 +475,34 @@ export function dispatchRunEventToStores(event: RunEvent) {
       }, 2400);
       break;
 
-    case 'error':
+    case 'error': {
+      const errorMessage = userFacingRunError(event.error);
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
       useStreamingStore.getState().updateActivity({
         sessionId: event.sessionId,
         status: 'failed',
-        phase: '连接断开或生成出错',
+        phase: '运行失败',
+        detail: errorMessage,
         countEvent: false,
       });
       if (!sessionIsOffscreen) {
         useStreamingStore.getState().setBanner({
           kind: 'error',
-          message: '连接断开或生成出错，请重试',
+          message: errorMessage,
           sessionId: event.sessionId,
         });
         ms.patchMessages((prev) => [
-          ...prev,
+          ...removeOptimisticAssistantMessages(prev),
           {
             id: String(Date.now()),
             role: 'model',
-            content: '连接断开或生成出错。',
+            content: `运行失败：${errorMessage}`,
             timestamp: Date.now(),
           },
         ]);
       }
       break;
+    }
 
     case 'rate_limited':
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
@@ -471,10 +519,22 @@ export function dispatchRunEventToStores(event: RunEvent) {
           retryAfterSec: event.retryAfterSec,
           sessionId: event.sessionId,
         });
+        ms.patchMessages(removeOptimisticAssistantMessages);
       }
       break;
 
     case 'terminal':
+      // Responses uses `response.incomplete` as the expected transport stop
+      // while an approval remains actionable. Expiring the session here makes
+      // the composer card disappear before the user can answer it. Durable
+      // run terminal facts still flow through `ingestSessionEventRecord` and
+      // close the matching interaction by run id.
+      if (
+        event.sessionId
+        && String(event.status || '').trim().toLowerCase() !== 'incomplete'
+      ) {
+        sharedInteractionStore.markSessionTerminal(event.sessionId);
+      }
       if (!sessionIsOffscreen) {
         settleRunningToolsForTerminalStatus(event.status);
       }

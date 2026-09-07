@@ -2,6 +2,8 @@ export { AgentWorkbench } from '../App.js';
 export type { AgentWorkbenchFeatureFlags, AgentWorkbenchProps } from '../App.js';
 export { ApiFacadeImpl } from '../core/api/facade.js';
 export type { ApiFacade } from '../core/api/types.js';
+export { AgentEngineClient } from '../api/client.js';
+export type { AgentEngineClientOptions, AgentEngineFetch } from '../api/client.js';
 export { RunEngineImpl } from '../core/run/engine.js';
 export type { RunEngine, RunEngineConfig, RunEvent, RunStage } from '../core/run/types.js';
 export { createProtocol } from '../core/stream/index.js';

@@ -185,6 +185,64 @@ test('responses stream utils expose standard mcp approval request resume metadat
   );
 });
 
+test('responses stream utils preserve durable interaction identity and resolution', async () => {
+  const responsesStream = await loadResponsesStreamUtils();
+  const state = responsesStream.createResponsesStreamState();
+
+  const requested = responsesStream.normalizeResponsesStreamEvent({
+    eventName: 'response.output_item.added',
+    data: {
+      item: {
+        id: 'approval-1',
+        type: 'mcp_approval_request',
+        name: 'command',
+        arguments: '{"command":"echo safe"}',
+        run_id: 'run-1',
+      },
+    },
+    state,
+  });
+  assert.equal(requested[1].type, 'approval_request');
+  assert.equal(requested[1].approvalRequestId, 'approval-1');
+  assert.equal(requested[1].runId, 'run-1');
+
+  assert.deepEqual(
+    responsesStream.normalizeResponsesStreamEvent({
+      eventName: 'response.ksadk.approval_resolved',
+      data: {
+        approvalRequestId: 'approval-1',
+        decision: 'reject',
+        revision: 2,
+      },
+      state,
+    }),
+    [{
+      type: 'approval_resolved',
+      approvalRequestId: 'approval-1',
+      decision: 'rejected',
+      revision: 2,
+    }],
+  );
+
+  assert.deepEqual(
+    responsesStream.normalizeResponsesStreamEvent({
+      eventName: 'response.ksadk.approval_resolved',
+      data: {
+        approvalRequestId: 'approval-1',
+        decision: 'cancel',
+        revision: 3,
+      },
+      state,
+    }),
+    [{
+      type: 'approval_resolved',
+      approvalRequestId: 'approval-1',
+      decision: 'cancelled',
+      revision: 3,
+    }],
+  );
+});
+
 test('responses stream utils project wrapped LangGraph HITL interrupts immediately', async () => {
   const responsesStream = await loadResponsesStreamUtils();
   assert.ok(responsesStream, 'expected Responses stream helpers to exist');
@@ -299,6 +357,44 @@ test('responses stream utils do not use reasoning items as completed text', asyn
       { type: 'text_final', text: '最终答案' },
       { type: 'terminal', status: 'completed' },
     ],
+  );
+});
+
+test('responses stream completion does not replay text already delivered as deltas', async () => {
+  const responsesStream = await loadResponsesStreamUtils();
+  assert.ok(responsesStream, 'expected Responses stream helpers to exist');
+  const state = responsesStream.createResponsesStreamState();
+
+  assert.deepEqual(
+    responsesStream.normalizeResponsesStreamEvent({
+      eventName: 'response.output_text.delta',
+      data: { item_id: 'message-1', delta: '先查询。' },
+      state,
+    }),
+    [{ type: 'text_delta', text: '先查询。' }],
+  );
+  assert.deepEqual(
+    responsesStream.normalizeResponsesStreamEvent({
+      eventName: 'response.output_text.delta',
+      data: { item_id: 'message-2', delta: '查询完成。' },
+      state,
+    }),
+    [{ type: 'text_delta', text: '查询完成。' }],
+  );
+  assert.deepEqual(
+    responsesStream.normalizeResponsesStreamEvent({
+      eventName: 'response.completed',
+      data: {
+        response: {
+          output: [{
+            type: 'message',
+            content: [{ type: 'output_text', text: '先查询。\n\n查询完成。' }],
+          }],
+        },
+      },
+      state,
+    }),
+    [{ type: 'terminal', status: 'completed' }],
   );
 });
 

@@ -114,7 +114,7 @@ export function DemoWorkbench() {
         ...message,
         content,
         blocks: (message.blocks ?? []).map((block) => (
-          block.id === `${responseId}-text`
+          block.type === 'text' && block.id === `${responseId}-text`
             ? { ...block, content, status: cursor >= finalText.length ? 'done' as const : 'streaming' as const }
             : block
         )),

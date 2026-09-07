@@ -258,7 +258,10 @@ describe('Hosted UI canonical ConversationItem projection', () => {
         type: 'tool',
         toolName: 'read_file',
         output: expect.stringContaining('"ok": true'),
+        extra: { callId: 'call-1' },
       })]);
+    expect(messages.find((message) => message.itemId === 'tool-1')?.tools?.read_file.callId)
+      .toBe('call-1');
     expect(messages.filter((message) => (
       message.itemId === 'tool-1' || message.itemId === 'tool-result-1'
     ))).toHaveLength(1);

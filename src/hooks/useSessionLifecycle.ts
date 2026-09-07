@@ -8,13 +8,18 @@ import { CancelledError } from '../api/client.js';
 import {
   eventHasTerminalRunStatus,
   maxSeqIdFromEvents,
+  mergeSessionEventRecords,
   sessionEventRunStatus,
 } from '../utils/session-events.js';
 import { mapBackendMessages } from '../utils/messages.js';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
-import { readPersistedSessionId, resolveSessionToRestore } from '../utils/session.js';
+import {
+  mergePendingSessions,
+  readPersistedSessionId,
+  resolveSessionToRestore,
+} from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
@@ -24,15 +29,24 @@ import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
   createSessionEventCursor,
-  loadCompleteSessionEventHistory,
 } from '../utils/session-event-history.js';
 import { ingestSessionEventRecord } from '../core/interaction/index.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
-const SESSION_EVENTS_PAGE_SIZE = 500;
+// Tool-heavy Codex runs can make 500 canonical events exceed 600 KB. The
+// durable Messages projection paints the readable transcript first; hydrate
+// a smaller newest-event window and page older runtime detail on upward scroll.
+const SESSION_EVENTS_PAGE_SIZE = 200;
+const SESSION_TRANSCRIPT_CACHE_SIZE = 8;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+
+type SessionEventHistoryCache = {
+  events: SessionEventRecord[];
+  loadedCount: number;
+  total: number;
+};
 
 function waitForRestoreRetry(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -118,6 +132,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const loadSessionGenerationRef = useRef(0);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
+  const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
+  const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
+  const eventHistoryBySessionRef = useRef(new Map<string, SessionEventHistoryCache>());
+  // CreateSession can become usable before ListSessions' projection catches up.
+  // Keep those optimistic rows until the server returns them so a settled-run
+  // refresh cannot evict the active transcript in that short window.
+  const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
+  const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
   const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
@@ -364,10 +386,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     async (sessionId: string) => {
       const previousSessionId = currentSessionIdRef.current;
       const generation = ++loadSessionGenerationRef.current;
+      const cacheTranscript = (targetSessionId: string, transcript: Message[]) => {
+        const cache = sessionTranscriptCacheRef.current;
+        cache.delete(targetSessionId);
+        cache.set(targetSessionId, transcript);
+        while (cache.size > SESSION_TRANSCRIPT_CACHE_SIZE) {
+          const oldestSessionId = cache.keys().next().value;
+          if (!oldestSessionId) break;
+          cache.delete(oldestSessionId);
+        }
+      };
+      const cachedHistory = sessionTranscriptCacheRef.current.get(sessionId);
       // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
       // 切回时用历史快照和 afterSeqId 订阅追平遗漏内容。
       if (previousSessionId && previousSessionId !== sessionId) {
-        useMessageStore.getState().setMessages([]);
+        cacheTranscript(previousSessionId, useMessageStore.getState().messages as Message[]);
+        useMessageStore.getState().setMessages(cachedHistory || []);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
         useCheckpointStore.getState().setSessionCheckpoints(sessionId, []);
         useCheckpointStore.getState().setSessionToolReceipts(sessionId, []);
@@ -380,7 +414,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         && loadSessionGenerationRef.current === generation
       );
       useSessionStore.getState().setCurrentSessionId(sessionId);
-      useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, true);
+      useSessionStore
+        .getState()
+        .setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
       resetCompaction();
       runSubscriptionAbortRef.current?.abort();
       if (isMobile) {
@@ -388,34 +424,70 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
 
       try {
-        const messagesData = await api.listSessionMessages(sessionId, {
+        const messageOptions = {
           limit: SESSION_MESSAGES_PAGE_SIZE,
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
-        });
+        };
+        let messagesData;
+        try {
+          messagesData = await api.listSessionMessages(sessionId, messageOptions);
+        } catch (error) {
+          if (error instanceof CancelledError) throw error;
+          // Cloud history reads can briefly race a deployment proxy refresh.
+          // Retry one small idempotent read before turning a cold switch into
+          // an empty conversation. Warm switches continue showing the LRU
+          // transcript throughout this recovery window.
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 180));
+          if (!isStillCurrentSession()) return;
+          messagesData = await api.listSessionMessages(sessionId, messageOptions);
+        }
         if (!isStillCurrentSession()) {
           return;
         }
         const fallbackHistory = mapBackendMessages(messagesData.Messages) as Message[];
+        fallbackHistoryBySessionRef.current.set(sessionId, fallbackHistory);
         let history = fallbackHistory;
         let latestEventSeqId = 0;
         let canonicalRunIds: string[] = [];
+
+        // Durable message rows are small and sufficient for the readable
+        // transcript. Paint them immediately on a cold switch instead of
+        // holding the entire conversation behind RuntimeEvent hydration,
+        // which can be hundreds of kilobytes for tool-heavy runs. A warm
+        // switch keeps the cached canonical transcript visible until the
+        // background refresh is complete.
+        if (!cachedHistory) {
+          useMessageStore.getState().setMessages(fallbackHistory);
+          cacheTranscript(sessionId, fallbackHistory);
+        }
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          nextCursor: messagesData.NextCursor,
+          hasMore: messagesData.HasMore,
+        });
+        useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, false);
 
         // RuntimeEvent/v2 is the transcript source of truth. Persisted
         // ListSessionMessages rows are cumulative snapshots and therefore only
         // a compatibility fallback for runs without canonical item identity.
         try {
-          const eventHistory = await loadCompleteSessionEventHistory(
-            sessionId,
-            (targetSessionId, opts) => api.listSessionEvents(targetSessionId, opts),
-            {
-              pageSize: SESSION_EVENTS_PAGE_SIZE,
-              shouldContinue: isStillCurrentSession,
-            },
-          );
+          const eventPage = await api.listSessionEvents(sessionId, {
+            offset: 0,
+            limit: SESSION_EVENTS_PAGE_SIZE,
+          });
           if (!isStillCurrentSession()) return;
-          if (eventHistory) {
+          const eventHistory = {
+            events: (eventPage.Events || []) as SessionEventRecord[],
+            loadedCount: eventPage.Events?.length || 0,
+            total: Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0),
+          };
+          eventHistoryBySessionRef.current.set(sessionId, eventHistory);
+          useSessionStore.getState().setSessionMessageHistory(sessionId, {
+            nextCursor: messagesData.NextCursor,
+            hasMore: Boolean(messagesData.HasMore || eventHistory.loadedCount < eventHistory.total),
+          });
+          if (eventHistory.events.length > 0) {
             latestEventSeqId = maxSeqIdFromEvents(eventHistory.events);
             const rebuilt = rebuildPersistedSessionHistory(
               fallbackHistory,
@@ -423,9 +495,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               sessionId,
             );
             canonicalRunIds = rebuilt.canonicalRunIds;
-            if (canonicalRunIds.length > 0) {
-              history = rebuilt.messages;
-            }
+            history = rebuilt.messages;
             for (const record of eventHistory.events) {
               ingestSessionEventRecord(record, sessionId);
             }
@@ -436,10 +506,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (!isStillCurrentSession()) return;
         canonicalRunIdsBySessionRef.current.set(sessionId, new Set(canonicalRunIds));
         useMessageStore.getState().setMessages(history);
-        useSessionStore.getState().setSessionMessageHistory(sessionId, {
-          nextCursor: messagesData.NextCursor,
-          hasMore: messagesData.HasMore,
-        });
+        cacheTranscript(sessionId, history);
         void loadFeedbackForMessages(agentIdRef.current, sessionId, history);
         const lastSeqId = Math.max(messagesData.LatestSeqId || 0, latestEventSeqId);
 
@@ -535,13 +602,34 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           page: 1,
           pageSize: SESSION_LIST_PAGE_SIZE,
         });
-        useSessionStore.getState().upsertSessions((data.Sessions || []) as Session[], {
+        const listedSessions = (data.Sessions || []) as Session[];
+        for (const listedSession of listedSessions) {
+          pendingCreatedSessionAgentsRef.current.delete(listedSession.SessionId);
+        }
+        const pendingSessionIds = new Set(
+          Array.from(pendingCreatedSessionAgentsRef.current.entries())
+            .filter(([, pendingAgentId]) => pendingAgentId === targetAgentId)
+            .map(([sessionId]) => sessionId),
+        );
+        const refreshedSessions = mergePendingSessions(
+          listedSessions,
+          useSessionStore.getState().sessions,
+          pendingSessionIds,
+        ) as Session[];
+        useSessionStore.getState().upsertSessions(refreshedSessions, {
           agentId: targetAgentId,
           total: Number(data.Total ?? data.Sessions?.length ?? 0),
           page: Number(data.Page ?? 1),
           pageSize: Number(data.PageSize ?? SESSION_LIST_PAGE_SIZE),
           replace: true,
         });
+        // A manual “new conversation” can overlap the initial ListSessions
+        // request. Do not let that older response restore a previous session
+        // while CreateSession is still resolving: doing so starts a stale
+        // history hydrate that can replace the just-rendered optimistic turn.
+        if (sessionCreationPromiseRef.current) {
+          return;
+        }
         const sorted = useSessionStore.getState().sessions;
         const activeSessionId = currentSessionIdRef.current;
         const restoredSessionId = resolveSessionToRestore(
@@ -615,35 +703,70 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     fetchSessionsRef.current = fetchSessions;
   }, [fetchSessions]);
 
-  const createNewSession = useCallback(async () => {
-    try {
-      loadSessionGenerationRef.current += 1;
-      runSubscriptionAbortRef.current?.abort();
-      const session = await api.createSession(agentId);
-      const newId = session.SessionId;
-      if (newId) {
-        useSessionStore
-          .getState()
-          .upsertSessions([{ SessionId: newId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
-        currentSessionIdRef.current = newId;
-        useSessionStore.getState().setCurrentSessionId(newId);
-        useMessageStore.getState().setMessages([]);
-        useSessionStore.getState().clearSessionMessageHistory(newId);
-        useCheckpointStore.getState().setSessionCheckpoints(newId, []);
-        useCheckpointStore.getState().setSessionToolReceipts(newId, []);
-        useStreamingStore.getState().setCurrentRunId('');
-        useStreamingStore.getState().clearActivity();
-        if (isMobile) {
-          useUIStore.getState().setMobileSidebarOpen(false);
-          useUIStore.getState().setMobileActionsOpen(false);
-        }
-        void fetchSessions(agentId, newId);
-      }
-    } catch (error) {
-      if (error instanceof CancelledError) return;
-      console.error('Failed to create session:', error);
+  const adoptCreatedSession = useCallback((newId: string, preserveMessages = false) => {
+    loadSessionGenerationRef.current += 1;
+    runSubscriptionAbortRef.current?.abort();
+    pendingCreatedSessionAgentsRef.current.set(newId, agentIdRef.current);
+    useSessionStore
+      .getState()
+      .upsertSessions([{ SessionId: newId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
+    currentSessionIdRef.current = newId;
+    useSessionStore.getState().setCurrentSessionId(newId);
+    if (!preserveMessages) {
+      useMessageStore.getState().setMessages([]);
+      useStreamingStore.getState().setCurrentRunId('');
+      useStreamingStore.getState().clearActivity();
     }
-  }, [agentId, api, fetchSessions, isMobile]);
+    useSessionStore.getState().clearSessionMessageHistory(newId);
+    useCheckpointStore.getState().setSessionCheckpoints(newId, []);
+    useCheckpointStore.getState().setSessionToolReceipts(newId, []);
+    if (isMobile) {
+      useUIStore.getState().setMobileSidebarOpen(false);
+      useUIStore.getState().setMobileActionsOpen(false);
+    }
+  }, [isMobile]);
+
+  const createNewSession = useCallback(async () => {
+    // Invalidate an older session hydrate immediately. A fast user can type
+    // and send while CreateSession is in flight; submitDraft waits on this
+    // exact promise instead of starting a second session or using the prior one.
+    loadSessionGenerationRef.current += 1;
+    runSubscriptionAbortRef.current?.abort();
+    currentSessionIdRef.current = null;
+    useSessionStore.getState().setCurrentSessionId(null);
+    useMessageStore.getState().setMessages([]);
+    const creation = api.createSession(agentId)
+      .then((session) => {
+        const newId = session.SessionId || null;
+        if (newId) {
+          const preserveMessages = useMessageStore.getState().messages.some((message) => (
+            message.eventType === 'optimistic_user_message'
+            || message.eventType === 'optimistic_assistant_placeholder'
+          ));
+          adoptCreatedSession(newId, preserveMessages);
+        }
+        return newId;
+      })
+      .catch((error) => {
+        if (!(error instanceof CancelledError)) {
+          console.error('Failed to create session:', error);
+        }
+        return null;
+      });
+    sessionCreationPromiseRef.current = creation;
+    try {
+      await creation;
+    } finally {
+      if (sessionCreationPromiseRef.current === creation) {
+        sessionCreationPromiseRef.current = null;
+      }
+    }
+  }, [adoptCreatedSession, agentId, api]);
+
+  const waitForPendingSessionCreation = useCallback(async () => {
+    await sessionCreationPromiseRef.current;
+    return currentSessionIdRef.current;
+  }, []);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
@@ -659,6 +782,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         useSessionStore.getState().removeSession(sessionId);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
+        sessionTranscriptCacheRef.current.delete(sessionId);
+        fallbackHistoryBySessionRef.current.delete(sessionId);
+        eventHistoryBySessionRef.current.delete(sessionId);
+        canonicalRunIdsBySessionRef.current.delete(sessionId);
+        pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
           runSubscriptionAbortRef.current?.abort();
@@ -682,12 +810,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const loadOlderSessionMessages = useCallback(async (sessionId: string) => {
     const historyState = useSessionStore.getState().messageHistory[sessionId];
-    if (
-      !historyState
-      || !historyState.hasMore
-      || historyState.nextCursor === null
-      || historyState.isLoadingOlder
-    ) {
+    const cachedEvents = eventHistoryBySessionRef.current.get(sessionId);
+    const canLoadOlderMessages = Boolean(historyState?.hasMore && historyState.nextCursor !== null);
+    const canLoadOlderEvents = Boolean(
+      cachedEvents && cachedEvents.loadedCount < cachedEvents.total,
+    );
+    if (!historyState || historyState.isLoadingOlder || (!canLoadOlderMessages && !canLoadOlderEvents)) {
       return;
     }
     const generation = loadSessionGenerationRef.current;
@@ -695,13 +823,23 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     olderMessageRequestRef.current.set(sessionId, requestToken);
     try {
       useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
-      const data = await api.listSessionMessages(sessionId, {
-        beforeSeqId: historyState.nextCursor,
-        limit: SESSION_MESSAGES_PAGE_SIZE,
-        includeReasoning: true,
-        includeToolEvents: true,
-        includeAttachments: true,
-      });
+      const [messagePage, eventPage] = await Promise.all([
+        canLoadOlderMessages
+          ? api.listSessionMessages(sessionId, {
+              beforeSeqId: historyState.nextCursor ?? undefined,
+              limit: SESSION_MESSAGES_PAGE_SIZE,
+              includeReasoning: true,
+              includeToolEvents: true,
+              includeAttachments: true,
+            })
+          : Promise.resolve(null),
+        canLoadOlderEvents && cachedEvents
+          ? api.listSessionEvents(sessionId, {
+              offset: cachedEvents.loadedCount,
+              limit: SESSION_EVENTS_PAGE_SIZE,
+            })
+          : Promise.resolve(null),
+      ]);
       if (
         currentSessionIdRef.current !== sessionId
         || loadSessionGenerationRef.current !== generation
@@ -709,18 +847,49 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       ) {
         return;
       }
-      const canonicalRunIds = canonicalRunIdsBySessionRef.current.get(sessionId) || new Set<string>();
-      const olderMessages = (mapBackendMessages(data.Messages) as Message[])
-        .filter((message) => !message.invocationId || !canonicalRunIds.has(message.invocationId));
+      const olderMessages = messagePage
+        ? mapBackendMessages(messagePage.Messages) as Message[]
+        : [];
       const olderIds = new Set(olderMessages.map((message) => message.id));
-      const mergedHistory = [
+      const fallbackHistory = [
         ...olderMessages,
-        ...useMessageStore.getState().messages.filter((message) => !olderIds.has(message.id)),
+        ...(fallbackHistoryBySessionRef.current.get(sessionId) || [])
+          .filter((message) => !olderIds.has(message.id)),
       ];
+      fallbackHistoryBySessionRef.current.set(sessionId, fallbackHistory);
+
+      let mergedEvents = cachedEvents?.events || [];
+      let loadedEventCount = cachedEvents?.loadedCount || 0;
+      let totalEventCount = cachedEvents?.total || 0;
+      if (eventPage) {
+        const olderEvents = (eventPage.Events || []) as SessionEventRecord[];
+        mergedEvents = mergeSessionEventRecords(olderEvents, mergedEvents) as SessionEventRecord[];
+        totalEventCount = Math.max(totalEventCount, Number(eventPage.Total ?? 0) || 0);
+        loadedEventCount = olderEvents.length > 0
+          ? Math.min(totalEventCount, loadedEventCount + olderEvents.length)
+          : totalEventCount;
+        eventHistoryBySessionRef.current.set(sessionId, {
+          events: mergedEvents,
+          loadedCount: loadedEventCount,
+          total: totalEventCount,
+        });
+        for (const record of olderEvents) {
+          ingestSessionEventRecord(record, sessionId);
+        }
+      }
+
+      const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId);
+      const mergedHistory = rebuilt.messages;
+      canonicalRunIdsBySessionRef.current.set(sessionId, new Set(rebuilt.canonicalRunIds));
       useMessageStore.getState().setMessages(mergedHistory);
+      sessionTranscriptCacheRef.current.delete(sessionId);
+      sessionTranscriptCacheRef.current.set(sessionId, mergedHistory);
       useSessionStore.getState().setSessionMessageHistory(sessionId, {
-        nextCursor: data.NextCursor,
-        hasMore: data.HasMore,
+        nextCursor: messagePage ? messagePage.NextCursor : historyState.nextCursor,
+        hasMore: Boolean(
+          (messagePage ? messagePage.HasMore : false)
+          || loadedEventCount < totalEventCount
+        ),
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {
@@ -741,6 +910,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     loadSession,
     loadOlderSessionMessages,
     createNewSession,
+    adoptCreatedSession,
+    waitForPendingSessionCreation,
     deleteSession,
     currentSessionIdRef,
     agentIdRef,

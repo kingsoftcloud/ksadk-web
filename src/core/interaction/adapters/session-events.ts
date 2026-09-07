@@ -15,6 +15,8 @@ const REQUESTED_EVENT_TYPES = new Set([
   'interaction_requested',
   'ksadk.interaction/v1.requested',
   'InteractionRequested',
+  'approval.requested',
+  'a2ui.interaction',
 ]);
 
 const RESOLVED_EVENT_TYPES = new Set([
@@ -25,6 +27,8 @@ const RESOLVED_EVENT_TYPES = new Set([
   'interaction.cancelled',
   'interaction.cancel',
   'interaction.expired',
+  'approval.resolved',
+  'a2ui.action',
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -57,38 +61,58 @@ export function interactionFromSessionEvent(
     payload;
   const interactionId = String(
     body.interaction_id ||
+    body.interactionId ||
     body.InteractionId ||
+    body.approval_id ||
+    body.approvalId ||
     payload.interaction_id ||
+    payload.interactionId ||
     payload.InteractionId ||
+    payload.approval_id ||
+    payload.approvalId ||
     '',
   );
   if (!interactionId) return null;
 
   const sessionId = String(
-    envelope.session_id || body.session_id || fallbackSessionId || '',
+    envelope.session_id || envelope.SessionId || body.session_id || body.sessionId || fallbackSessionId || '',
   );
   if (!sessionId) return null;
 
   if (REQUESTED_EVENT_TYPES.has(eventType)) {
+    const extensions = {
+      ...(asRecord(body.extensions) || {}),
+      ...(body.detail !== undefined ? { detail: body.detail } : {}),
+      ...((body.call_id ?? body.callId) !== undefined
+        ? { call_id: body.call_id ?? body.callId }
+        : {}),
+    };
     return normalizeInteraction({
       interactionId,
       sessionId,
-      runId: body.run_id ?? envelope.run_id,
-      kind: body.kind ?? 'approval',
+      runId: body.run_id ?? body.runId ?? envelope.run_id ?? envelope.InvocationId,
+      kind: eventType === 'approval.requested' ? 'approval' : body.kind ?? 'approval',
       title: body.title,
-      message: body.message ?? body.description,
-      requestSchema: body.request_schema ?? body.RequestSchema,
+      message: body.message ?? body.description ?? asRecord(body.detail)?.command,
+      requestSchema: body.request_schema ?? body.requestSchema ?? body.input_schema ?? body.inputSchema ?? body.RequestSchema,
       presentation: body.presentation,
       status: 'pending',
       revision: body.revision ?? 1,
-      createdAt: body.created_at ?? envelope.timestamp,
+      createdAt: body.created_at ?? body.createdAt ?? envelope.timestamp ?? envelope.Timestamp,
       expiresAt: body.expires_at,
       source: 'interaction_v1',
-      extensions: body.extensions,
+      extensions,
     });
   }
 
   if (RESOLVED_EVENT_TYPES.has(eventType)) {
+    const extensions = {
+      ...(asRecord(body.extensions) || {}),
+      ...(body.detail !== undefined ? { detail: body.detail } : {}),
+      ...((body.call_id ?? body.callId) !== undefined
+        ? { call_id: body.call_id ?? body.callId }
+        : {}),
+    };
     const normalizedEventStatus =
       eventType === 'interaction.cancelled' || eventType === 'interaction.cancel'
         ? 'cancelled'
@@ -98,7 +122,9 @@ export function interactionFromSessionEvent(
     const rawOutcome = String(
       payload.outcome ?? body.outcome ?? body.status ?? '',
     ).toLowerCase();
-    const action = String(payload.action ?? body.action ?? '').toLowerCase();
+    const action = String(
+      payload.action ?? body.action ?? payload.name ?? body.name ?? '',
+    ).toLowerCase();
     let outcome = rawOutcome;
     if (!outcome) {
       if (action === 'approve') outcome = 'approved';
@@ -114,7 +140,7 @@ export function interactionFromSessionEvent(
     return normalizeInteraction({
       interactionId,
       sessionId,
-      runId: body.run_id ?? envelope.run_id,
+      runId: body.run_id ?? body.runId ?? envelope.run_id ?? envelope.InvocationId,
       kind: body.kind,
       title: body.title,
       message: body.message,
@@ -124,7 +150,7 @@ export function interactionFromSessionEvent(
       revision: body.revision,
       createdAt: body.created_at ?? envelope.timestamp,
       expiresAt: body.expires_at,
-      resolvedAt: payload.resolved_at ?? body.resolved_at ?? envelope.timestamp,
+      resolvedAt: payload.resolved_at ?? payload.resolvedAt ?? body.resolved_at ?? body.resolvedAt ?? envelope.timestamp ?? envelope.Timestamp,
       actor: payload.actor ?? body.actor ?? envelope.actor_ref,
       outcome,
       responseSummary:
@@ -132,7 +158,7 @@ export function interactionFromSessionEvent(
         body.response_summary ??
         (action ? `${action}` : undefined),
       source: 'interaction_v1',
-      extensions: body.extensions,
+      extensions,
     });
   }
 

@@ -1,1 +1,1 @@
-import '../index.css';
+import '../embed.css';

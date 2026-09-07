@@ -81,3 +81,23 @@ export function resolveSessionToRestore(sessions, preferredSessionId) {
 
   return null;
 }
+
+export function mergePendingSessions(listedSessions, currentSessions, pendingSessionIds) {
+  const listed = Array.isArray(listedSessions) ? listedSessions : [];
+  const current = Array.isArray(currentSessions) ? currentSessions : [];
+  const pending = pendingSessionIds instanceof Set
+    ? pendingSessionIds
+    : new Set(Array.isArray(pendingSessionIds) ? pendingSessionIds : []);
+  if (pending.size === 0) {
+    return listed;
+  }
+
+  const listedIds = new Set(
+    listed.map((session) => String(session?.SessionId || '').trim()).filter(Boolean),
+  );
+  const optimistic = current.filter((session) => {
+    const sessionId = String(session?.SessionId || '').trim();
+    return sessionId && pending.has(sessionId) && !listedIds.has(sessionId);
+  });
+  return optimistic.length > 0 ? [...listed, ...optimistic] : listed;
+}

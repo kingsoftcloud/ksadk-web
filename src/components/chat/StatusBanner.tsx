@@ -30,9 +30,9 @@ export function StatusBanner({ onRetry }: StatusBannerProps) {
 
   const config = {
     rate_limited: {
-      icon: <ZapOff className="h-4 w-4 text-amber-500" />,
-      bg: 'border-amber-200/70 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20',
-      text: 'text-amber-700 dark:text-amber-200',
+      icon: <ZapOff className="h-4 w-4 text-neutral-500" />,
+      bg: 'border-neutral-200/70 bg-neutral-50/70 dark:border-neutral-900/40 dark:bg-neutral-950/20',
+      text: 'text-neutral-700 dark:text-neutral-200',
       label: rateLimitedLabel,
     },
     network: {

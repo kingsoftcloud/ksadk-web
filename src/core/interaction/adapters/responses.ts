@@ -37,9 +37,12 @@ export function interactionFromResponsesApproval(
     status: 'pending',
     revision: 1,
     source: 'responses',
-    extensions: request.approvalLevel
-      ? { approval_level: request.approvalLevel }
-      : {},
+    extensions: {
+      ...(request.approvalLevel
+        ? { approval_level: request.approvalLevel }
+        : {}),
+      ...(request.args ? { arguments: request.args } : {}),
+    },
   });
 }
 

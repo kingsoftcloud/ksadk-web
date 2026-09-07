@@ -78,7 +78,7 @@ export function NativeRuntimeLauncher({
                   打开{nativeManagementLink.label}
                 </a>
               ) : (
-                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                <div className="mt-5 rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-800 dark:border-neutral-900/60 dark:bg-neutral-950/30 dark:text-neutral-200">
                   当前访问模式不开放原生管理入口。需要完整对话体验时，请使用 owner/private 链接或 CLI。
                 </div>
               )}

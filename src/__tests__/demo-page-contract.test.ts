@@ -30,12 +30,14 @@ describe('public demo page contract', () => {
       'utf8',
     );
 
-    const styles = readFileSync(resolve(repoRoot, 'src/index.css'), 'utf8');
+    const styles = readFileSync(resolve(repoRoot, 'src/motion.css'), 'utf8');
+    const embedStyles = readFileSync(resolve(repoRoot, 'src/embed.css'), 'utf8');
     expect(source).toContain("generating && 'waiting-thinking-text'");
     expect(source).toContain("data-testid={generating ? 'thinking-indicator'");
     expect(source).toContain("generating ? '正在思考…' : '已思考'");
-    expect(styles).toContain('@keyframes waiting-thinking-text');
-    expect(styles).toContain('animation: waiting-thinking-text 1.6s linear infinite');
+    expect(styles).toContain('@keyframes ksadk-waiting-thinking-text');
+    expect(styles).toContain('animation: ksadk-waiting-thinking-text 1.25s linear infinite');
     expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(embedStyles).toContain('@import "./motion.css"');
   });
 });

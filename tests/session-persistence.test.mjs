@@ -62,6 +62,28 @@ test('resolveSessionToRestore falls back to the newest session when persisted se
   );
 });
 
+test('mergePendingSessions keeps a just-created session through a lagging list refresh', async () => {
+  const sessionUtils = await import('../src/utils/session.js');
+  const listed = [{ SessionId: 'older-session' }];
+  const current = [
+    { SessionId: 'new-session', UpdatedAt: '2026-09-04T10:00:00Z' },
+    { SessionId: 'older-session' },
+  ];
+
+  assert.deepEqual(
+    sessionUtils.mergePendingSessions(listed, current, new Set(['new-session'])),
+    [listed[0], current[0]],
+  );
+  assert.equal(
+    sessionUtils.mergePendingSessions(
+      [{ SessionId: 'new-session', Name: 'durable' }],
+      current,
+      new Set(['new-session']),
+    ).length,
+    1,
+  );
+});
+
 test('persisted session helpers can read and clear local storage safely', async () => {
   const sessionUtils = await loadSessionUtils();
 

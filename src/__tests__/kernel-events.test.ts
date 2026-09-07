@@ -186,6 +186,157 @@ describe('KernelRunEventTranslator', () => {
     });
   });
 
+  it('maps LangGraph RuntimeEvent v2 tool parts without native item metadata', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    const started = t.translate({
+      seq: 30,
+      family: 'runtime',
+      event_type: 'item.started',
+      event_id: 'event-tool-started',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-tool-call',
+      item_kind: 'tool_call',
+      initial: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'tool_call',
+          call_id: 'call-1',
+          name: 'load_memory',
+          arguments: { query: '*' },
+        }],
+      },
+      source: { framework: 'langgraph', metadata: {} },
+    });
+    const completedCall = t.translate({
+      seq: 31,
+      family: 'runtime',
+      event_type: 'item.completed',
+      event_id: 'event-tool-call-completed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-tool-call',
+      item_kind: 'tool_call',
+      snapshot: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'tool_call',
+          call_id: 'call-1',
+          name: 'load_memory',
+          arguments: { query: '*' },
+        }],
+      },
+      source: { framework: 'langgraph', metadata: {} },
+    });
+    const completedResult = t.translate({
+      seq: 32,
+      family: 'runtime',
+      event_type: 'item.completed',
+      event_id: 'event-tool-result-completed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-tool-result',
+      item_kind: 'tool_result',
+      snapshot: {
+        parts: [{
+          content_type: 'tool_result',
+          part_id: 'tool_result',
+          call_id: 'call-1',
+          result: { memories: ['breakfast'] },
+          is_error: false,
+        }],
+      },
+      source: { framework: 'langgraph', metadata: {} },
+    });
+
+    expect(started).toMatchObject({
+      EventType: 'tool_call',
+      Metadata: {
+        call_id: 'call-1',
+        tool_name: 'load_memory',
+        tool_args: { query: '*' },
+        RuntimeItem: { ItemId: 'call-1', Operation: 'replace' },
+      },
+    });
+    expect(completedCall).toMatchObject({
+      EventType: 'tool_call',
+      Metadata: { RuntimeItem: { ItemId: 'call-1', Operation: 'replace' } },
+    });
+    expect(completedResult).toMatchObject({
+      EventType: 'tool_result',
+      Metadata: {
+        call_id: 'call-1',
+        tool_name: 'load_memory',
+        tool_output: { memories: ['breakfast'] },
+        RuntimeItem: { ItemId: 'call-1', Operation: 'completed' },
+      },
+    });
+  });
+
+  it('settles a Codex tool_call item whose completed snapshot includes its result', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    t.translate({
+      seq: 40,
+      family: 'runtime',
+      event_type: 'item.started',
+      event_id: 'event-command-started',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-command',
+      item_kind: 'tool_call',
+      initial: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'command-call',
+          call_id: 'call-command',
+          name: 'codex.command',
+          arguments: { command: 'echo hello' },
+        }],
+      },
+      source: { framework: 'codex', metadata: { native_item_kind: 'commandExecution' } },
+    });
+
+    const completed = t.translate({
+      seq: 41,
+      family: 'runtime',
+      event_type: 'item.completed',
+      event_id: 'event-command-completed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-command',
+      item_kind: 'tool_call',
+      snapshot: {
+        parts: [
+          {
+            content_type: 'tool_call',
+            part_id: 'command-call',
+            call_id: 'call-command',
+            name: 'codex.command',
+            arguments: { command: 'echo hello' },
+          },
+          {
+            content_type: 'tool_result',
+            part_id: 'command-result',
+            call_id: 'call-command',
+            result: { exit_code: 0, output: 'hello\n' },
+            is_error: false,
+          },
+        ],
+      },
+      source: { framework: 'codex', metadata: { native_item_kind: 'commandExecution' } },
+    });
+
+    expect(completed).toMatchObject({
+      EventType: 'tool_result',
+      Metadata: {
+        call_id: 'call-command',
+        tool_name: 'codex.command',
+        tool_output: { exit_code: 0, output: 'hello\n' },
+        RuntimeItem: { ItemId: 'call-command', Operation: 'completed' },
+      },
+    });
+  });
+
   it('settles a failed tool item as an identity-bound error result', () => {
     const t = new KernelRunEventTranslator('sess-1');
     const failed = t.translate(itemFrame(20, 'item.failed', 'commandExecution', {
@@ -201,6 +352,80 @@ describe('KernelRunEventTranslator', () => {
     expect(failed?.Metadata?.RuntimeItem).toMatchObject({
       ItemId: 'tool-1',
       Operation: 'completed',
+    });
+  });
+
+  it('keeps Codex MCP failures on the original call identity and name', () => {
+    const t = new KernelRunEventTranslator('sess-1');
+    const started = t.translate({
+      seq: 40,
+      family: 'runtime',
+      event_type: 'item.started',
+      event_id: 'event-mcp-started',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-mcp-tool',
+      item_kind: 'tool_call',
+      initial: {
+        parts: [{
+          content_type: 'tool_call',
+          part_id: 'tool-call',
+          call_id: 'call-mcp-tool',
+          name: 'mcp.metaso-inner.metaso_topic_list',
+          arguments: {},
+        }],
+      },
+      source: { metadata: { native_item_kind: 'mcpToolCall' } },
+    });
+    const updated = t.translate({
+      seq: 41,
+      family: 'runtime',
+      event_type: 'item.updated',
+      event_id: 'event-mcp-updated',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-mcp-tool',
+      item_kind: 'tool_call',
+      op: 'replace',
+      update: {
+        content_type: 'tool_result',
+        part_id: 'tool-result',
+        call_id: 'call-mcp-tool',
+        result: { status: 'failed', error: { message: 'user rejected MCP tool call' } },
+        is_error: true,
+      },
+      source: { metadata: { native_item_kind: 'mcpToolCall' } },
+    });
+    const failed = t.translate({
+      seq: 42,
+      family: 'runtime',
+      event_type: 'item.failed',
+      event_id: 'event-mcp-failed',
+      run_id: 'run-1',
+      scope_id: 'scope-1',
+      item_id: 'item-mcp-tool',
+      item_kind: 'tool_call',
+      error: { code: 'codex_mcp_tool_failed', message: 'Codex mcpToolCall failed' },
+      source: { metadata: { native_item_kind: 'mcpToolCall' } },
+    });
+
+    expect(started?.Metadata).toMatchObject({
+      call_id: 'call-mcp-tool',
+      tool_name: 'mcp.metaso-inner.metaso_topic_list',
+      RuntimeItem: { ItemId: 'call-mcp-tool' },
+    });
+    expect(updated?.Metadata).toMatchObject({
+      call_id: 'call-mcp-tool',
+      tool_name: 'mcp.metaso-inner.metaso_topic_list',
+      RuntimeItem: { ItemId: 'call-mcp-tool', Operation: 'completed' },
+    });
+    expect(failed?.Metadata).toMatchObject({
+      call_id: 'call-mcp-tool',
+      tool_name: 'mcp.metaso-inner.metaso_topic_list',
+      tool_output: {
+        error: { status: 'failed', error: { message: 'user rejected MCP tool call' } },
+      },
+      RuntimeItem: { ItemId: 'call-mcp-tool', Operation: 'completed' },
     });
   });
 

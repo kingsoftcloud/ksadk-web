@@ -74,6 +74,33 @@ describe('normalizeCapabilities', () => {
       Data: { Capabilities: { RuntimeCapabilityMatrix: { schema_version: 1 } } },
     }).RuntimeCapabilityMatrix).toBeUndefined();
   });
+
+  it('keeps older Codex bootstraps usable without weakening malformed contracts', () => {
+    const legacy = normalizeCapabilities({
+      Data: {
+        Agent: { Framework: 'codex' },
+        Capabilities: {
+          ApprovalPolicy: {
+            Modes: ['ask', 'risk', 'full'],
+            DefaultMode: 'risk',
+            RuntimeOverride: true,
+          },
+        },
+      },
+    });
+
+    expect(legacy.Approval).toBe(true);
+    expect(legacy.RuntimeCapabilityMatrix?.plan).toMatchObject({ supported: true, mode: 'emulated' });
+    expect(legacy.RuntimeCapabilityMatrix?.goal).toMatchObject({ supported: true, mode: 'emulated' });
+
+    const malformed = normalizeCapabilities({
+      Data: {
+        Agent: { Framework: 'codex' },
+        Capabilities: { RuntimeCapabilityMatrix: { schema_version: 1 } },
+      },
+    });
+    expect(malformed.RuntimeCapabilityMatrix).toBeUndefined();
+  });
 });
 
 import { decodeCapabilityMatrix } from '../types/agent-control.js';

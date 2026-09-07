@@ -70,7 +70,7 @@ function blockStatus(item: ConversationItem): 'streaming' | 'done' | 'error' {
 function textMessage(item: ConversationItem): Message {
   const text = typeof item.payload.text === 'string' ? item.payload.text : '';
   if (item.kind === 'user_message') {
-    return { ...messageBase(item), role: 'user', content: text };
+    return { ...messageBase(item), role: 'user', content: text, eventType: 'user_message' };
   }
   const block: ProcessingBlock = item.kind === 'reasoning'
     ? {
@@ -96,6 +96,7 @@ function textMessage(item: ConversationItem): Message {
 
 function toolMessage(item: ConversationItem): Message {
   const toolName = nonEmptyString(item.payload.tool) || 'Tool';
+  const callId = nonEmptyString(item.payload.callId);
   const args = displayValue(item.payload.args);
   const output = Object.prototype.hasOwnProperty.call(item.payload, 'output')
     ? displayValue(item.payload.output)
@@ -117,9 +118,16 @@ function toolMessage(item: ConversationItem): Message {
       args,
       output,
       status,
+      ...(callId ? { extra: { callId } } : {}),
     }],
     tools: {
-      [toolName]: { name: toolName, args, output, status },
+      [toolName]: {
+        name: toolName,
+        ...(callId ? { callId } : {}),
+        args,
+        output,
+        status,
+      },
     },
   };
 }
@@ -172,7 +180,12 @@ function interactionFromItem(item: ConversationItem): Interaction | null {
       ? nonEmptyString(item.payload.responseSummary)
       : null,
     source: 'interaction_v1',
-    extensions: { conversation_item_id: item.itemId },
+    extensions: {
+      conversation_item_id: item.itemId,
+      ...(nonEmptyString(item.payload.callId)
+        ? { call_id: nonEmptyString(item.payload.callId)! }
+        : {}),
+    },
   };
 }
 
@@ -180,7 +193,11 @@ function approvalMessage(item: ConversationItem, interaction: Interaction): Mess
   const toolName = nonEmptyString(item.payload.kind) || 'approval';
   const args = displayValue(item.payload.detail);
   const approvalStatus = interaction.status === 'resolved'
-    ? interaction.outcome === 'rejected' ? 'rejected' as const : 'approved' as const
+    ? interaction.outcome === 'rejected'
+      ? 'rejected' as const
+      : interaction.outcome === 'cancelled' || interaction.outcome === 'expired'
+        ? 'cancelled' as const
+        : 'approved' as const
     : 'pending' as const;
   const status = interaction.status === 'pending' ? 'paused' as const : 'completed' as const;
   const extra = {
@@ -332,6 +349,9 @@ export function projectConversationStreamForHostedUi(
     }
     const fallback = fallbackById.get(item.itemId);
     if (fallback) {
+      const cancelled = item.kind === 'error'
+        && ['cancelled', 'canceled'].includes(String(item.payload.status || '').toLowerCase());
+      if (cancelled) continue;
       messages.push(fallbackMessage(
         item,
         fallback.title,
@@ -361,12 +381,61 @@ export function mergeConversationRunMessages(
   // here used to produce the brief blank screen seen during slow/reordered
   // cloud streams.
   if (!projected.length) return previous;
+  // The canonical stream may contain a user_message item representing the
+  // turn input. Hosted UI marks the temporary row inserted by startDraft(),
+  // allowing this projection to replace exactly that row without mistaking an
+  // older unscoped user message for the current prompt.  If the turn input
+  // is absent from the canonical stream, the optimistic row is still
+  // absorbed so the user never sees a duplicate bubble.
+  let cleanPrevious = previous.filter(
+    (message) => message.eventType !== 'optimistic_assistant_placeholder',
+  );
+  {
+    let optimisticUserIndex = -1;
+    for (let index = cleanPrevious.length - 1; index >= 0; index -= 1) {
+      const message = cleanPrevious[index];
+      if (message.role === 'user' && message.eventType === 'optimistic_user_message') {
+        optimisticUserIndex = index;
+        break;
+      }
+    }
+    if (optimisticUserIndex >= 0) {
+      const optimistic = cleanPrevious[optimisticUserIndex];
+      const optimisticContent = String(optimistic.content || '').trim();
+      cleanPrevious = [
+        ...cleanPrevious.slice(0, optimisticUserIndex),
+        ...cleanPrevious.slice(optimisticUserIndex + 1),
+      ];
+      const hasProjectedUser = projected.some((m) => m.role === 'user');
+      if (!hasProjectedUser && optimisticContent) {
+        // Re-insert the optimistic row ahead of this run's assistant messages
+        // so the turn input stays visible even when the canonical stream
+        // did not carry a user_message item.
+        const retained = cleanPrevious.filter((message) => !(
+          (message.eventType === EVENT_TYPE && message.runId === result.runId)
+          || message.invocationId === result.runId
+        ));
+        const insertionIndex = cleanPrevious.findIndex((message) => (
+          (message.eventType === EVENT_TYPE && message.runId === result.runId)
+          || message.invocationId === result.runId
+        ));
+        const index = insertionIndex < 0 ? retained.length : insertionIndex;
+        return [
+          ...retained.slice(0, index),
+          { ...optimistic, timestamp: Date.now() },
+          ...projected,
+          ...retained.slice(index),
+        ];
+      }
+    }
+  }
+
   const belongsToRun = (message: Message) => (
     (message.eventType === EVENT_TYPE && message.runId === result.runId)
     || message.invocationId === result.runId
   );
-  const insertionIndex = previous.findIndex(belongsToRun);
-  const retained = previous.filter((message) => !belongsToRun(message));
+  const insertionIndex = cleanPrevious.findIndex(belongsToRun);
+  const retained = cleanPrevious.filter((message) => !belongsToRun(message));
   const index = insertionIndex < 0 ? retained.length : insertionIndex;
   return [
     ...retained.slice(0, index),

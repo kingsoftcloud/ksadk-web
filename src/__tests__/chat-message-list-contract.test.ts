@@ -13,10 +13,44 @@ describe('chat message list contracts', () => {
     expect(source).toContain('stickToBottomRef');
     expect(source).toContain('userDetachedFromBottomRef');
     expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('!needsInitialScrollRef.current');
+    expect(source).toContain('scrolledUp &&');
+    expect(source).toContain('const keepAttachedToBottom');
     expect(source).toContain('isStreamingRef.current && scrolledUp');
     expect(source).toContain('distanceFromBottom <= 12');
     expect(source).toContain('distanceFromBottom < 96');
     expect(source).not.toMatch(/scrollRef\.current\.scrollTop\s*=\s*scrollRef\.current\.scrollHeight/);
+  });
+
+  it('shows the jump control only when content remains below the viewport', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('distanceFromBottom');
+    expect(source).toContain('shouldShowScrollToBottom');
+    expect(source).toContain('animate-bounce');
+    expect(source).toContain('animationDelay');
+    expect(source).toContain('data-scroll-indicator="streaming"');
+    expect(source).toContain('data-scroll-indicator="idle"');
+    expect(source).toContain('<ChevronDown');
+    expect(source).not.toContain('scrollTop > 320');
+  });
+
+  it('returns to the live edge after the user sends a new turn', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('previousLastMessageIdRef');
+    expect(source).toContain("lastMessage?.role === 'user'");
+    expect(source).toContain('scrollToBottom();');
+  });
+
+  it('keeps runtime diagnostics out of the conversation viewport', () => {
+    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+    const composerSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatComposer.tsx'), 'utf8');
+
+    expect(listSource).not.toContain('RunActivityBanner');
+    expect(listSource).not.toContain('activity.eventCount');
+    expect(listSource).not.toContain('估算 token');
+    expect(composerSource).toContain('<ContextUsageIndicator');
   });
 
   it('bypasses the stickiness gate to pin to the bottom on initial session load', () => {
@@ -33,6 +67,8 @@ describe('chat message list contracts', () => {
     // settles scrollHeight across frames; we rAF-loop until stable (3
     // consecutive unchanged checks) with a 2s timeout backstop.
     expect(source).toContain('needsInitialScrollRef.current) {');
+    expect(source).toContain("el.dispatchEvent(new Event('scroll'))");
+    expect(source).toContain('Keep the initial-pin intent');
     expect(source).toContain('requestAnimationFrame(pin)');
     expect(source).toMatch(/stableCount\s*>=\s*3/);
     expect(source).toMatch(/setTimeout\(finish,\s*2000\)/);
@@ -105,6 +141,10 @@ describe('chat message list contracts', () => {
     expect(source).toContain('border-slate-200/80');
     expect(source).toContain('正在思考…');
     expect(source).toContain('leading-7');
+    expect(source).toContain("message.eventType === 'optimistic_assistant_placeholder'");
+    expect(source).toContain('aria-label="正在生成"');
+    expect(source).toContain('waiting-generation-breathe');
+    expect(source).not.toContain('正在连接…');
   });
 
   it('uses the same non-spinning shimmer for legacy reasoning rows', () => {
@@ -168,12 +208,10 @@ describe('chat message list contracts', () => {
 
   it('labels the streaming stop button as runtime cancel when available', () => {
     const composerSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatComposer.tsx'), 'utf8');
-    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 
     expect(composerSource).toContain('保留恢复点并结束本次执行');
     expect(composerSource).toContain("onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成'");
-    expect(listSource).toContain('aria-label="取消运行并保留恢复点"');
-    expect(listSource).toContain('取消运行并保留最近 checkpoint');
+    expect(composerSource).toContain('onCancelRemote();');
   });
 
   it('uses canonical event history as the transcript owner with projected messages as fallback', () => {
@@ -182,15 +220,24 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
     expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
-    // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The durable
-    // message projection is retained only for legacy runs and pagination.
+    // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The latest
+    // event page hydrates after the readable message projection, and older
+    // event pages follow the same upward-scroll pagination as old messages.
     const listSessionEventsCalls = lifecycleSource
       .split('\n')
       .filter((line) => line.includes('api.listSessionEvents(sessionId'));
-    expect(listSessionEventsCalls).toHaveLength(0);
-    expect(lifecycleSource).toContain('loadCompleteSessionEventHistory(');
+    expect(listSessionEventsCalls).toHaveLength(2);
+    expect(lifecycleSource).not.toContain('loadCompleteSessionEventHistory(');
+    expect(lifecycleSource).toContain('offset: cachedEvents.loadedCount');
+    expect(lifecycleSource).toContain('loadedEventCount < totalEventCount');
     expect(lifecycleSource).toContain('rebuildPersistedSessionHistory(');
-    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 500');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 200');
+    expect(lifecycleSource).toContain('SESSION_TRANSCRIPT_CACHE_SIZE = 8');
+    expect(lifecycleSource).toContain('if (!cachedHistory) {');
+    expect(lifecycleSource).toContain('setSessionInitialMessageHistoryLoading(sessionId, false)');
+    expect(lifecycleSource.indexOf('setMessages(fallbackHistory)')).toBeLessThan(
+      lifecycleSource.indexOf('const eventPage = await api.listSessionEvents(sessionId'),
+    );
     expect(lifecycleSource).toContain('canonicalRunIdsBySessionRef');
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] checkpoint load failed:'");
     expect(lifecycleSource).toContain("console.warn('[SessionLifecycle] tool receipt load failed:'");
@@ -253,6 +300,29 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('currentSessionIdRef.current === options.sessionId');
     expect(lifecycleSource).toContain('dispatchRunEventToStores({');
     expect(dispatcherSource).toContain('mergeRecoveredRunMessages');
+  });
+
+  it('keeps a newly-created session local until its first turn is durable', () => {
+    const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
+    const createSessionSource = lifecycleSource.slice(
+      lifecycleSource.indexOf('const createNewSession = useCallback'),
+      lifecycleSource.indexOf('const deleteSession = useCallback'),
+    );
+    const adoptSessionSource = lifecycleSource.slice(
+      lifecycleSource.indexOf('const adoptCreatedSession = useCallback'),
+      lifecycleSource.indexOf('const createNewSession = useCallback'),
+    );
+    const runAgentSource = readFileSync(resolve(repoRoot, 'src/hooks/useRunAgent.ts'), 'utf8');
+
+    expect(adoptSessionSource).toContain('upsertSessions');
+    expect(createSessionSource).not.toContain('fetchSessions(');
+    expect(createSessionSource).toContain('sessionCreationPromiseRef.current = creation');
+    expect(lifecycleSource).toContain('if (sessionCreationPromiseRef.current) {');
+    expect(runAgentSource).toContain('await waitForPendingSessionCreation?.();');
+    expect(runAgentSource.indexOf('optimisticMessageId: appendOptimisticMessage')).toBeLessThan(
+      runAgentSource.indexOf('await waitForPendingSessionCreation?.();'),
+    );
+    expect(runAgentSource).toContain('if (!draft.optimisticMessageId) appendOptimisticMessage(draft);');
   });
 
   it('keeps an initial transcript load distinct from an actually empty session', () => {

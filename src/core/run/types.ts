@@ -51,12 +51,14 @@ export type RunEvent =
       args: string;
       message?: string;
       approvalLevel?: string;
+      runId?: string;
       sessionId?: string | null;
     }
   | {
       type: 'approval_resolved';
       approvalRequestId: string;
-      decision: 'approved' | 'rejected';
+      decision: 'approved' | 'rejected' | 'cancelled';
+      revision?: number;
       sessionId?: string | null;
     }
   | { type: 'compaction'; phase: string; trigger?: string; compactedUntilSeqId?: number; sessionId?: string | null }

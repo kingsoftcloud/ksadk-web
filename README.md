@@ -43,14 +43,45 @@ package entrypoints under `dist-lib`.
 The npm package exposes these stable entrypoints:
 
 - `@kingsoftcloud/ksadk-web/components`
+- `@kingsoftcloud/ksadk-web/chat/timeline`
+- `@kingsoftcloud/ksadk-web/chat/composer`
 - `@kingsoftcloud/ksadk-web/conversation` (headless, Node/SSR-safe)
 - `@kingsoftcloud/ksadk-web/runtime`
 - `@kingsoftcloud/ksadk-web/capabilities`
+- `@kingsoftcloud/ksadk-web/hooks`
 - `@kingsoftcloud/ksadk-web/styles`
 - `@kingsoftcloud/ksadk-web/types`
 
 Hosted UI should import the shared shell from the package and keep private
 auth, routing, feature flags, Docker, nginx, and Helm logic in its own repo.
+
+### Embedded conversation composition
+
+Studio and custom hosts can keep their own navigation and layout while using
+the same conversation behavior and components as Hosted UI:
+
+```tsx
+import {
+  AgentConversationTimeline,
+} from '@kingsoftcloud/ksadk-web/chat/timeline'
+import {
+  AgentConversationComposer,
+} from '@kingsoftcloud/ksadk-web/chat/composer'
+import { useAgentChat } from '@kingsoftcloud/ksadk-web/hooks'
+import { ApiFacadeImpl } from '@kingsoftcloud/ksadk-web/runtime'
+import '@kingsoftcloud/ksadk-web/styles'
+
+const api = new ApiFacadeImpl({ fetch: authenticatedFetch, agentId })
+const chat = useAgentChat({ api, agentId, conversationClient: null })
+```
+
+Use `conversationClient: null` when the host intentionally exposes only the
+AgentEngine action API. Omit it for capability-driven Conversation v1 with the
+historical Responses / AG-UI fallback. Wrap the surface in `.ksadk-web`; set
+the documented CSS variables on that wrapper, pass `className` to the main
+components, or target their `data-slot` attributes from CSS loaded after the
+package stylesheet. The embeddable stylesheet scopes its utility selectors to
+that wrapper and does not reset `html`, `body`, or the host application's root.
 
 ### Headless conversation client
 

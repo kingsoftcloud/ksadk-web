@@ -1,0 +1,179 @@
+/* Component-safe stylesheet for embedded hosts. No html/body/#root reset. */
+@import "./motion.css";
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+@config "../tailwind.embed.config.ts";
+@plugin "@tailwindcss/typography";
+@plugin "tailwindcss-animate";
+
+@theme {
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-surface: hsl(var(--surface));
+  --color-text-primary: hsl(var(--foreground));
+  --color-text-secondary: hsl(var(--text-secondary));
+  --color-text-muted: hsl(var(--text-muted));
+  --color-code-bg: hsl(var(--code-bg));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-hover: hsl(var(--sidebar-hover));
+  --color-sidebar-active: hsl(var(--sidebar-active));
+  --color-sidebar-text: hsl(var(--sidebar-text));
+  --color-sidebar-text-secondary: hsl(var(--sidebar-text-secondary));
+  --color-sidebar-text-muted: hsl(var(--sidebar-text-muted));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius: var(--ksadk-radius);
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  .ksadk-web {
+    --primary: 173 80% 40%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 173 80% 95%;
+    --accent-foreground: 173 80% 25%;
+    --ksadk-radius: 0.5rem;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 10%;
+    --surface: 240 7% 97%;
+    --text-secondary: 0 0% 40%;
+    --text-muted: 0 0% 60%;
+    --code-bg: 220 14% 96%;
+    --sidebar: 0 0% 95%;
+    --sidebar-hover: 0 0% 90%;
+    --sidebar-active: 0 0% 88%;
+    --sidebar-text: 0 0% 23%;
+    --sidebar-text-secondary: 0 0% 35%;
+    --sidebar-text-muted: 0 0% 50%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 60%;
+    --border: 0 0% 88%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --input: 0 0% 88%;
+    --ring: 173 80% 40%;
+    --ksadk-interaction-background: hsl(var(--card));
+    --ksadk-interaction-border: hsl(var(--border));
+    --ksadk-interaction-foreground: hsl(var(--foreground));
+    --ksadk-interaction-muted: hsl(var(--muted-foreground));
+    --ksadk-interaction-muted-background: hsl(var(--muted));
+    --ksadk-interaction-control-background: hsl(var(--background));
+    --ksadk-interaction-primary-background: hsl(var(--foreground));
+    --ksadk-interaction-primary-foreground: hsl(var(--background));
+    --ksadk-interaction-focus-ring: hsl(var(--ring));
+    --ksadk-menu-background: hsl(var(--popover));
+    --ksadk-menu-trigger-background: hsl(var(--muted));
+    --ksadk-menu-border: hsl(var(--border));
+    --ksadk-menu-shadow: 0 18px 44px rgb(15 23 42 / 0.16);
+    --ksadk-approval-background: hsl(45 100% 96% / 0.72);
+    --ksadk-approval-border: hsl(43 96% 74% / 0.8);
+    --ksadk-approval-foreground: hsl(32 81% 29%);
+    --ksadk-approval-elevated-background: hsl(0 86% 97% / 0.78);
+    --ksadk-approval-elevated-border: hsl(0 94% 82% / 0.85);
+    --ksadk-approval-elevated-foreground: hsl(0 74% 42%);
+    --app-height: 100vh;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  .dark .ksadk-web,
+  .ksadk-web.dark {
+    --primary: 173 77% 49%;
+    --primary-foreground: 200 30% 10%;
+    --background: 210 13% 8%;
+    --foreground: 200 18% 95%;
+    --surface: 215 16% 13%;
+    --text-secondary: 215 28% 80%;
+    --text-muted: 220 14% 65%;
+    --code-bg: 222 40% 11%;
+    --sidebar: 0 0% 13%;
+    --sidebar-hover: 0 0% 20%;
+    --sidebar-active: 0 0% 28%;
+    --sidebar-text: 220 4% 87%;
+    --sidebar-text-secondary: 220 4% 74%;
+    --sidebar-text-muted: 220 3% 57%;
+    --card: 215 16% 13%;
+    --card-foreground: 210 40% 98%;
+    --popover: 215 16% 13%;
+    --popover-foreground: 210 40% 98%;
+    --secondary: 215 16% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 215 16% 16%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 215 16% 16%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 12% 25%;
+    --input: 215 12% 25%;
+    --ring: 173 77% 49%;
+    --ksadk-interaction-background: hsl(var(--card));
+    --ksadk-interaction-border: hsl(var(--border));
+    --ksadk-interaction-foreground: hsl(var(--foreground));
+    --ksadk-interaction-muted: hsl(var(--muted-foreground));
+    --ksadk-interaction-muted-background: hsl(var(--muted));
+    --ksadk-interaction-control-background: hsl(var(--background));
+    --ksadk-interaction-primary-background: hsl(var(--foreground));
+    --ksadk-interaction-primary-foreground: hsl(var(--background));
+    --ksadk-interaction-focus-ring: hsl(var(--ring));
+    --ksadk-menu-background: hsl(var(--popover));
+    --ksadk-menu-trigger-background: hsl(var(--muted));
+    --ksadk-menu-border: hsl(var(--border));
+    --ksadk-menu-shadow: 0 18px 44px rgb(0 0 0 / 0.34);
+    --ksadk-approval-background: hsl(32 81% 12% / 0.3);
+    --ksadk-approval-border: hsl(32 75% 32% / 0.65);
+    --ksadk-approval-foreground: hsl(43 96% 82%);
+    --ksadk-approval-elevated-background: hsl(0 63% 15% / 0.36);
+    --ksadk-approval-elevated-border: hsl(0 63% 35% / 0.7);
+    --ksadk-approval-elevated-foreground: hsl(0 91% 82%);
+  }
+
+  .ksadk-web *,
+  .ksadk-web *::before,
+  .ksadk-web *::after {
+    border-color: hsl(var(--border));
+  }
+}
+
+@supports (height: 100dvh) {
+  .ksadk-web { --app-height: 100dvh; }
+}
+
+.ksadk-web .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.ksadk-web .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.ksadk-web .custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.3);
+  border-radius: 20px;
+}
+.ksadk-web .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+}
+
+.ksadk-web .prose { font-size: 15px; line-height: 1.8; hanging-punctuation: first last; }
+.ksadk-web .prose code {
+  font-size: 13.5px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+.ksadk-web .prose p { margin-bottom: 0.75em; }

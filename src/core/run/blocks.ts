@@ -203,7 +203,13 @@ export function getProcessingBlocks(blocks: ProcessingBlock[] | undefined): Proc
  */
 export function buildBlocksFromHistory(input: {
   reasoning?: string;
-  tools?: Record<string, { name: string; args?: string; output?: string; status?: string }>;
+  tools?: Record<string, {
+    name: string;
+    callId?: string;
+    args?: string;
+    output?: string;
+    status?: string;
+  }>;
   content?: string;
 }): ProcessingBlock[] {
   const blocks: ProcessingBlock[] = [];
@@ -219,6 +225,7 @@ export function buildBlocksFromHistory(input: {
         args: tool.args ?? '',
         output: tool.output,
         status: (tool.status as ToolBlock['status']) ?? 'completed',
+        ...(tool.callId ? { extra: { callId: tool.callId } } : {}),
       });
     }
   }

@@ -18,13 +18,14 @@ import type { Interaction } from '../../core/interaction/types';
 
 type ToolData = NonNullable<Message['tools']>[string];
 
-interface Props {
+export interface ProcessingBlocksViewProps {
   message: Message;
   isStreaming: boolean;
   onRespondToApproval?: (p: { approvalRequestId: string; approve: boolean; previousResponseId?: string }) => void;
   onRespondToAguiApproval?: (p: { interruptId: string; approve: boolean }) => void;
   /** Interaction/v1 records; when present the read-only anchor replaces inline approval buttons. */
   interactionRecords?: readonly Interaction[];
+  className?: string;
 }
 
 /** 折叠容器:单行 summary + 可展开详情,260ms 高度动画。 */
@@ -78,7 +79,7 @@ function ThinkingRow({ block }: { block: ThinkingBlock }) {
         aria-expanded={open}
         aria-controls={detailId}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] leading-5 text-slate-400 transition-colors hover:bg-slate-100/70 hover:text-slate-500 dark:text-slate-500 dark:hover:bg-slate-800/40 dark:hover:text-slate-400"
+        className="inline-flex max-w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] leading-5 text-slate-400 transition-colors hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
       >
         {!generating && <Sparkles className="h-3.5 w-3.5 shrink-0" />}
         <span
@@ -121,8 +122,8 @@ function ToolRow({
   isStreaming: boolean;
   /** The composer tray owns all interaction decisions once normalized. */
   interactionRecord?: Interaction;
-  onRespondToApproval?: Props['onRespondToApproval'];
-  onRespondToAguiApproval?: Props['onRespondToAguiApproval'];
+  onRespondToApproval?: ProcessingBlocksViewProps['onRespondToApproval'];
+  onRespondToAguiApproval?: ProcessingBlocksViewProps['onRespondToAguiApproval'];
 }) {
   const status = tool?.status ?? block.status;
   const args = tool?.args ?? block.args;
@@ -130,13 +131,29 @@ function ToolRow({
   // 审批字段优先从 block.extra 读(approval_requested 同步写进 blocks,key=toolName 一致);
   // fallback 从 tool 读(旧路径,msg.tools 用 approvalRequestId 做 key 可能和 toolName 不一致。
   const extra = (block.extra || {}) as Record<string, unknown>;
-  const approvalStatus = (extra.approvalStatus as string) || tool?.approvalStatus;
+  const interactionApprovalStatus = interactionRecord?.outcome === 'cancelled'
+    || interactionRecord?.outcome === 'expired'
+    || interactionRecord?.status === 'cancelled'
+    || interactionRecord?.status === 'expired'
+    ? 'cancelled'
+    : interactionRecord?.outcome === 'rejected'
+      ? 'rejected'
+      : interactionRecord?.outcome === 'approved'
+        ? 'approved'
+        : undefined;
+  const approvalStatus = interactionApprovalStatus
+    || (extra.approvalStatus as string)
+    || tool?.approvalStatus;
   const approvalRequestId = (extra.approvalRequestId as string) || tool?.approvalRequestId;
   const approvalMessage = (extra.approvalMessage as string) || tool?.approvalMessage;
   const approvalProtocol = (extra.approvalProtocol as string) || tool?.approvalProtocol;
   const previousResponseId = (extra.previousResponseId as string) || tool?.previousResponseId;
   const running = status === 'running';
-  const errored = status === 'error';
+  // Codex reports a cancelled command as item.failed after the authoritative
+  // interaction cancellation. Present that expected terminal state as
+  // cancelled instead of turning the user's feedback into an execution error.
+  const cancelledByInteraction = approvalStatus === 'cancelled' || approvalStatus === 'rejected';
+  const errored = status === 'error' && !cancelledByInteraction;
   const paused = status === 'paused';
 
   // Approval is an audit trail. The execution result is the primary state,
@@ -147,6 +164,8 @@ function ToolRow({
       ? '等待确认'
       : approvalStatus === 'rejected'
         ? '已拒绝'
+        : approvalStatus === 'cancelled'
+          ? '已取消'
         : running
           ? approvalStatus === 'approved' ? '已授权 · 执行中' : '正在运行'
           : approvalStatus === 'approved'
@@ -178,11 +197,14 @@ function ToolRow({
     >
       <div className="flex flex-col gap-2.5 py-1 text-[13px]">
         {approvalRequestId && approvalStatus === 'pending' && !interactionRecord && (
-          <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200/90 bg-white/70 px-2.5 py-2 font-sans text-[12px] text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300">
+          <section
+            data-slot="tool-approval-card"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--ksadk-approval-border)] bg-[var(--ksadk-approval-background)] px-2.5 py-2 font-sans text-[12px] text-[var(--ksadk-approval-foreground)] shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+          >
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
-              <span className="shrink-0 font-medium text-slate-700 dark:text-slate-200">需要确认</span>
-              <span className="min-w-0 truncate text-slate-500 dark:text-slate-400">{approvalMessage || '允许后将执行此工具调用。'}</span>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ksadk-approval-foreground)]" aria-hidden="true" />
+              <span className="shrink-0 font-medium">需要确认</span>
+              <span className="min-w-0 truncate opacity-75">{approvalMessage || '允许后将执行此工具调用。'}</span>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
                 <button
@@ -220,13 +242,19 @@ function ToolRow({
         ) : null}
         {approvalRequestId && approvalStatus && approvalStatus !== 'pending' && (
           <div className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
-            <span>{approvalStatus === 'approved' ? '已授权' : '已拒绝'}</span>
+            <span>
+              {approvalStatus === 'approved'
+                ? '已授权'
+                : approvalStatus === 'cancelled'
+                  ? '已取消'
+                  : '已拒绝'}
+            </span>
             {approvalStatus === 'approved' && running ? <span>· 工具执行中</span> : null}
             {approvalStatus === 'approved' && errored ? <span>· 工具执行失败</span> : null}
           </div>
         )}
         {args ? <PayloadBlock label="入参" value={args} tone="input" /> : null}
-        {output ? renderToolOutput(block.toolName, output, errored) : null}
+        {output && !cancelledByInteraction ? renderToolOutput(block.toolName, output, errored) : null}
       </div>
     </Collapsible>
   );
@@ -376,10 +404,11 @@ export function ProcessingBlocksView({
   onRespondToApproval,
   onRespondToAguiApproval,
   interactionRecords,
-}: Props) {
+  className,
+}: ProcessingBlocksViewProps) {
   const blocks: ProcessingBlock[] = message.blocks ?? [];
   return (
-    <div className="mb-3 min-w-0">
+    <div className={cn('mb-3 min-w-0', className)} data-slot="processing-blocks">
       {blocks.map((block) => {
         if (block.type === 'thinking') {
           return <ThinkingRow key={block.id} block={block} />;
@@ -391,9 +420,16 @@ export function ProcessingBlocksView({
             || message.tools?.[block.toolName]?.approvalRequestId
             || '',
           );
+          const callId = String(
+            blockExtra.callId
+            || blockExtra.call_id
+            || '',
+          );
           const record = approvalId
             ? interactionRecords?.find((entry) => entry.interactionId === approvalId)
-            : undefined;
+            : callId
+              ? interactionRecords?.find((entry) => String(entry.extensions.call_id || '') === callId)
+              : undefined;
           return (
             <div key={block.id}>
               <ToolRow

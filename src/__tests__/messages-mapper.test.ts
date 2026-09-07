@@ -3,6 +3,17 @@ import { mapBackendMessage, mapBackendMessages } from '../utils/messages.js';
 import type { BackendMessage } from '../api/messages.js';
 
 describe('mapBackendMessage', () => {
+  it('normalises numeric Unix-second strings from cloud message history', () => {
+    const result = mapBackendMessage({
+      MessageId: 'msg-time',
+      Role: 'user',
+      Content: { text: 'hello' },
+      Timestamp: '1700000000.125',
+    } satisfies BackendMessage);
+
+    expect(result.timestamp).toBe(1_700_000_000_125);
+  });
+
   it('maps user message with attachments', () => {
     const msg: BackendMessage = {
       MessageId: 'msg-1',
@@ -167,6 +178,47 @@ describe('mapBackendMessage', () => {
         messages: [{ createSurface: { surfaceId: 'status' } }],
       },
     });
+  });
+
+  it('gives activities a distinct row id when the backend reuses the assistant id', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'run-1:assistant',
+      Role: 'assistant',
+      Content: { text: '状态如下' },
+      Activities: [{
+        MessageId: 'run-1:assistant',
+        SurfaceId: 'status',
+        Content: { a2ui_operations: [{ createSurface: { surfaceId: 'status' } }] },
+      }],
+    }]);
+
+    expect(result.map((message) => message.id)).toEqual([
+      'run-1:assistant',
+      'run-1:assistant:a2ui:status:0',
+    ]);
+  });
+
+  it('does not replay Studio approval compatibility surfaces as blank activity cards', () => {
+    const result = mapBackendMessages([{
+      MessageId: 'run-approval:assistant',
+      Role: 'assistant',
+      Content: { text: '等待确认' },
+      Activities: [{
+        MessageId: 'run-approval:assistant',
+        SurfaceId: 'approval-item-1',
+        Content: {
+          a2ui_operations: [{
+            updateComponents: {
+              surfaceId: 'approval-item-1',
+              components: [{ id: 'approval', component: 'ApprovalBar' }],
+            },
+          }],
+        },
+      }],
+    }]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe('model');
   });
 
   it('repairs only the legacy A2UI root id during history rehydration', () => {

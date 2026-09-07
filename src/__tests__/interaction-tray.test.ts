@@ -6,6 +6,7 @@ import {
   computeA2uiCatalogDigest,
   validateA2uiPresentation,
 } from '../core/interaction/a2ui-validate.js';
+import { schemaFields } from '../components/chat/schema-fields.js';
 
 function readSource(relativePath: string): string {
   return readFileSync(
@@ -46,6 +47,53 @@ describe('InteractionTray contract', () => {
     expect(source).toContain('data-testid="interaction-tray-next"');
   });
 
+  it('uses a compact neutral card with host-overridable style tokens', () => {
+    const source = readSource('components/chat/InteractionTray.tsx');
+    const styles = readSource('embed.css');
+    expect(source).toContain('max-w-[64rem]');
+    expect(source).toContain('data-slot="interaction-summary"');
+    expect(source).toContain('--ksadk-interaction-primary-background');
+    expect(source).not.toContain('bg-emerald-600');
+    expect(source).toContain("active.kind === 'approval'");
+    expect(styles).toContain('--ksadk-interaction-muted-background');
+    expect(styles).toContain('--ksadk-interaction-focus-ring');
+  });
+
+  it('submits non-empty custom feedback with Enter outside IME composition', () => {
+    const source = readSource('components/chat/InteractionTray.tsx');
+    expect(source).toContain("event.key !== 'Enter'");
+    expect(source).toContain('event.nativeEvent.isComposing');
+    expect(source).toContain("respond('cancel', { feedback: comment.trim() })");
+    expect(source).toContain("respond('submit', { value: comment.trim() })");
+  });
+
+  it('queues approval feedback as the next user turn instead of approving the old command', () => {
+    const source = readSource('hooks/useAgentChat.ts');
+    expect(source).toContain("input.action === 'cancel'");
+    expect(source).toContain("String(input.response.feedback || '').trim()");
+    expect(source).toContain("receipt.status === 'accepted' && feedback");
+    expect(source).toContain('await submitDraft(feedback, [])');
+  });
+
+  it('recognises JSON-schema arrays as multi-select questions', () => {
+    expect(schemaFields({
+      type: 'object',
+      properties: {
+        checks: {
+          type: 'array',
+          items: { type: 'string', enum: ['单测', '端到端', '回归'] },
+        },
+      },
+    })).toMatchObject([{
+      name: 'checks',
+      type: 'array',
+      enumValues: ['单测', '端到端', '回归'],
+    }]);
+    const source = readSource('components/chat/InteractionSchemaForm.tsx');
+    expect(source).toContain("field.type === 'array'");
+    expect(source).toContain("'checkbox' : 'radio'");
+  });
+
   it('resolved anchors expand into a read-only snapshot with schema summary', () => {
     const source = readSource('components/chat/InteractionHistoryAnchor.tsx');
     expect(source).toContain("interaction.actor");
@@ -82,6 +130,9 @@ describe('InteractionTray contract', () => {
   it('keeps a streamed tool approval read-only once the composer tray owns it', () => {
     const source = readSource('components/chat/ProcessingBlocksView.tsx');
     expect(source).toContain('interactionRecord={record}');
+    expect(source).toContain("entry.extensions.call_id");
+    expect(source).toContain("status === 'error' && !cancelledByInteraction");
+    expect(source).toContain('output && !cancelledByInteraction');
     expect(source).toContain("approvalStatus === 'pending' && !interactionRecord");
     expect(source).toContain('请在输入区确认面板中操作。');
   });
@@ -125,5 +176,19 @@ describe('A2UI v0.9.1 validation and safe fallback', () => {
         catalog,
       ),
     ).toBe('basic-controls');
+  });
+});
+
+
+describe('native question fields', () => {
+  it('keeps suggested choices and custom answers for a multi-select question', () => {
+    expect(schemaFields({ type: 'object', properties: { checks: {
+      type: 'array', items: { type: 'string' },
+      'x-codex-options': [{ label: '单测' }, { label: '回归' }],
+      'x-codex-is-other': true, description: '请选择检查项目',
+    } }, required: ['checks'] })).toMatchObject([{
+      name: 'checks', type: 'array', enumValues: ['单测', '回归'],
+      allowOther: true, required: true, description: '请选择检查项目',
+    }]);
   });
 });

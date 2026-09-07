@@ -61,13 +61,15 @@ export type Message = {
   tools?: {
     [name: string]: {
       name: string;
+      /** Stable provider call identity used to join tool history to its approval. */
+      callId?: string;
       args: string;
       output?: string;
       status: 'running' | 'completed' | 'error' | 'paused';
       approvalRequestId?: string;
       previousResponseId?: string;
       serverLabel?: string;
-      approvalStatus?: 'pending' | 'approved' | 'rejected';
+      approvalStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled';
       approvalProtocol?: 'responses' | 'ag-ui';
       approvalMessage?: string;
       approvalLevel?: string;
@@ -145,6 +147,7 @@ export type ComposerContextIndicator = {
   percent?: number;
   usedTokens?: number;
   contextWindowTokens?: number;
+  contextWindowSource?: 'runtime' | 'model';
 } | null;
 
 export type WorkspaceFilesCapability = {

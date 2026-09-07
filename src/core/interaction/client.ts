@@ -236,6 +236,16 @@ export class InteractionClientImpl implements InteractionClient {
         });
       }
       return receipt;
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : String(error || '交互提交失败');
+      this.store.markFailed(record.sessionId, input.interactionId, {
+        code: 'interaction_submit_failed',
+        message,
+        retryable: true,
+      });
+      throw error;
     } finally {
       this.inFlight.delete(input.interactionId);
     }

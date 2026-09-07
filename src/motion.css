@@ -1,0 +1,104 @@
+/* Shared conversation motion primitives. This file is imported by both the
+ * standalone app and the component-safe embed stylesheet consumed by Studio. */
+@keyframes ksadk-token-count-pulse {
+  0% {
+    opacity: 0.45;
+    transform: translateY(1px);
+  }
+  55% {
+    opacity: 0.95;
+    transform: translateY(-0.5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.token-count-pulse {
+  animation: ksadk-token-count-pulse 260ms ease-out;
+}
+
+@keyframes ksadk-waiting-thinking-text {
+  0% {
+    background-position: 140% 50%;
+  }
+  100% {
+    background-position: -40% 50%;
+  }
+}
+
+.waiting-thinking-text {
+  display: inline-block;
+  color: hsl(var(--text-muted, 215 16% 47%));
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--text-muted, 215 16% 47%) / 0.66) 0%,
+    hsl(var(--text-muted, 215 16% 47%) / 0.82) 28%,
+    hsl(var(--foreground, 215 25% 15%)) 48%,
+    hsl(var(--foreground, 215 25% 15%)) 52%,
+    hsl(var(--text-muted, 215 16% 47%) / 0.82) 72%,
+    hsl(var(--text-muted, 215 16% 47%) / 0.66) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ksadk-waiting-thinking-text 1.25s linear infinite;
+}
+
+@keyframes ksadk-waiting-generation-dot {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: scale(0.84);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1);
+  }
+}
+
+@keyframes ksadk-waiting-generation-ring {
+  0% {
+    opacity: 0.46;
+    transform: scale(0.62);
+  }
+  72%,
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
+.waiting-generation-breathe {
+  position: relative;
+  display: block;
+  color: hsl(var(--text-muted, 215 16% 47%) / 0.72);
+  background: currentColor;
+  animation: ksadk-waiting-generation-dot 1.25s ease-in-out infinite;
+}
+
+.waiting-generation-breathe::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  animation: ksadk-waiting-generation-ring 1.25s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .token-count-pulse,
+  .waiting-thinking-text,
+  .waiting-generation-breathe,
+  .waiting-generation-breathe::after {
+    animation: none;
+  }
+
+  .waiting-thinking-text {
+    background: none;
+    color: hsl(var(--text-muted, 215 16% 47%));
+    -webkit-text-fill-color: currentColor;
+  }
+}
