@@ -118,7 +118,7 @@ function bootstrap() {
         Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
       }],
     },
-    Model: { id: 'fixture-model', display_name: 'Fixture Model' },
+    Model: { id: 'fixture-model', display_name: 'Fixture Model', context_window_tokens: 1024000 },
   };
 }
 
@@ -470,8 +470,8 @@ async function handleAgentApi(request, response, requestUrl) {
     },
     ListAgentModels: {
       Models: [
-        { id: 'fixture-model', display_name: 'Fixture Model' },
-        { id: 'fixture-model-alt', display_name: 'Fixture Model Alt' },
+        { id: 'fixture-model', display_name: 'Fixture Model', context_window_tokens: 1024000 },
+        { id: 'fixture-model-alt', display_name: 'Fixture Model Alt', context_window_tokens: 200000 },
       ],
       Current: 'fixture-model',
       Source: 'fixture',

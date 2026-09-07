@@ -84,10 +84,14 @@ export function buildComposerContextIndicator({ selectedModel, contextUsage }) {
   const usage = contextUsage && (!contextUsage.model || contextUsage.model === selectedModel?.id)
     ? contextUsage : null;
   const usedTokens = coercePositiveNumber(usage?.used_tokens);
-  const contextWindowTokens = coercePositiveNumber(usage?.context_window_tokens)
-    ?? resolveContextWindowTokens(selectedModel);
+  const runtimeWindow = coercePositiveNumber(usage?.context_window_tokens);
+  const contextWindowTokens = runtimeWindow ?? resolveContextWindowTokens(selectedModel);
+  const windowInfo = {
+    contextWindowTokens: contextWindowTokens ?? undefined,
+    contextWindowSource: contextWindowTokens ? (runtimeWindow ? 'runtime' : 'model') : undefined,
+  };
   const label = usage?.source === 'last_request' ? '上次请求输入' : '上下文占用';
-  if (!usedTokens) return { label: '上下文用量暂不可用', phase: 'default' };
+  if (!usedTokens) return { label: '上下文用量暂不可用', phase: 'default', ...windowInfo };
   const percent = contextWindowTokens
     ? Math.round(usedTokens / contextWindowTokens * 100) : undefined;
   return {
@@ -96,6 +100,6 @@ export function buildComposerContextIndicator({ selectedModel, contextUsage }) {
       ? 'warning' : 'normal',
     percent,
     usedTokens,
-    contextWindowTokens: contextWindowTokens ?? undefined,
+    ...windowInfo,
   };
 }

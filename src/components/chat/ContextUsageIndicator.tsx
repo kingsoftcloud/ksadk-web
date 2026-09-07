@@ -11,13 +11,18 @@ type ContextUsageIndicatorProps = {
 export function ContextUsageIndicator({ indicator, onCompact, disabled }: ContextUsageIndicatorProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const pinnedRef = useRef(false);
   useEffect(() => {
     if (!open) return;
     const dismissOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
+        pinnedRef.current = false;
+        setOpen(false);
+      }
     };
     const dismissEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
+        pinnedRef.current = false;
         setOpen(false);
         rootRef.current?.querySelector('button')?.focus();
       }
@@ -46,9 +51,11 @@ export function ContextUsageIndicator({ indicator, onCompact, disabled }: Contex
     }
   };
   return (
-    <div ref={rootRef} className="relative flex h-8 w-8 items-center justify-center">
+    <div ref={rootRef} className="relative flex h-8 w-8 items-center justify-center"
+      onPointerEnter={(event) => { if (event.pointerType !== 'touch') setOpen(true); }}
+      onPointerLeave={() => { if (!pinnedRef.current) setOpen(false); }}>
       <button type="button" aria-label="上下文用量与压缩" aria-expanded={open}
-        onClick={() => { setOpen(!open); setResult(''); }}
+        onClick={() => { pinnedRef.current = !pinnedRef.current; setOpen(pinnedRef.current); setResult(''); }}
         className={cn('flex h-8 w-8 items-center justify-center rounded-full',
           indicator.phase === 'warning' ? 'text-text-primary' : 'text-text-muted')}>
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"
@@ -69,8 +76,12 @@ export function ContextUsageIndicator({ indicator, onCompact, disabled }: Contex
         <p className={cn("font-medium", busy && "waiting-thinking-text")}>{busy ? '正在压缩上下文…' : indicator.label}</p>
         <p className="mt-1 text-text-secondary">
           {indicator.usedTokens !== undefined ? `${formatTokens(indicator.usedTokens)} tokens` : '等待运行时报告用量'}
-          {indicator.contextWindowTokens ? ` / ${formatTokens(indicator.contextWindowTokens)}` : ''}
+          {indicator.usedTokens !== undefined && indicator.contextWindowTokens ? ` / ${formatTokens(indicator.contextWindowTokens)}` : ''}
         </p>
+        {indicator.contextWindowTokens && <p className="mt-1 text-text-muted">
+          模型窗口：{formatTokens(indicator.contextWindowTokens)} tokens
+          {indicator.contextWindowSource === 'model' ? '（模型配置）' : '（运行时报告）'}
+        </p>}
         {indicator.usedTokens !== undefined && !indicator.contextWindowTokens && <p className="mt-1 text-text-muted">模型窗口大小未报告</p>}
         {indicator.percent !== undefined && <p className="text-text-muted">{indicator.percent}% 已使用</p>}
         {open && <>

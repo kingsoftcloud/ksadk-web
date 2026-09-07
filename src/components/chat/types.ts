@@ -147,6 +147,7 @@ export type ComposerContextIndicator = {
   percent?: number;
   usedTokens?: number;
   contextWindowTokens?: number;
+  contextWindowSource?: 'runtime' | 'model';
 } | null;
 
 export type WorkspaceFilesCapability = {

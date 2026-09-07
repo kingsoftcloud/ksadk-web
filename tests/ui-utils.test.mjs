@@ -45,6 +45,23 @@ test('context remains unknown without a current snapshot or after switching mode
   }
 });
 
+test('known window remains visible without usage and runtime window takes precedence', () => {
+  const selectedModel = { id: 'new', context_window_tokens: 1024000 };
+  for (const contextUsage of [undefined, { model: 'old', used_tokens: 44000 }]) {
+    const indicator = buildComposerContextIndicator({ selectedModel, contextUsage });
+    assert.equal(indicator.contextWindowTokens, 1024000);
+    assert.equal(indicator.contextWindowSource, 'model');
+    assert.equal(indicator.usedTokens, undefined);
+    assert.equal(indicator.percent, undefined);
+  }
+  const reported = buildComposerContextIndicator({ selectedModel,
+    contextUsage: { model: 'new', used_tokens: 10000, context_window_tokens: 100000 },
+  });
+  assert.equal(reported.contextWindowTokens, 100000);
+  assert.equal(reported.contextWindowSource, 'runtime');
+  assert.equal(reported.percent, 10);
+});
+
 test('preprocessMarkdown keeps GFM table rows on separate lines for inline table blobs', () => {
   const raw = [
     '五、与岗位匹配度',

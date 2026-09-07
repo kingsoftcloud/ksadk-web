@@ -241,7 +241,7 @@ test('Hosted UI fails closed before upload when attachment capability is absent'
   await composer.fill('禁止附件必须 fail closed');
   await composer.press('Enter');
 
-  await expect(page.getByText('连接断开或生成出错，请重试', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Conversation attachment is not declared by the active surface.');
   const current = await fixtureState(request);
   expect(current.uploads).toEqual([]);
   expect(current.inputs).toEqual([]);
@@ -270,7 +270,7 @@ test('Hosted UI rejects an oversized attachment before upload or canonical submi
   const composer = page.locator('textarea[placeholder^="发送消息"]');
   await composer.fill('超大附件必须 fail closed');
   await composer.press('Enter');
-  await expect(page.getByText('连接断开或生成出错，请重试', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Conversation attachment exceeds the Hosted UI upload limit.');
 
   const current = await fixtureState(request);
   expect(current.uploads).toEqual([]);
@@ -334,4 +334,30 @@ test('independent custom frontend consumes the public conversation API across re
     Action: 'approve',
     IdempotencyKey: `interaction:${APPROVAL_ID}:revision-${APPROVAL_REVISION}`,
   }]);
+});
+
+
+test('context hover shows model metadata without inventing usage and supports pinned dismissal', async ({ page }) => {
+  await openCanonicalHostedUi(page);
+  const trigger = page.getByRole('button', { name: '上下文用量与压缩' });
+  const popup = page.getByRole('dialog', { name: '上下文', exact: true });
+  await trigger.hover();
+  await expect(popup).toBeVisible();
+  await expect(popup).toContainText('1,024,000 tokens（模型配置）');
+  await expect(popup).toContainText('等待运行时报告用量');
+  await expect(popup).not.toContainText('% 已使用');
+  await page.mouse.move(0, 0);
+  await expect(popup).toBeHidden();
+  await trigger.click();
+  await page.mouse.move(0, 0);
+  await expect(popup).toBeVisible();
+  await page.mouse.click(0, 0);
+  await expect(popup).toBeHidden();
+  await trigger.click();
+  await page.keyboard.press('Escape');
+  await expect(popup).toBeHidden();
+  await page.getByRole('button', { name: /模型 Fixture Model/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Fixture Model Alt' }).click();
+  await trigger.hover();
+  await expect(popup).toContainText('200,000 tokens（模型配置）');
 });

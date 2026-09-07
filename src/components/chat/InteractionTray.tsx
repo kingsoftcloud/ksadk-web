@@ -213,7 +213,7 @@ export function InteractionTray({
           <div className="flex min-w-0 items-center gap-1.5">
             <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" strokeWidth={1.7} aria-hidden="true" />
             <span data-testid="interaction-tray-title">
-              {active.kind === 'approval' ? '问题' : active.title}
+              {active.title}
             </span>
             {summary.operation ? (
               <span className="truncate text-[11px] text-[var(--ksadk-interaction-muted)]">
