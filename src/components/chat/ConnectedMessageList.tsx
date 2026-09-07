@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useMessageStore } from '../../stores/message.js';
@@ -18,6 +18,8 @@ import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 
 export type ConnectedMessageListProps = {
   agentName: string;
+  /** Replace the welcome surface without replacing the conversation renderer. */
+  emptyState?: ReactNode;
   isMobile: boolean;
   onDeleteFeedback: (message: Message) => void;
   onSubmitFeedback: (options: { message: Message; rating: 'up' | 'down'; comment?: string }) => void;
@@ -35,6 +37,7 @@ export type ConnectedMessageListProps = {
 
 export function ConnectedMessageList({
   agentName,
+  emptyState,
   isMobile,
   onDeleteFeedback,
   onSubmitFeedback,
@@ -352,6 +355,7 @@ export function ConnectedMessageList({
   return (
     <>
       <ChatMessageList
+        emptyState={emptyState}
         agentName={agentName}
         isMobile={isMobile}
         isStreaming={isStreaming}

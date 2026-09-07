@@ -47,6 +47,8 @@ import type { Interaction } from '../../core/interaction/types.js';
 
 export type ChatMessageListProps = {
   agentName: string;
+  /** Host-owned welcome surface; null suppresses it. */
+  emptyState?: ReactNode;
   isMobile: boolean;
   isStreaming: boolean;
   activity: RunActivity | null;
@@ -951,6 +953,7 @@ function ChatMessage({
 
 export function ChatMessageList({
   agentName,
+  emptyState,
   isMobile,
   isStreaming,
   activity,
@@ -1075,7 +1078,7 @@ export function ChatMessageList({
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
         ) : messages.length === 0 ? (
-        <EmptyState agentName={agentName} />
+        emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <div style={{ height: virtualWindow.totalHeight }} className="relative">
             {visibleItems.map((entry) => (
