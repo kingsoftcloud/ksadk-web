@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.5 - 2026-09-04
+## 0.3.5 - 2026-09-07
 
 - Add an instance-scoped `AgentEngineClient` and `ApiFacadeImpl` so Studio and
   other embedded hosts can inject their authenticated fetch function and bind
@@ -20,6 +20,10 @@
 - Preserve historical Hosted Agents through the existing capability-driven
   transport negotiation: canonical Conversation v1 is used when advertised,
   while a missing surface keeps the Responses / AG-UI compatibility path.
+
+- Restore paginated durable conversation history, native tool results and question answers across refreshes.
+- Show runtime context usage with model-catalog window metadata, hover and click disclosure, and manual compaction progress.
+- Use neutral cancellation and waiting surfaces, visible thinking animations, and host-provided welcome content.
 
 ## 0.3.4 - 2026-08-31
 
