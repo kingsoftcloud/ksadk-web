@@ -80,7 +80,7 @@ export function ExecutionModeMenu({
           className={cn(
             'flex h-8 max-w-[8.5rem] items-center gap-1 rounded-xl px-2 text-[12px] transition',
             mode === 'goal'
-              ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300'
+              ? 'bg-neutral-50 text-neutral-700 hover:bg-neutral-100 dark:bg-neutral-950/40 dark:text-neutral-300'
               : 'text-text-secondary hover:bg-muted hover:text-text-primary',
           )}
           aria-label={`当前执行模式：${modeLabels[mode]}`}

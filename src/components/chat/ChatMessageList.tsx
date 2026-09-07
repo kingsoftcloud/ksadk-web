@@ -411,10 +411,10 @@ function MessageAttachments({
 function SystemMessage({ message }: { message: Message }) {
   return (
     <div className="w-full px-0 py-2 sm:px-4">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+      <div className="mx-auto max-w-3xl rounded-xl border border-neutral-200/70 bg-neutral-50/60 px-4 py-3 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900/40 dark:text-neutral-300">
         <div className="flex items-center gap-2 font-medium">
           {message.status === 'running' ? (
-            <RefreshCcw className="h-4 w-4 animate-spin text-amber-600 dark:text-amber-300" />
+            <RefreshCcw className="h-4 w-4 animate-spin text-neutral-600 dark:text-neutral-300" />
           ) : message.status === 'failed' ? (
             <StopCircle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
           ) : (
@@ -423,13 +423,13 @@ function SystemMessage({ message }: { message: Message }) {
           <span>{message.content}</span>
         </div>
         {message.compactedUntilSeqId ? (
-          <div className="mt-1 text-xs text-amber-700/80 dark:text-amber-200/80">
+          <div className="mt-1 text-xs text-neutral-700/80 dark:text-neutral-200/80">
             已折叠到会话事件 #{message.compactedUntilSeqId}
           </div>
         ) : null}
         {message.summary ? (
-          <details className="mt-3 rounded-xl border border-amber-200/80 bg-white/70 px-3 py-2 dark:border-amber-900/60 dark:bg-slate-950/40">
-            <summary className="cursor-pointer select-none text-xs font-medium text-amber-800 dark:text-amber-200">
+          <details className="mt-3 rounded-xl border border-neutral-200/80 bg-white/70 px-3 py-2 dark:border-neutral-900/60 dark:bg-slate-950/40">
+            <summary className="cursor-pointer select-none text-xs font-medium text-neutral-800 dark:text-neutral-200">
               查看压缩摘要
             </summary>
             <div className="mt-2 text-[13px] leading-relaxed text-slate-700 dark:text-slate-200">
@@ -760,7 +760,7 @@ function ChatMessage({
               className={cn(
                 'group/details mb-2 overflow-hidden rounded-md border text-sm transition-colors',
                 tool.status === 'paused'
-                  ? 'border-amber-200/80 bg-amber-50/25 text-slate-700 dark:border-amber-900/60 dark:bg-amber-950/10 dark:text-slate-200'
+                  ? 'border-neutral-200/80 bg-neutral-50/25 text-slate-700 dark:border-neutral-900/60 dark:bg-neutral-950/10 dark:text-slate-200'
                   : tool.status === 'error'
                     ? 'border-rose-200/80 bg-rose-50/25 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/10 dark:text-rose-200'
                     : 'border-slate-200/80 bg-slate-50/40 text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/30 dark:text-slate-300',
@@ -771,7 +771,7 @@ function ChatMessage({
                   {tool.status === 'running' ? (
                     <RefreshCcw className="h-4 w-4 animate-spin text-slate-500" />
                   ) : tool.status === 'paused' ? (
-                    <ShieldCheck className="h-4 w-4 text-amber-500" />
+                    <ShieldCheck className="h-4 w-4 text-neutral-500" />
                   ) : tool.status === 'error' ? (
                     <XCircle className="h-4 w-4 text-rose-500" />
                   ) : (
@@ -797,7 +797,7 @@ function ChatMessage({
                 className={cn(
                   'flex flex-col gap-3 border-t px-3 py-3 font-mono text-[13px] leading-relaxed',
                   tool.status === 'paused'
-                    ? 'border-amber-200/70 dark:border-amber-900/60'
+                    ? 'border-neutral-200/70 dark:border-neutral-900/60'
                     : tool.status === 'error'
                       ? 'border-rose-200/70 dark:border-rose-900/60'
                       : 'border-slate-200/70 dark:border-slate-800',
@@ -823,7 +823,7 @@ function ChatMessage({
                       </div>
                     ) : null}
                     {tool.serverLabel ? (
-                      <div className="mt-1 text-xs text-amber-700/80 dark:text-amber-200/80">
+                      <div className="mt-1 text-xs text-neutral-700/80 dark:text-neutral-200/80">
                         MCP Server: {tool.serverLabel}
                       </div>
                     ) : null}
