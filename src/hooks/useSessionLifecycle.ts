@@ -826,7 +826,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const [messagePage, eventPage] = await Promise.all([
         canLoadOlderMessages
           ? api.listSessionMessages(sessionId, {
-              beforeSeqId: historyState.nextCursor,
+              beforeSeqId: historyState.nextCursor ?? undefined,
               limit: SESSION_MESSAGES_PAGE_SIZE,
               includeReasoning: true,
               includeToolEvents: true,

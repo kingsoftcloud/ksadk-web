@@ -83,7 +83,7 @@ export function ingestSessionEventRecord(
   const terminalStatus = envelope
     ? sessionEventRunStatus(envelope as never)
     : null;
-  if (RUN_TERMINAL_STATUSES.has(terminalStatus)) {
+  if (terminalStatus !== null && RUN_TERMINAL_STATUSES.has(terminalStatus)) {
     const content = typeof envelope?.Content === 'object' && envelope.Content !== null
       ? envelope.Content as Record<string, unknown>
       : {};
@@ -148,7 +148,7 @@ export function ingestApprovalRequestedEvent(event: {
 /** Ingest the authoritative terminal fact carried by a live approval stream. */
 export function ingestApprovalResolvedEvent(event: {
   approvalRequestId: string;
-  decision: 'approved' | 'rejected';
+  decision: 'approved' | 'rejected' | 'cancelled';
   revision?: number;
   sessionId?: string | null;
 }): Interaction | null {

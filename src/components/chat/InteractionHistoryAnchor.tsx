@@ -36,7 +36,6 @@ export function InteractionHistoryAnchor({ interaction }: { interaction: Interac
   }
   const terminal =
     interaction.status === 'resolved'
-    || interaction.status === 'cancelled'
     || interaction.status === 'expired';
   const schemaKeys = requestSchemaKeys(interaction.requestSchema);
 

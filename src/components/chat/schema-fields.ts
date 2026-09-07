@@ -1,6 +1,9 @@
 export type InteractionRequestSchemaField = {
   name: string;
   title?: string;
+  description?: string;
+  allowOther?: boolean;
+  secret?: boolean;
   type: 'string' | 'number' | 'boolean' | 'array' | 'unknown';
   required: boolean;
   enumValues?: unknown[];
@@ -31,16 +34,23 @@ export function schemaFields(schema: Record<string, unknown>): InteractionReques
         ? (rawType as 'string' | 'number' | 'boolean' | 'array')
         : 'unknown';
     const items = asRecord(property?.items);
+    const choices = Array.isArray(property?.['x-codex-options'])
+      ? property['x-codex-options'].map(asRecord).map((option) => option?.label).filter((label) => typeof label === 'string')
+      : [];
+    const nativeOptions = choices.length ? choices : undefined;
     fields.push({
       name,
       title: typeof property?.title === 'string' ? property.title : undefined,
+      description: typeof property?.description === 'string' ? property.description : undefined,
+      allowOther: property?.['x-codex-is-other'] === true,
+      secret: property?.['x-codex-is-secret'] === true,
       type,
       required: required.has(name),
       enumValues: Array.isArray(property?.enum)
         ? property.enum
         : Array.isArray(items?.enum)
           ? items.enum
-          : undefined,
+          : nativeOptions,
     });
   }
   return fields;

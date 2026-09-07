@@ -77,7 +77,7 @@ function readSubmitError(
     return {
       code: String(error.code),
       message: String(error.message),
-      retryable: Boolean(error.retryable),
+      retryable: Boolean('retryable' in error && error.retryable),
     };
   }
   return null;

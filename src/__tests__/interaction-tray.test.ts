@@ -91,7 +91,7 @@ describe('InteractionTray contract', () => {
     }]);
     const source = readSource('components/chat/InteractionSchemaForm.tsx');
     expect(source).toContain("field.type === 'array'");
-    expect(source).toContain('type="checkbox"');
+    expect(source).toContain("'checkbox' : 'radio'");
   });
 
   it('resolved anchors expand into a read-only snapshot with schema summary', () => {
@@ -176,5 +176,19 @@ describe('A2UI v0.9.1 validation and safe fallback', () => {
         catalog,
       ),
     ).toBe('basic-controls');
+  });
+});
+
+
+describe('native question fields', () => {
+  it('keeps suggested choices and custom answers for a multi-select question', () => {
+    expect(schemaFields({ type: 'object', properties: { checks: {
+      type: 'array', items: { type: 'string' },
+      'x-codex-options': [{ label: '单测' }, { label: '回归' }],
+      'x-codex-is-other': true, description: '请选择检查项目',
+    } }, required: ['checks'] })).toMatchObject([{
+      name: 'checks', type: 'array', enumValues: ['单测', '回归'],
+      allowOther: true, required: true, description: '请选择检查项目',
+    }]);
   });
 });

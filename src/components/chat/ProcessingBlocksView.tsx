@@ -122,8 +122,8 @@ function ToolRow({
   isStreaming: boolean;
   /** The composer tray owns all interaction decisions once normalized. */
   interactionRecord?: Interaction;
-  onRespondToApproval?: Props['onRespondToApproval'];
-  onRespondToAguiApproval?: Props['onRespondToAguiApproval'];
+  onRespondToApproval?: ProcessingBlocksViewProps['onRespondToApproval'];
+  onRespondToAguiApproval?: ProcessingBlocksViewProps['onRespondToAguiApproval'];
 }) {
   const status = tool?.status ?? block.status;
   const args = tool?.args ?? block.args;

@@ -10,12 +10,12 @@ import type {
   InteractionOutcome,
   InteractionSource,
   InteractionStatus,
-} from './types.js';
+} from '../types.js';
 
 export type RawInteractionFields = {
   interactionId: string;
   sessionId: string;
-  runId?: string | null;
+  runId?: unknown;
   kind?: unknown;
   title?: unknown;
   message?: unknown;
