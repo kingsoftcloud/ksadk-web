@@ -343,8 +343,10 @@ test('context hover shows model metadata without inventing usage and supports pi
   const popup = page.getByRole('dialog', { name: '上下文', exact: true });
   await trigger.hover();
   await expect(popup).toBeVisible();
-  await expect(popup).toContainText('1,024,000 tokens（模型配置）');
-  await expect(popup).toContainText('等待运行时报告用量');
+  await expect(popup).toContainText('上下文用量暂不可用');
+  await expect(popup).toContainText('模型窗口：1,024,000 tokens');
+  await expect(popup).not.toContainText('模型配置');
+  await expect(popup).not.toContainText('运行时报告');
   await expect(popup).not.toContainText('% 已使用');
   await page.mouse.move(0, 0);
   await expect(popup).toBeHidden();
@@ -359,5 +361,5 @@ test('context hover shows model metadata without inventing usage and supports pi
   await page.getByRole('button', { name: /模型 Fixture Model/ }).click();
   await page.getByRole('menuitemradio', { name: 'Fixture Model Alt' }).click();
   await trigger.hover();
-  await expect(popup).toContainText('200,000 tokens（模型配置）');
+  await expect(popup).toContainText('模型窗口：200,000 tokens');
 });

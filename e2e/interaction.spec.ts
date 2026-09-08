@@ -148,7 +148,7 @@ async function installFixture(page, state, options = {}) {
         : {
             schema_version: 1,
             command_id: `cmd-${state.submits.length}`,
-            status: 'accepted',
+            status: options.receiptStatus || 'accepted',
           };
       if (!alreadyResolved) {
         state.resolvedIds.add(body.InteractionId);
@@ -173,9 +173,21 @@ async function installFixture(page, state, options = {}) {
       return;
     }
 
+    if (action === 'SubscribeRunEvents' && state.subscriptions) {
+      state.subscriptions.push(Object.fromEntries(new URL(route.request().url()).searchParams));
+      await route.fulfill({ status: 200, contentType: 'text/event-stream',
+        body: sse([resolvedEvent()]) + 'event: __done__\ndata: {}\n\n' });
+      return;
+    }
+
     const events = typeof state.events === 'function' ? state.events() : state.events;
     const payloadByAction = {
-      GetAgentUiBootstrap: bootstrap(options.interactionV1 !== false, options.executionModes === true),
+      GetAgentUiBootstrap: {
+        ...bootstrap(options.interactionV1 !== false, options.executionModes === true),
+        ...(options.lifecycle ? { Capabilities: {
+          ...bootstrap().Capabilities, RunLifecycle: { Enabled: true, Resume: true },
+        } } : {}),
+      },
       ListSessions: {
         Sessions: state.sessionCreated
           ? [{ SessionId: SESSION_ID, AgentId: AGENT_ID, Title: 'Interaction fixture' }]
@@ -250,7 +262,7 @@ test('approve sends exactly one SubmitInteraction and replay never resubmits', a
   await page.reload();
   const tray = page.getByTestId('interaction-tray');
   await expect(tray).toBeVisible();
-  await expect(page.getByTestId('interaction-tray-title')).toHaveText('问题');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('人工确认');
   expect(state.submits).toHaveLength(0);
 
   // Double click: exactly one submit leaves the client.
@@ -325,6 +337,33 @@ test('reject stays resolving after the receipt and resolves on the terminal even
   await expect(tray).toHaveCount(0);
   expect(state.submits).toHaveLength(1);
 });
+
+for (const receiptStatus of ['accepted', 'duplicate']) {
+test(`${receiptStatus} approval follows terminal events without a page reload`, async ({ page }) => {
+  const state = {
+    submits: [], subscriptions: [], resolvedIds: new Set(), sessionCreated: false,
+    events: () => {
+      const event = requestedEvent();
+      event.Content.interaction.run_id = 'inv-1';
+      return [event];
+    }, history: historyWithApproval(),
+  };
+  await installFixture(page, state, { lifecycle: true, receiptStatus });
+  await createSession(page);
+  await page.reload();
+  await expect(page.getByTestId('interaction-tray')).toBeVisible();
+  await page.getByTestId('interaction-approve').click();
+  await expect.poll(() => state.subscriptions.length).toBe(1);
+  expect(state.subscriptions[0]).toMatchObject({
+    SessionId: SESSION_ID, InvocationId: 'inv-1', AfterSeqId: '10',
+  });
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  await expect(page.getByTestId('interaction-history-anchor')).toHaveAttribute(
+    'data-interaction-status', 'resolved',
+  );
+  expect(state.submits).toHaveLength(1);
+});
+}
 
 test('structured form submits the full response payload', async ({ page }) => {
   const state = {
@@ -516,7 +555,7 @@ test('multiple pending interactions queue in one tray with count badge and switc
   await expect(trays).toHaveCount(1);
   await expect(trays).toHaveAttribute('data-interaction-count', '2');
   await expect(page.getByTestId('interaction-tray-count')).toHaveText('1 of 2');
-  await expect(page.getByTestId('interaction-tray-title')).toHaveText('问题');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('删除文件');
   await expect(page.getByText('确认删除 demo.txt？')).toBeVisible();
   // Only the current item's action buttons are rendered.
   await expect(page.getByTestId('interaction-approve')).toHaveCount(1);
@@ -524,7 +563,7 @@ test('multiple pending interactions queue in one tray with count badge and switc
   // Switch to the second item.
   await page.getByTestId('interaction-tray-next').click();
   await expect(page.getByTestId('interaction-tray-count')).toHaveText('2 of 2');
-  await expect(page.getByTestId('interaction-tray-title')).toHaveText('问题');
+  await expect(page.getByTestId('interaction-tray-title')).toHaveText('执行命令');
   await expect(page.getByTestId('interaction-tray-prev')).toBeEnabled();
   await expect(page.getByTestId('interaction-tray-next')).toBeDisabled();
 });

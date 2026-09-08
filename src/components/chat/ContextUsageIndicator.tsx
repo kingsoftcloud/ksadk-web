@@ -80,7 +80,7 @@ export function ContextUsageIndicator({ indicator, onCompact, disabled }: Contex
           {`${formatTokens(indicator.usedTokens!)} tokens`}
           {indicator.contextWindowTokens ? ` / ${formatTokens(indicator.contextWindowTokens)}` : ''}
         </p>}
-        {hasUsage && indicator.contextWindowTokens && <p className="mt-1 text-text-muted">
+        {indicator.contextWindowTokens && <p className="mt-1 text-text-muted">
           模型窗口：{formatTokens(indicator.contextWindowTokens)} tokens
         </p>}
         {hasUsage && !indicator.contextWindowTokens && <p className="mt-1 text-text-muted">模型窗口大小未报告</p>}

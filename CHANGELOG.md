@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.7 - 2026-09-09
+
+- Isolate page state, cached sessions, drafts, and delayed callbacks by the
+  authenticated principal so switching identities cannot reveal or mutate the
+  previous identity's conversation state.
+- Restore scoped semantic styles in the standalone workbench and keep the
+  full-screen initialization shell correctly sized.
+- Hide context percentages and provenance labels when the runtime does not
+  supply authoritative usage metadata.
+- Resume the same run's event subscription after an accepted or duplicate
+  interaction receipt, so approval results and tool output appear without a
+  manual page reload.
+
 ## 0.3.6 - 2026-09-08
 
 - Restore full-screen sidebar and conversation layout in Hosted UI and embedded

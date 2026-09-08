@@ -31,6 +31,7 @@ import {
   createSessionEventCursor,
 } from '../utils/session-event-history.js';
 import { ingestSessionEventRecord } from '../core/interaction/index.js';
+import type { Interaction } from '../core/interaction/types.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
@@ -381,6 +382,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     },
     [api],
   );
+
+  const followAcceptedInteraction = useCallback((interaction: Interaction) => {
+    // The inbox receipt does not mean the run has finished resuming. Follow
+    // its durable identity even while GetSession still projects waiting_input.
+    if (!uiCapabilities.RunLifecycle.Enabled || !interaction.runId
+      || agentIdRef.current !== agentId
+      || currentSessionIdRef.current !== interaction.sessionId
+      || runSubscriptionAbortRef.current) return;
+    void subscribeRunEvents({
+      sessionId: interaction.sessionId,
+      invocationId: interaction.runId,
+      afterSeqId: maxSeqIdFromEvents(
+        eventHistoryBySessionRef.current.get(interaction.sessionId)?.events || [],
+      ),
+    });
+  }, [agentId, subscribeRunEvents, uiCapabilities.RunLifecycle.Enabled]);
 
   const loadSession = useCallback(
     async (sessionId: string) => {
@@ -905,6 +922,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [api, loadFeedbackForMessages]);
 
   return {
+    followAcceptedInteraction,
     fetchSessions,
     loadMoreSessions,
     loadSession,
