@@ -1,12 +1,13 @@
 /* Component-safe stylesheet for embedded hosts. No html/body/#root reset. */
 @import "./motion.css";
 @import "tailwindcss/theme";
+@import "./embed-preflight.css";
 @import "tailwindcss/utilities";
 @config "../tailwind.embed.config.ts";
 @plugin "@tailwindcss/typography";
 @plugin "tailwindcss-animate";
 
-@theme {
+@theme inline {
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-accent: hsl(var(--accent));
