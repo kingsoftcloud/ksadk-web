@@ -36,7 +36,9 @@ export function ContextUsageIndicator({ indicator, onCompact, disabled }: Contex
   }, [open]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState('');
-  const percent = Math.max(0, Math.min(100, indicator.percent ?? 0));
+  const hasUsage = typeof indicator.usedTokens === 'number' && Number.isFinite(indicator.usedTokens) && indicator.usedTokens >= 0;
+  const percent = hasUsage && typeof indicator.percent === 'number' && Number.isFinite(indicator.percent)
+    ? Math.max(0, Math.min(100, indicator.percent)) : undefined;
   const compact = async () => {
     if (!onCompact || busy || disabled) return;
     setBusy(true);
@@ -61,7 +63,7 @@ export function ContextUsageIndicator({ indicator, onCompact, disabled }: Contex
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"
           className={busy ? 'animate-pulse' : undefined} style={{ display: 'block', flexShrink: 0 }}>
           <circle cx="8" cy="8" r="6" fill="none" stroke="var(--ksadk-menu-border, #b8bcb5)" strokeWidth="2" />
-          {indicator.percent !== undefined && <circle cx="8" cy="8" r="6" fill="none"
+          {percent !== undefined && <circle cx="8" cy="8" r="6" fill="none"
             stroke="currentColor" strokeWidth="2" pathLength="100"
             strokeDasharray={`${percent} 100`} transform="rotate(-90 8 8)" />}
         </svg>
@@ -73,17 +75,16 @@ export function ContextUsageIndicator({ indicator, onCompact, disabled }: Contex
       }} role={open ? 'dialog' : undefined} aria-label={open ? '上下文' : undefined}
         className={cn('absolute bottom-full right-0 z-30 w-60 rounded-xl border border-border bg-background p-4 text-sm text-foreground shadow-lg',
           open ? 'block' : 'hidden')}>
-        <p className={cn("font-medium", busy && "waiting-thinking-text")}>{busy ? '正在压缩上下文…' : indicator.label}</p>
-        <p className="mt-1 text-text-secondary">
-          {indicator.usedTokens !== undefined ? `${formatTokens(indicator.usedTokens)} tokens` : '等待运行时报告用量'}
-          {indicator.usedTokens !== undefined && indicator.contextWindowTokens ? ` / ${formatTokens(indicator.contextWindowTokens)}` : ''}
-        </p>
-        {indicator.contextWindowTokens && <p className="mt-1 text-text-muted">
-          模型窗口：{formatTokens(indicator.contextWindowTokens)} tokens
-          {indicator.contextWindowSource === 'model' ? '（模型配置）' : '（运行时报告）'}
+        <p className={cn("font-medium", busy && "waiting-thinking-text")}>{busy ? '正在压缩上下文…' : hasUsage ? indicator.label : '上下文用量暂不可用'}</p>
+        {hasUsage && <p className="mt-1 text-text-secondary">
+          {`${formatTokens(indicator.usedTokens!)} tokens`}
+          {indicator.contextWindowTokens ? ` / ${formatTokens(indicator.contextWindowTokens)}` : ''}
         </p>}
-        {indicator.usedTokens !== undefined && !indicator.contextWindowTokens && <p className="mt-1 text-text-muted">模型窗口大小未报告</p>}
-        {indicator.percent !== undefined && <p className="text-text-muted">{indicator.percent}% 已使用</p>}
+        {hasUsage && indicator.contextWindowTokens && <p className="mt-1 text-text-muted">
+          模型窗口：{formatTokens(indicator.contextWindowTokens)} tokens
+        </p>}
+        {hasUsage && !indicator.contextWindowTokens && <p className="mt-1 text-text-muted">模型窗口大小未报告</p>}
+        {percent !== undefined && <p className="text-text-muted">{percent}% 已使用</p>}
         {open && <>
           <button type="button" onClick={() => void compact()} disabled={!onCompact || busy || disabled}
             className="mt-3 w-full rounded-lg border border-border bg-muted px-3 py-2 disabled:opacity-50">
