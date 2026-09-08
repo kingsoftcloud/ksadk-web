@@ -39,3 +39,18 @@ test('semantic utilities resolve theme variables at the component, not document 
   assert.ok(sidebar.nodes.some(node => node.prop === 'background-color'
     && node.value === 'hsl(var(--sidebar))'), 'sidebar must use its local theme variable');
 });
+
+test('standalone workbench also emits local sidebar and text semantics', async () => {
+  const standalone = new URL('../src/index.css', import.meta.url).pathname;
+  const output = await postcss([tailwind()]).process(readFileSync(standalone, 'utf8'), { from: standalone });
+  for (const [selector, property, value] of [
+    ['.bg-sidebar', 'background-color', 'hsl(var(--sidebar))'],
+    ['.text-text-secondary', 'color', 'hsl(var(--text-secondary))'],
+  ]) {
+    let found = false;
+    output.root.walkRules(selector, rule => {
+      found ||= rule.nodes.some(node => node.prop === property && node.value === value);
+    });
+    assert.ok(found, `standalone CSS is missing ${selector}`);
+  }
+});

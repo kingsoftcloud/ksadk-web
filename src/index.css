@@ -28,6 +28,22 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Semantic utilities used by the shared workbench, resolved in the active
+   light/dark scope just like the embedded stylesheet. */
+@theme inline {
+  --color-surface: hsl(var(--surface));
+  --color-text-primary: hsl(var(--foreground));
+  --color-text-secondary: hsl(var(--text-secondary));
+  --color-text-muted: hsl(var(--text-muted));
+  --color-code-bg: hsl(var(--code-bg));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-hover: hsl(var(--sidebar-hover));
+  --color-sidebar-active: hsl(var(--sidebar-active));
+  --color-sidebar-text: hsl(var(--sidebar-text));
+  --color-sidebar-text-secondary: hsl(var(--sidebar-text-secondary));
+  --color-sidebar-text-muted: hsl(var(--sidebar-text-muted));
+}
+
 @layer base {
   :root {
     --primary: 173 80% 40%;          /* wework teal 20 184 166 */
