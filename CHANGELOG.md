@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6 - 2026-09-08
+
+- Restore full-screen sidebar and conversation layout in Hosted UI and embedded
+  workbenches by placing layout utilities beneath the stylesheet scope wrapper.
+- Give assistant responses more reading space on wide screens.
+- Render inline code without decorative borders or backgrounds, and wrap long
+  code fragments without overflowing the conversation.
+- Improve Markdown table sizing, cell wrapping, and horizontal scrolling.
+
 ## 0.3.5 - 2026-09-07
 
 - Add an instance-scoped `AgentEngineClient` and `ApiFacadeImpl` so Studio and
