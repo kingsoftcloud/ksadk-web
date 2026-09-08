@@ -134,6 +134,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     fetchSessions,
     loadMoreSessions,
     loadSession,
+    followAcceptedInteraction,
     loadOlderSessionMessages,
     createNewSession,
     adoptCreatedSession,
@@ -265,6 +266,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     currentSessionId,
     api,
     interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
+    onAcceptedInteraction: followAcceptedInteraction,
     legacyResponsesApproval: (approvalRequestId, approve) => {
       respondToApprovalRef.current({ approvalRequestId, approve });
     },

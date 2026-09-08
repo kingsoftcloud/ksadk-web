@@ -22,6 +22,7 @@ type UseInteractionsContext = {
    * the 0.3.1 Responses/AG-UI fallback callbacks.
    */
   interactionV1Enabled: boolean;
+  onAcceptedInteraction?: (interaction: Interaction) => void;
   /** 0.3.1 fallback: official `mcp_approval_response` submission. */
   legacyResponsesApproval?: (approvalRequestId: string, approve: boolean) => void;
   /** 0.3.1 fallback: AG-UI `resumeAguiInterrupt`. */
@@ -80,6 +81,7 @@ export function useInteractions(ctx: UseInteractionsContext) {
       : [];
   }, [version, ctx.currentSessionId]);
 
+  const { currentSessionId, interactionV1Enabled, onAcceptedInteraction } = ctx;
   const respond = useCallback(
     (input: {
       interactionId: string;
@@ -87,8 +89,19 @@ export function useInteractions(ctx: UseInteractionsContext) {
       action: InteractionAction;
       response: Record<string, unknown>;
       idempotencyKey: string;
-    }): Promise<InteractionReceipt> => client.respond(input),
-    [client],
+    }): Promise<InteractionReceipt> => {
+      const interaction = currentSessionId
+        ? sharedInteractionStore.get(currentSessionId, input.interactionId)
+        : null;
+      return client.respond(input).then((receipt) => {
+        if (interactionV1Enabled && interaction
+          && (receipt.status === 'accepted' || receipt.status === 'duplicate')) {
+          onAcceptedInteraction?.(interaction);
+        }
+        return receipt;
+      });
+    },
+    [client, currentSessionId, interactionV1Enabled, onAcceptedInteraction],
   );
 
   return {
