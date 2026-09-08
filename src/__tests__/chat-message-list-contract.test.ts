@@ -53,6 +53,13 @@ describe('chat message list contracts', () => {
     expect(composerSource).toContain('<ContextUsageIndicator');
   });
 
+  it('uses the available conversation width for assistant content', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+
+    expect(source).toContain('max-w-[60rem] px-2 sm:px-4');
+    expect(source).not.toContain('group mx-auto mb-3 w-full max-w-3xl px-6');
+  });
+
   it('bypasses the stickiness gate to pin to the bottom on initial session load', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
 

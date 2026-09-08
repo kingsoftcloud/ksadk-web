@@ -693,7 +693,7 @@ function ChatMessage({
   const reasoningStreaming = isStreaming && isLastMessage && !message.content;
 
   return (
-    <div className="group mx-auto mb-3 w-full max-w-3xl px-6">
+    <div className="group mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
       {showAgentHeader ? (
         <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
           <Bot className="w-3.5 h-3.5" />

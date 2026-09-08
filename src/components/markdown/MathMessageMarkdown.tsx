@@ -31,7 +31,7 @@ const markdownComponents = {
 
     if (isInline) {
       return (
-        <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-md text-[13.5px] font-mono text-slate-800 dark:text-slate-200 before:content-none after:content-none border border-slate-200 dark:border-slate-700" {...props}>
+        <code className="break-all font-mono text-[0.92em] text-slate-800 dark:text-slate-200 before:content-none after:content-none" {...props}>
           {children}
         </code>
       );
@@ -44,18 +44,18 @@ const markdownComponents = {
   },
   table({ children, ...props }: MarkdownTableProps) {
     return (
-      <div className="overflow-x-auto my-4 border border-slate-200 dark:border-slate-700 rounded-lg">
-        <table className="w-full text-sm text-left my-0" {...props}>
+      <div className="my-4 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+        <table className="my-0 w-full min-w-[36rem] table-auto text-left text-sm" {...props}>
           {children}
         </table>
       </div>
     );
   },
   th({ children, ...props }: MarkdownCellProps) {
-    return <th className="bg-slate-50 dark:bg-slate-800/50 px-4 py-2 font-semibold border-b border-slate-200 dark:border-slate-700" {...props}>{children}</th>;
+    return <th className="break-words border-b border-slate-200 bg-slate-50 px-3 py-2 text-left align-top font-semibold dark:border-slate-700 dark:bg-slate-800/50" {...props}>{children}</th>;
   },
   td({ children, ...props }: MarkdownDataCellProps) {
-    return <td className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0" {...props}>{children}</td>;
+    return <td className="break-words border-b border-slate-100 px-3 py-2 align-top dark:border-slate-800 last:border-0" {...props}>{children}</td>;
   },
   a({ children, href, ...props }: MarkdownLinkProps) {
      return <a href={href} className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>

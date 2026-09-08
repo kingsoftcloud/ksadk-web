@@ -67,7 +67,7 @@ const markdownComponents = {
 
     if (isInline) {
       return (
-        <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[13.5px] text-text-primary before:content-none after:content-none" {...props}>
+        <code className="break-all font-mono text-[0.92em] text-text-primary before:content-none after:content-none" {...props}>
           {children}
         </code>
       );
@@ -91,18 +91,18 @@ const markdownComponents = {
   },
   table({ children, ...props }: MarkdownTableProps) {
     return (
-      <div className="mb-3 max-w-full overflow-x-auto">
-        <table className="w-full min-w-max border-collapse text-sm text-foreground" {...props}>
+      <div className="mb-3 max-w-full overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[36rem] table-auto border-collapse text-sm text-foreground" {...props}>
           {children}
         </table>
       </div>
     );
   },
   th({ children, ...props }: MarkdownCellProps) {
-    return <th className="border-b border-border px-3 py-2 text-left font-semibold text-foreground" {...props}>{children}</th>;
+    return <th className="break-words border-b border-border bg-muted/40 px-3 py-2 text-left align-top font-semibold text-foreground" {...props}>{children}</th>;
   },
   td({ children, ...props }: MarkdownDataCellProps) {
-    return <td className="border-b border-border px-3 py-2 text-text-secondary" {...props}>{children}</td>;
+    return <td className="break-words border-b border-border px-3 py-2 align-top text-text-secondary" {...props}>{children}</td>;
   },
   a({ children, href, ...props }: MarkdownLinkProps) {
      return <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>

@@ -327,35 +327,37 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   if (bootstrapStatus !== 'ready') {
     const authRequired = bootstrapStatus === 'auth-required';
     const bootstrapContent = (
-      <div className="ksadk-web fixed inset-0 flex h-[var(--app-height)] min-h-[var(--app-height)] items-center justify-center bg-slate-50 px-6 font-sans text-slate-800 dark:bg-slate-950 dark:text-slate-100">
-        <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-blue-600 dark:bg-blue-950/50">
-            {bootstrapStatus === 'loading' ? '…' : '↗'}
+      <div className="ksadk-web">
+        <div className="fixed inset-0 flex h-[var(--app-height)] min-h-[var(--app-height)] items-center justify-center bg-slate-50 px-6 font-sans text-slate-800 dark:bg-slate-950 dark:text-slate-100">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-blue-600 dark:bg-blue-950/50">
+              {bootstrapStatus === 'loading' ? '…' : '↗'}
+            </div>
+            <h1 className="text-xl font-semibold">
+              {bootstrapStatus === 'loading'
+                ? '正在连接 Agent'
+                : authRequired
+                  ? '需要有效的访问链接'
+                  : 'Agent 暂时无法连接'}
+            </h1>
+            {bootstrapStatus !== 'loading' ? (
+              <>
+                <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  {bootstrapErrorMessage}
+                  {authRequired
+                    ? ' 请从 AgentEngine 控制台重新打开 Dashboard，或使用 agentengine dashboard open 获取临时链接。'
+                    : ''}
+                </p>
+                <button
+                  type="button"
+                  className="mt-6 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
+                  onClick={() => window.location.reload()}
+                >
+                  重新加载
+                </button>
+              </>
+            ) : null}
           </div>
-          <h1 className="text-xl font-semibold">
-            {bootstrapStatus === 'loading'
-              ? '正在连接 Agent'
-              : authRequired
-                ? '需要有效的访问链接'
-                : 'Agent 暂时无法连接'}
-          </h1>
-          {bootstrapStatus !== 'loading' ? (
-            <>
-              <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                {bootstrapErrorMessage}
-                {authRequired
-                  ? ' 请从 AgentEngine 控制台重新打开 Dashboard，或使用 agentengine dashboard open 获取临时链接。'
-                  : ''}
-              </p>
-              <button
-                type="button"
-                className="mt-6 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
-                onClick={() => window.location.reload()}
-              >
-                重新加载
-              </button>
-            </>
-          ) : null}
         </div>
       </div>
     );
@@ -391,7 +393,8 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
   };
 
   const content = (
-    <div className="ksadk-web fixed inset-0 flex h-[var(--app-height)] min-h-[var(--app-height)] overflow-hidden bg-white font-sans text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+    <div className="ksadk-web">
+      <div className="fixed inset-0 flex h-[var(--app-height)] min-h-[var(--app-height)] overflow-hidden bg-white font-sans text-slate-800 dark:bg-slate-900 dark:text-slate-200">
       <ConnectedSidebar
         uiCapabilities={uiCapabilities}
         createNewSession={createNewSession}
@@ -524,6 +527,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
           />
         </Suspense>
       ) : null}
+      </div>
     </div>
   );
 
