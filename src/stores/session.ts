@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { authorizationCache } from '../utils/authorization-cache.js';
 import type { Session } from '../components/chat/types.js';
 import { buildSessionPaginationState, mergeLoadedPages } from '../utils/session-pagination.js';
 
@@ -59,9 +60,9 @@ function sessionUpdatedAtValue(session: Session): number {
 
 const PINNED_SESSIONS_STORAGE_KEY = 'ksadk.pinnedSessionIds';
 
-function readPinnedSessionIds(): string[] {
+export function readPinnedSessionIds(): string[] {
   try {
-    const raw = globalThis.localStorage?.getItem(PINNED_SESSIONS_STORAGE_KEY);
+    const raw = globalThis.localStorage?.getItem(authorizationCache.key(PINNED_SESSIONS_STORAGE_KEY));
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
   } catch {
@@ -70,8 +71,9 @@ function readPinnedSessionIds(): string[] {
 }
 
 function writePinnedSessionIds(ids: string[]) {
+  if (!authorizationCache.writable) return;
   try {
-    globalThis.localStorage?.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(ids));
+    globalThis.localStorage?.setItem(authorizationCache.key(PINNED_SESSIONS_STORAGE_KEY), JSON.stringify(ids));
   } catch {
     // Ignore unavailable storage, e.g. private mode.
   }

@@ -1,11 +1,12 @@
 import { create } from 'zustand';
+import { authorizationCache } from '../utils/authorization-cache.js';
 import type { PermissionMode } from '../core/run/types.js';
 
 const STORAGE_KEY = 'ksadk.web.permission-mode';
 
-function readPermissionMode(): PermissionMode {
+export function readPermissionMode(): PermissionMode {
   try {
-    const mode = globalThis.localStorage?.getItem(STORAGE_KEY);
+    const mode = globalThis.localStorage?.getItem(authorizationCache.key(STORAGE_KEY));
     return mode === 'ask' || mode === 'full' || mode === 'risk' ? mode : 'risk';
   } catch {
     // Private/locked-down storage must not make the composer unusable.
@@ -14,8 +15,9 @@ function readPermissionMode(): PermissionMode {
 }
 
 function writePermissionMode(mode: PermissionMode) {
+  if (!authorizationCache.writable) return;
   try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, mode);
+    globalThis.localStorage?.setItem(authorizationCache.key(STORAGE_KEY), mode);
   } catch {
     // The in-memory selection remains valid when persistence is unavailable.
   }

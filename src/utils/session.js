@@ -1,3 +1,5 @@
+import { authorizationCache } from './authorization-cache.js';
+
 const SESSION_STORAGE_KEY_PREFIX = 'ksadk:webui:selected-session:';
 
 function normalizeAgentId(agentId) {
@@ -22,7 +24,7 @@ function resolveStorage(storage) {
 }
 
 export function buildSessionStorageKey(agentId) {
-  return `${SESSION_STORAGE_KEY_PREFIX}${normalizeAgentId(agentId)}`;
+  return authorizationCache.key(`${SESSION_STORAGE_KEY_PREFIX}${normalizeAgentId(agentId)}`);
 }
 
 export function readPersistedSessionId(agentId, storage) {
@@ -40,6 +42,7 @@ export function readPersistedSessionId(agentId, storage) {
 }
 
 export function writePersistedSessionId(agentId, sessionId, storage) {
+  if (!authorizationCache.writable) return;
   const backend = resolveStorage(storage);
   if (!backend) {
     return;

@@ -1,4 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { AgentAuthorizationBoundary } from './components/AgentAuthorizationBoundary.js';
 import { useUIStore } from './stores/ui.js';
 import { useBootstrapStore } from './stores/bootstrap.js';
 import { useModelStore } from './stores/model.js';
@@ -63,13 +64,37 @@ export type AgentWorkbenchFeatureFlags = Record<string, boolean>;
 export type AgentWorkbenchInitialSurface = 'chat' | 'tui' | 'workspace';
 
 export type AgentWorkbenchProps = {
+  /** Opaque cache scope from the authenticated host; changing it reloads the page. */
+  authorizationScopeKey?: string;
   apiAdapter?: import('./core/api/types.js').ApiFacade;
   featureFlags?: AgentWorkbenchFeatureFlags;
   initialSurface?: AgentWorkbenchInitialSurface;
   routeShell?: React.ComponentType<{ children: React.ReactNode }>;
 };
 
-export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell: RouteShell }: AgentWorkbenchProps = {}) {
+export function AgentWorkbench(props: AgentWorkbenchProps = {}) {
+  const api = props.apiAdapter || apiFacade;
+  const [bootstrap, setBootstrap] = useState<{ api: typeof api; data: unknown } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api.getAgentUiBootstrap(undefined, { signal: controller.signal }).then(data => {
+      if (!controller.signal.aborted) setBootstrap({ api, data });
+    }).catch(() => {
+      // Preserve the existing bootstrap error/auth UI rather than guessing an
+      // identity after an unsuccessful lookup. Its normal hook retries once.
+      if (!controller.signal.aborted) setBootstrap({ api, data: undefined });
+    });
+    return () => controller.abort();
+  }, [api]);
+  if (!bootstrap || bootstrap.api !== api) return <div role="status">正在初始化会话身份…</div>;
+  const serverScope = (bootstrap.data as { AuthorizationScopeKey?: unknown } | undefined)?.AuthorizationScopeKey;
+  const scope = props.authorizationScopeKey ?? (typeof serverScope === 'string' && serverScope ? serverScope : undefined);
+  return <AgentAuthorizationBoundary authorizationScopeKey={scope}>
+    <AgentWorkbenchContent {...props} bootstrapData={bootstrap.data} />
+  </AgentAuthorizationBoundary>;
+}
+
+function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell: RouteShell, bootstrapData }: AgentWorkbenchProps & { bootstrapData?: unknown }) {
   const api = apiAdapter || apiFacade;
   const agentId = useBootstrapStore((s: BootstrapStore) => s.agentId);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
@@ -254,7 +279,7 @@ export function AgentWorkbench({ apiAdapter, initialSurface = 'chat', routeShell
     },
   });
 
-  useBootstrap({ fetchSessions }, undefined, api);
+  useBootstrap({ fetchSessions }, undefined, api, bootstrapData);
 
   useEffect(() => {
     agentIdRef.current = agentId;

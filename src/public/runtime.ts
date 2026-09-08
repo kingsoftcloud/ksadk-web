@@ -1,4 +1,6 @@
 export { AgentWorkbench } from '../App.js';
+export { AgentAuthorizationBoundary } from '../components/AgentAuthorizationBoundary.js';
+export type { AgentAuthorizationBoundaryProps } from '../components/AgentAuthorizationBoundary.js';
 export type { AgentWorkbenchFeatureFlags, AgentWorkbenchProps } from '../App.js';
 export { ApiFacadeImpl } from '../core/api/facade.js';
 export type { ApiFacade } from '../core/api/types.js';

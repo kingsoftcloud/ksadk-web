@@ -1,4 +1,6 @@
 export { ChatComposer } from '../components/chat/ChatComposer.js';
+export { AgentAuthorizationBoundary } from '../components/AgentAuthorizationBoundary.js';
+export type { AgentAuthorizationBoundaryProps } from '../components/AgentAuthorizationBoundary.js';
 export type { ChatComposerProps } from '../components/chat/ChatComposer.js';
 export { ChatHeader } from '../components/chat/ChatHeader.js';
 export { ChatMessageList } from '../components/chat/ChatMessageList.js';

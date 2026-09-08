@@ -58,13 +58,14 @@ export function useBootstrap(
   sessionCallbacks: SessionCallbacks,
   explicitAgentId?: string,
   api: ApiFacade = defaultApi,
+  initialBootstrap?: unknown,
 ) {
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
       useBootstrapStore.getState().setStatus('loading');
       try {
-        const data = await api.getAgentUiBootstrap(explicitAgentId, { signal: controller.signal });
+        const data = initialBootstrap ?? await api.getAgentUiBootstrap(explicitAgentId, { signal: controller.signal });
         if (controller.signal.aborted) return;
         const dataRecord = data as Record<string, unknown>;
         const agentRecord = dataRecord?.Agent as Record<string, unknown> | undefined;
@@ -122,5 +123,5 @@ export function useBootstrap(
     })();
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, explicitAgentId]);
+  }, [api, explicitAgentId, initialBootstrap]);
 }
