@@ -11,6 +11,14 @@ export type AgentAuthorizationBoundaryProps = {
   children: ReactNode;
 };
 
+export function AgentAuthorizationLoading() {
+  return <div className="ksadk-web">
+    <div role="status" className="fixed inset-0 flex items-center justify-center bg-background text-sm text-text-muted">
+      正在初始化会话身份…
+    </div>
+  </div>;
+}
+
 /** 0.3.x stores are page-wide: do not remount them under a different principal.
  * Hide the old tree before paint and reload instead. This destroys outstanding
  * requests, streams, component drafts, previews and singleton caches together.
@@ -34,7 +42,7 @@ export function AgentAuthorizationBoundary({ authorizationScopeKey, children }: 
   }, [authorizationScopeKey]);
 
   if (!ready || !authorizationCache.matches(authorizationScopeKey)) {
-    return <div role="status">正在初始化会话身份…</div>;
+    return <AgentAuthorizationLoading />;
   }
   return children;
 }

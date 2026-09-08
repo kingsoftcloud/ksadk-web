@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { AgentAuthorizationBoundary } from './components/AgentAuthorizationBoundary.js';
+import { AgentAuthorizationBoundary, AgentAuthorizationLoading } from './components/AgentAuthorizationBoundary.js';
 import { useUIStore } from './stores/ui.js';
 import { useBootstrapStore } from './stores/bootstrap.js';
 import { useModelStore } from './stores/model.js';
@@ -86,7 +86,7 @@ export function AgentWorkbench(props: AgentWorkbenchProps = {}) {
     });
     return () => controller.abort();
   }, [api]);
-  if (!bootstrap || bootstrap.api !== api) return <div role="status">正在初始化会话身份…</div>;
+  if (!bootstrap || bootstrap.api !== api) return <AgentAuthorizationLoading />;
   const serverScope = (bootstrap.data as { AuthorizationScopeKey?: unknown } | undefined)?.AuthorizationScopeKey;
   const scope = props.authorizationScopeKey ?? (typeof serverScope === 'string' && serverScope ? serverScope : undefined);
   return <AgentAuthorizationBoundary authorizationScopeKey={scope}>
