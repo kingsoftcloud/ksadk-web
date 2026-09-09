@@ -264,7 +264,7 @@ export class ApiFacadeImpl implements ApiFacade {
   }
 
   async getWorkspaceFileContent(agentId: string, path: string, opts?: { signal?: AbortSignal; asText?: boolean }) {
-    return this.client.getResource('GetWorkspaceFileContent', { AgentId: agentId, Path: path }, opts);
+    return this.client.getResource('GetWorkspaceFileContent', { AgentId: agentId, FilePath: path }, opts);
   }
 
   async listAgentModels(agentId: string, opts?: { signal?: AbortSignal }) {

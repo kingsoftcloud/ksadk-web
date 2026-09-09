@@ -354,3 +354,28 @@ describe('ApiFacadeImpl agent-kernel/v1 control surface', () => {
     expect(urls[0]).toBe('/agentengine/api/v1/SubscribeSessionEvents?SessionId=s1&after_seq=42');
   });
 });
+
+
+describe('workspace preview request contract', () => {
+  it('uses FilePath for content reads through the hosted facade', async () => {
+    const originalFetch = globalThis.fetch;
+    const path = 'skills/排障手册 #1.md';
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input), 'https://example.test');
+      if (url.searchParams.get('FilePath') !== path) {
+        return new Response(JSON.stringify({ Code: 422, Message: 'FilePath is required' }), {
+          status: 422, headers: { 'content-type': 'application/json' },
+        });
+      }
+      expect(url.searchParams.get('AgentId')).toBe('agent-old');
+      expect(url.searchParams.has('Path')).toBe(false);
+      return new Response('# Preview works', { headers: { 'content-type': 'text/markdown' } });
+    }) as typeof fetch;
+    try {
+      expect(await new ApiFacadeImpl().getWorkspaceFileContent('agent-old', path, { asText: true }))
+        .toBe('# Preview works');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
