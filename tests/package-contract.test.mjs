@@ -26,6 +26,10 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
     './hooks',
     './runtime',
     './styles',
+    './teams',
+    './teams/components',
+    './teams/execution',
+    './teams/styles',
     './types',
   ]);
   assert.equal(packageJson.exports['./runtime'].types, './dist-lib/public/runtime.d.ts');

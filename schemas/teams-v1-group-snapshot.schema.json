@@ -1,0 +1,1016 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "teams.ksadk.io/v1"
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorityRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "tenantId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "ownerSubject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "taskAcceptance": {
+              "type": "string",
+              "enum": [
+                "human",
+                "result"
+              ]
+            },
+            "peerWake": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "taskAcceptance",
+            "peerWake"
+          ],
+          "additionalProperties": false
+        },
+        "leaderMemberId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "updatedAt": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "groupId",
+        "name",
+        "authorityRef",
+        "tenantId",
+        "ownerSubject",
+        "leaderMemberId",
+        "revision",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": {}
+    },
+    "watermark": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "memberId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "groupId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "leader",
+              "member"
+            ]
+          },
+          "bindingRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "binding": {
+            "type": "object",
+            "properties": {
+              "bindingRef": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "providerRef": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "local_build",
+                  "a2a"
+                ]
+              },
+              "agentId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "enqueue": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  },
+                  "steer": {
+                    "type": "boolean"
+                  },
+                  "restore": {
+                    "type": "boolean"
+                  },
+                  "interaction": {
+                    "type": "boolean"
+                  },
+                  "leader": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enqueue",
+                  "cancel",
+                  "steer",
+                  "restore",
+                  "interaction",
+                  "leader"
+                ],
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "bindingRef",
+              "providerRef",
+              "kind",
+              "agentId",
+              "capabilities"
+            ],
+            "additionalProperties": {}
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "removed",
+              "unavailable"
+            ]
+          },
+          "executionStatus": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "queued",
+              "running",
+              "waiting",
+              "needs_attention",
+              "unavailable"
+            ]
+          }
+        },
+        "required": [
+          "memberId",
+          "groupId",
+          "name",
+          "role",
+          "bindingRef",
+          "binding",
+          "sessionId",
+          "revision",
+          "status",
+          "executionStatus"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "groupId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "senderPrincipal": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "senderName": {
+            "type": "string"
+          },
+          "groupRole": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "leader",
+              "member",
+              "system"
+            ]
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "attachment"
+                    },
+                    "attachmentRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "mediaType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "attachmentRef",
+                    "mediaType"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "start_goal",
+              "followup",
+              "directed",
+              "note",
+              "result",
+              "progress"
+            ]
+          },
+          "sourceRefs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "authorityRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "memberId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "bindingRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "providerRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "itemId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                }
+              },
+              "required": [
+                "authorityRef",
+                "groupId",
+                "memberId",
+                "bindingRef",
+                "providerRef",
+                "sessionId",
+                "runId"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "internal"
+            ]
+          }
+        },
+        "required": [
+          "messageId",
+          "groupId",
+          "revision",
+          "createdAt",
+          "senderPrincipal",
+          "senderName",
+          "groupRole",
+          "parts",
+          "mentions",
+          "intent",
+          "visibility"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "groupId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "teamRunId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "ownerMemberId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "ready",
+              "blocked",
+              "running",
+              "awaiting_acceptance",
+              "succeeded",
+              "failed",
+              "cancel_requested",
+              "cancelled"
+            ]
+          },
+          "acceptanceCriteria": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attemptId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "attemptNumber": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "executionEpoch": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "ready",
+                    "blocked",
+                    "running",
+                    "awaiting_acceptance",
+                    "succeeded",
+                    "failed",
+                    "cancel_requested",
+                    "cancelled"
+                  ]
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "authorityRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "groupId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "memberId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "bindingRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "providerRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "runId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "itemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    }
+                  },
+                  "required": [
+                    "authorityRef",
+                    "groupId",
+                    "memberId",
+                    "bindingRef",
+                    "providerRef",
+                    "sessionId",
+                    "runId"
+                  ],
+                  "additionalProperties": {}
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "authorityRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "groupId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "memberId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "bindingRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "providerRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "runId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          },
+                          "itemId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          }
+                        },
+                        "required": [
+                          "authorityRef",
+                          "groupId",
+                          "memberId",
+                          "bindingRef",
+                          "providerRef",
+                          "sessionId",
+                          "runId"
+                        ],
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "name",
+                      "mediaType",
+                      "source"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "attemptId",
+                "attemptNumber",
+                "executionEpoch",
+                "status",
+                "artifacts"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "taskId",
+          "groupId",
+          "teamRunId",
+          "revision",
+          "title",
+          "description",
+          "ownerMemberId",
+          "dependencies",
+          "status",
+          "acceptanceCriteria",
+          "attempts"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "teamRuns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "teamRunId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "groupId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "groupRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "goalMessageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "goal": {
+            "type": "string"
+          },
+          "leaderMemberId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planning",
+              "running",
+              "waiting",
+              "needs_attention",
+              "awaiting_acceptance",
+              "succeeded",
+              "failed",
+              "cancel_requested",
+              "cancelled"
+            ]
+          },
+          "dispatchSuspended": {
+            "type": "boolean"
+          },
+          "dispatchEpoch": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "maxMembers": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxConcurrent": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxStarts": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "startsUsed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxHops": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "maxMembers",
+              "maxConcurrent",
+              "maxStarts",
+              "startsUsed",
+              "maxHops"
+            ],
+            "additionalProperties": {}
+          },
+          "createdAt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "teamRunId",
+          "groupId",
+          "groupRevision",
+          "revision",
+          "goalMessageId",
+          "goal",
+          "leaderMemberId",
+          "status",
+          "dispatchSuspended",
+          "dispatchEpoch",
+          "budget",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "deliveries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "groupId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "teamRunId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "memberId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected",
+              "uncertain",
+              "cancelled"
+            ]
+          }
+        },
+        "required": [
+          "deliveryId",
+          "groupId",
+          "teamRunId",
+          "messageId",
+          "memberId",
+          "revision",
+          "status"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "interactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "object",
+            "properties": {
+              "authorityRef": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "groupId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "memberId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "bindingRef": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "providerRef": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "itemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "interactionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            },
+            "required": [
+              "authorityRef",
+              "groupId",
+              "memberId",
+              "bindingRef",
+              "providerRef",
+              "sessionId",
+              "runId",
+              "interactionId"
+            ],
+            "additionalProperties": {}
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "approval",
+              "input"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "resolving",
+              "resolved",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "ref",
+          "revision",
+          "title",
+          "message",
+          "kind",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "apiVersion",
+    "group",
+    "watermark",
+    "members",
+    "messages",
+    "tasks",
+    "teamRuns",
+    "deliveries",
+    "interactions"
+  ],
+  "additionalProperties": {},
+  "$id": "https://ksadk.io/schemas/teams/v1/group-snapshot.json",
+  "title": "teams.ksadk.io/v1 group-snapshot"
+}

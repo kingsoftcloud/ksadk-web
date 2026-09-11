@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.8 - 2026-09-11
+
+- Add the componentized Agent Teams contracts, client, workspace components,
+  execution types, and stylesheet as additive public exports.
+- Keep existing Hosted UI and conversation exports unchanged.
+
 ## 0.3.7 - 2026-09-09
 
 - Isolate page state, cached sessions, drafts, and delayed callbacks by the

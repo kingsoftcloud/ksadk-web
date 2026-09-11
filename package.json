@@ -1,6 +1,6 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,7 +22,8 @@
     "test:e2e:reconnect": "playwright test --config playwright.reconnect.config.mjs",
     "build:ksadk": "VITE_BASE_PATH=./ vite build --outDir dist-ksadk",
     "release:provenance": "node scripts/release-provenance.mjs",
-    "release:preflight": "node scripts/release-preflight.mjs"
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "test:e2e:teams": "playwright test --config playwright.teams.config.mjs"
   },
   "exports": {
     ".": {
@@ -61,7 +62,20 @@
     "./types": {
       "types": "./dist-lib/public/types.d.ts",
       "import": "./dist-lib/types.js"
-    }
+    },
+    "./teams": {
+      "types": "./dist-lib/public/teams.d.ts",
+      "import": "./dist-lib/teams.js"
+    },
+    "./teams/components": {
+      "types": "./dist-lib/public/team-components.d.ts",
+      "import": "./dist-lib/team-components.js"
+    },
+    "./teams/execution": {
+      "types": "./dist-lib/public/team-execution.d.ts",
+      "import": "./dist-lib/team-execution.js"
+    },
+    "./teams/styles": "./dist-lib/teams.css"
   },
   "files": [
     "dist-lib",
