@@ -1,0 +1,316 @@
+/* Teams exposes its own tokens; hosts can supply their design system without CSS forks. */
+.ksadk-teams {
+  --team-bg: #fff;
+  --team-soft: #f6f8fa;
+  --team-ink: #3c4449;
+  --team-muted: #687580;
+  --team-border: #d0d5d9;
+  --team-accent: #0091ea;
+  --team-accent-soft: #e8f5ff;
+  --team-danger: #b32512;
+  --team-danger-soft: #fff0ed;
+  --team-warning: #8c5b01;
+  --team-warning-soft: #fff8ec;
+  --team-success: #347651;
+  --team-on-primary: #fff;
+  --team-primary: var(--team-accent);
+  --team-primary-hover: #0081d2;
+  --team-control-radius: 4px;
+  --team-radius: 6px;
+  --team-control-height: 32px;
+  --team-shadow: 0 8px 24px #2737461f;
+  color: var(--team-ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  box-sizing: border-box;
+  color-scheme: light;
+}
+:where(.dark) .ksadk-teams, .ksadk-teams.dark {
+  --team-bg: #202123;
+  --team-soft: #28292c;
+  --team-ink: #ececf1;
+  --team-muted: #a5a7ae;
+  --team-border: #3c3e44;
+  --team-accent: #58b9fa;
+  --team-accent-soft: #203b50;
+  --team-primary-hover: #7ac9ff;
+  --team-danger: #ff9e92;
+  --team-danger-soft: #402825;
+  --team-warning: #e6bb70;
+  --team-warning-soft: #362f23;
+  --team-success: #8ec6a4;
+  --team-on-primary: #202123;
+  color-scheme: dark;
+}
+.ksadk-teams *,.ksadk-teams *::before,.ksadk-teams *::after{box-sizing:border-box}
+.ksadk-teams :where(h1,h2,h3,h4,p){margin:0}
+.ksadk-teams :where(button,input,textarea,select){font:inherit;color:inherit}
+.ksadk-teams :where(button,a,input,textarea,select):focus-visible{outline:2px solid var(--team-accent);outline-offset:3px}
+.ksadk-teams button{cursor:pointer}
+.ksadk-teams button:disabled{cursor:default;opacity:.5}
+.ksadk-teams button:not(:disabled):active{transform:translateY(1px)}
+.ksadk-teams a{color:var(--team-accent);text-decoration:underline;text-underline-offset:3px}
+.ksadk-teams .team-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--team-control-height);padding:5px 16px;border:1px solid var(--team-border);border-radius:var(--team-control-radius);background:var(--team-bg);font-size:12px;line-height:20px;font-weight:400;white-space:nowrap;transition:background .16s ease,border-color .16s ease,transform .16s ease}
+.ksadk-teams .team-button:hover:not(:disabled){background:var(--team-bg);border-color:var(--team-accent);color:var(--team-accent)}
+.ksadk-teams .team-primary{background:var(--team-primary);border-color:var(--team-primary);color:var(--team-on-primary)}
+.ksadk-teams .team-primary:hover:not(:disabled){background:var(--team-primary-hover);border-color:var(--team-primary-hover);color:var(--team-on-primary)}
+.ksadk-teams .team-text-button{padding:2px 0;border:0;background:transparent;color:inherit;font-size:13px;text-align:left;text-underline-offset:4px}
+.ksadk-teams .team-text-button:hover:not(:disabled){text-decoration:underline}
+.ksadk-teams .team-icon-button{width:var(--team-control-height);height:var(--team-control-height);min-height:var(--team-control-height);border-color:transparent;padding:0;font-size:23px;font-weight:300}
+.ksadk-teams .team-muted{color:var(--team-muted)}
+.ksadk-teams .team-danger{color:var(--team-danger)}
+.ksadk-teams .team-eyebrow{display:inline-block;color:var(--team-muted);font-size:11px;font-weight:600;letter-spacing:.06em}
+.ksadk-teams .team-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.ksadk-teams.team-workspace{display:flex;flex-direction:column;height:100%;min-height:400px;min-width:0;background:var(--team-bg);container-type:inline-size;overflow:hidden}
+.ksadk-teams .team-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:72px;padding:16px 24px;border-bottom:1px solid var(--team-border);flex-shrink:0}
+.ksadk-teams .team-header h1{font-size:16px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.ksadk-teams .team-header-identity{display:flex;align-items:center;gap:15px;min-width:0}
+.ksadk-teams .team-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.ksadk-teams .team-avatar{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--team-radius);background:var(--team-accent-soft);color:var(--team-accent);font-size:13px;font-weight:600;flex:0 0 auto}
+.ksadk-teams .team-avatar-stack{display:flex;padding-right:3px}
+.ksadk-teams .team-avatar-stack .team-avatar{width:35px;height:35px;border:3px solid var(--team-bg);margin-right:-10px}
+.ksadk-teams .team-avatar-stack .team-avatar:nth-child(2){background:var(--team-soft);color:var(--team-muted)}
+.ksadk-teams .team-avatar-stack .team-avatar:nth-child(3){background:var(--team-accent-soft);color:var(--team-muted)}
+.ksadk-teams .team-body{display:flex;position:relative;flex:1;min-height:0;overflow:hidden}
+.ksadk-teams .team-chat-pane{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
+.ksadk-teams .team-timeline{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--team-border) transparent;outline-offset:-3px}
+.ksadk-teams .team-timeline-inner{max-width:816px;margin:0 auto;padding:34px 30px 24px}
+.ksadk-teams .team-message{display:flex;gap:13px;min-width:0;margin:0 0 31px;overflow-wrap:anywhere}
+.ksadk-teams .team-message-main{min-width:0;max-width:100%}
+.ksadk-teams .team-message header{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;color:var(--team-muted)}
+.ksadk-teams .team-message header strong{font-size:13px;font-weight:600;color:var(--team-ink)}
+.ksadk-teams .team-message header time{margin-left:5px;font-size:10px;opacity:.7}
+.ksadk-teams .team-message-body{font-size:14px;line-height:1.75;min-width:0}
+.ksadk-teams .team-message-body p,.ksadk-teams .team-observer-item p{margin:0 0 10px;line-height:1.75;color:inherit}
+.ksadk-teams .team-message-body p:last-child{margin-bottom:0}
+.ksadk-teams .team-message-body :where(ul,ol){padding-left:22px;margin:8px 0}
+.ksadk-teams .team-message-body :where(h1,h2,h3){font-size:16px;margin:18px 0 8px}
+.ksadk-teams .team-message-body pre{max-width:100%;overflow:auto}
+.ksadk-teams .team-message-body table{border-collapse:collapse;width:100%;font-size:12px}
+.ksadk-teams .team-message-body :where(td,th){padding:7px;border:1px solid var(--team-border);text-align:left}
+.ksadk-teams .team-message[data-role=owner]{justify-content:flex-end;margin-bottom:34px}
+.ksadk-teams .team-message[data-role=owner] .team-message-main{max-width:88%}
+.ksadk-teams .team-message[data-role=owner] header{justify-content:flex-end}
+.ksadk-teams .team-message[data-role=owner] .team-message-body{padding:12px 17px;background:var(--team-soft);border-radius:var(--team-radius) var(--team-radius) 2px var(--team-radius)}
+.ksadk-teams .team-message[data-role=system] .team-avatar{display:none}
+.ksadk-teams .team-message[data-role=system]{border-left:2px solid var(--team-border);padding-left:14px;color:var(--team-muted);font-size:12px}
+.ksadk-teams .team-attachment{display:inline-flex;gap:8px;padding:5px 10px;border:1px solid var(--team-border);border-radius:var(--team-control-radius);font-size:12px}
+.ksadk-teams .team-attachment span{color:var(--team-muted)}
+.ksadk-teams .team-empty{margin:auto;max-width:520px;padding:70px 30px;text-align:left}
+.ksadk-teams .team-empty h2{margin:12px 0;font-size:24px;font-weight:600}
+.ksadk-teams .team-empty p{color:var(--team-muted);font-size:14px;line-height:1.85;margin-bottom:18px}
+.ksadk-teams .team-progress-card{display:block;width:100%;padding:17px 19px;text-align:left;border:1px solid var(--team-border);background:var(--team-bg);border-radius:var(--team-radius);margin:6px 0 12px;transition:border-color .16s ease,background .16s ease}
+.ksadk-teams .team-progress-card:hover{border-color:var(--team-border);background:var(--team-soft)}
+.ksadk-teams .team-progress-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.ksadk-teams .team-progress-card>strong{display:block;font-size:14px;font-weight:550;margin-bottom:10px;overflow-wrap:anywhere}
+.ksadk-teams .team-progress-caption{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--team-muted)}
+.ksadk-teams .team-progress-caption>span{color:var(--team-accent);white-space:nowrap}
+.ksadk-teams .team-progress-reason{display:block;color:var(--team-muted);font-size:12px;margin-top:9px}
+.ksadk-teams .team-status{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:11px;font-weight:500;color:var(--team-muted)}
+.ksadk-teams .team-status::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor}
+.ksadk-teams .team-status[data-status=running]{color:var(--team-success)}
+.ksadk-teams .team-status:is([data-status=awaiting_acceptance],[data-status=needs_attention],[data-status=cancel_requested]){color:var(--team-warning)}
+.ksadk-teams .team-status[data-status=failed]{color:var(--team-danger)}
+.ksadk-teams .team-status[data-status=succeeded]{color:var(--team-success)}
+.ksadk-teams .team-composer-wrap{width:100%;max-width:816px;margin:0 auto;padding:12px 30px 15px;flex:0 0 auto}
+.ksadk-teams .team-mention-options{display:flex;flex-wrap:wrap;gap:5px;padding:8px;margin-bottom:7px;border:1px solid var(--team-border);background:var(--team-bg);border-radius:var(--team-radius)}
+.ksadk-teams .team-mention-options button{display:flex;align-items:center;gap:7px;border:0;background:var(--team-soft);border-radius:var(--team-control-radius);padding:6px 9px;font-size:12px}
+.ksadk-teams .team-mention-options .team-avatar{height:22px;width:22px;border-radius:6px;font-size:10px}
+.ksadk-teams .team-mention-options small{font-size:10px;color:var(--team-muted)}
+.ksadk-teams .team-composer{border:1px solid var(--team-border);border-radius:var(--team-radius);background:var(--team-bg);box-shadow:none;overflow:hidden}
+.ksadk-teams .team-composer textarea{display:block;width:100%;padding:15px 17px 6px;min-height:88px;max-height:176px;overflow-y:auto;resize:none;border:0;background:none;outline:none;line-height:1.6;font-size:14px}
+.ksadk-teams .team-composer textarea:focus-visible{outline:none}
+.ksadk-teams .team-composer textarea::placeholder{color:var(--team-muted)}
+.ksadk-teams .team-composer-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 11px 11px}
+.ksadk-teams .team-composer-toolbar>div{display:flex;align-items:center;gap:13px;min-width:0}
+.ksadk-teams .team-composer-toolbar select{max-width:160px;border:0;background:var(--team-soft);border-radius:var(--team-control-radius);padding:6px 8px;font-size:11px}
+.ksadk-teams .team-note-toggle{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--team-muted);white-space:nowrap}
+.ksadk-teams input[type=checkbox]{accent-color:var(--team-accent)}
+.ksadk-teams .team-composer-help{text-align:center;color:var(--team-muted);font-size:10px;margin-top:8px}
+.ksadk-teams .team-attention-banner{display:flex;justify-content:space-between;gap:20px;margin:0 auto;width:calc(100% - 60px);max-width:756px;border:0;border-radius:var(--team-control-radius);background:var(--team-warning-soft);color:var(--team-warning);padding:8px 12px;font-size:12px;text-align:left}
+.ksadk-teams .team-connection{font-size:11px;color:var(--team-muted)}
+.ksadk-teams .team-top-error{display:flex;align-items:center;justify-content:space-between;gap:15px;background:var(--team-danger-soft);padding:10px 28px;color:var(--team-danger);font-size:12px}
+.ksadk-teams .team-inline-error{font-size:12px;color:var(--team-danger);padding:9px 0;line-height:1.6}
+.ksadk-teams .team-sidepanel{display:flex;flex-direction:column;width:350px;min-width:300px;max-width:380px;border-left:1px solid var(--team-border);background:var(--team-soft);flex:0 0 auto;min-height:0;outline-offset:-3px}
+.ksadk-teams .team-panel-header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px;border-bottom:1px solid var(--team-border);flex-shrink:0}
+.ksadk-teams .team-panel-header h2{font-size:14px;font-weight:550;overflow-wrap:anywhere}
+.ksadk-teams .team-panel-scroll{overflow:auto;flex:1;min-height:0;padding:0 20px 20px;scrollbar-width:thin}
+.ksadk-teams .team-run-overview{padding:21px 0;border-bottom:1px solid var(--team-border);margin-bottom:20px}
+.ksadk-teams .team-run-overview h3{font-size:14px;line-height:1.7;margin:7px 0;font-weight:550}
+.ksadk-teams .team-run-overview p{font-size:12px;color:var(--team-muted);margin:8px 0}
+.ksadk-teams .team-run-actions{display:flex;gap:17px;margin-top:13px}
+.ksadk-teams .team-run-actions button{font-size:11px}
+.ksadk-teams .team-task-board section{margin-bottom:23px}
+.ksadk-teams .team-task-board h3{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--team-muted);font-weight:500;margin:0 0 8px}
+.ksadk-teams .team-task-board h3>span{font-size:10px;font-variant-numeric:tabular-nums;background:var(--team-soft);border-radius:4px;padding:0 5px}
+.ksadk-teams .team-task-row{display:block;width:100%;padding:12px 10px;margin:0 -10px;width:calc(100% + 20px);border:1px solid transparent;border-radius:var(--team-control-radius);background:transparent;text-align:left;transition:background .16s ease}
+.ksadk-teams .team-task-row:hover,.ksadk-teams .team-task-row[aria-pressed=true]{background:var(--team-soft)}
+.ksadk-teams .team-task-row-main{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px}
+.ksadk-teams .team-task-row-main strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}
+.ksadk-teams .team-task-row>.team-muted{display:block;font-size:11px;overflow-wrap:anywhere}
+.ksadk-teams .team-panel-footer{padding:13px 20px;border-top:1px solid var(--team-border)}
+.ksadk-teams .team-expand{width:100%;justify-content:space-between;background:transparent}
+.ksadk-teams .team-panel-empty{padding:38px 0}
+.ksadk-teams .team-panel-empty h3{font-size:14px;margin-bottom:10px;font-weight:500}
+.ksadk-teams .team-panel-empty p{font-size:12px;color:var(--team-muted);line-height:1.8}
+.ksadk-teams .team-task-detail{padding:16px 0}
+.ksadk-teams .team-task-detail h3{font-size:16px;font-weight:550;margin:9px 0 16px;line-height:1.6}
+.ksadk-teams .team-task-detail h4{font-size:11px;color:var(--team-muted);font-weight:500;margin:24px 0 7px}
+.ksadk-teams .team-task-detail p{font-size:13px;line-height:1.8;overflow-wrap:anywhere}
+.ksadk-teams .team-member-link{display:flex;align-items:center;gap:9px;width:100%;padding:10px;border:1px solid var(--team-border);background:var(--team-bg);border-radius:var(--team-radius);margin-bottom:15px;text-align:left;font-size:12px}
+.ksadk-teams .team-member-link>.team-avatar{height:25px;width:25px;border-radius:var(--team-control-radius);font-size:11px}
+.ksadk-teams .team-member-link>span:last-child{margin-left:auto;color:var(--team-muted);font-size:10px}
+.ksadk-teams .team-detail-reason{margin:12px 0;padding:10px;border-left:2px solid var(--team-warning);background:var(--team-warning-soft)}
+.ksadk-teams .team-task-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.ksadk-teams .team-artifact{display:flex;flex-direction:column;gap:3px;padding:12px 0;border-bottom:1px solid var(--team-border)}
+.ksadk-teams .team-artifact small{font-size:10px;color:var(--team-muted)}
+.ksadk-teams .team-interactions:empty{display:none}
+.ksadk-teams .team-interaction-card{padding:16px;border:1px solid var(--team-border);background:var(--team-warning-soft);border-radius:var(--team-radius);margin-bottom:20px}
+.ksadk-teams .team-interaction-card h3{font-size:14px;margin:8px 0;font-weight:550}
+.ksadk-teams .team-interaction-card p{font-size:12px;color:var(--team-warning);line-height:1.75;overflow-wrap:anywhere}
+.ksadk-teams .team-interaction-card form{margin-top:12px}
+.ksadk-teams .team-interaction-card form input:not([type=checkbox]):not([type=radio]){width:100%;padding:8px;border:1px solid var(--team-border);border-radius:var(--team-control-radius);background:var(--team-bg)}
+.ksadk-teams .team-interaction-card form button{border:1px solid var(--team-border);border-radius:var(--team-control-radius);background:var(--team-bg);padding:6px 10px;margin:8px 8px 0 0}
+.ksadk-teams .team-interaction-card form label{display:flex;align-items:center;gap:8px;padding:6px 0}
+.ksadk-teams .team-back{margin:15px 0 0;color:var(--team-muted);font-size:11px}
+.ksadk-teams .team-member-row{display:flex;align-items:center;gap:12px;width:100%;border:0;border-bottom:1px solid var(--team-border);background:none;padding:18px 0;text-align:left}
+.ksadk-teams .team-member-row>span:nth-child(2){flex:1;min-width:0}
+.ksadk-teams .team-member-row strong{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:550}
+.ksadk-teams .team-member-row small{font-size:10px;color:var(--team-muted);font-weight:400}
+.ksadk-teams .team-member-row>span:nth-child(2)>span{display:block;font-size:11px;color:var(--team-muted);margin-top:4px}
+.ksadk-teams .team-member-row>span:last-child{color:var(--team-muted)}
+.ksadk-teams .team-member-inspector{padding-top:18px}
+.ksadk-teams .team-member-heading{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.ksadk-teams .team-member-heading h3{font-size:15px;font-weight:550}
+.ksadk-teams .team-member-heading .team-muted{font-size:11px}
+.ksadk-teams .team-member-actions{display:flex;gap:7px;flex-wrap:wrap}
+.ksadk-teams .team-observer-note{font-size:11px;color:var(--team-muted);padding:13px 0}
+.ksadk-teams .team-member-transcript{margin-top:18px}
+.ksadk-teams .team-observer-item{padding:15px 0;border-top:1px solid var(--team-border);font-size:12px;overflow-wrap:anywhere}
+.ksadk-teams .team-observer-item>.team-eyebrow{margin-bottom:7px}
+.ksadk-teams .team-execution-workspace{position:absolute;inset:0;display:flex;flex-direction:column;min-height:0;background:var(--team-bg);z-index:2}
+.ksadk-teams[data-execution=open] .team-chat-pane,.ksadk-teams[data-execution=open] .team-sidepanel{visibility:hidden}
+.ksadk-teams .team-execution{display:flex;flex-direction:column;min-height:0;flex:1}
+.ksadk-teams .team-view-switch{display:flex;gap:0;padding:12px 24px 0;flex-shrink:0;max-width:100%;overflow-x:auto;scrollbar-width:thin;border-bottom:1px solid var(--team-border)}
+.ksadk-teams .team-view-switch button{flex-shrink:0;min-height:32px;font-size:12px;line-height:30px;padding:0 16px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--team-ink);border-radius:0;white-space:nowrap}
+.ksadk-teams .team-view-switch button:hover{color:var(--team-accent)}
+.ksadk-teams .team-view-switch button[aria-pressed=true]{border-bottom-color:var(--team-accent);color:var(--team-accent);font-weight:500}
+.ksadk-teams .team-graph-caption{font-size:11px;color:var(--team-muted);padding:15px 28px 0}
+.ksadk-teams .team-graph-scroll{overflow:auto;flex:1;min-height:0;background-image:radial-gradient(var(--team-border) .65px,transparent .65px);background-size:18px 18px;margin-top:14px;outline-offset:-3px}
+.ksadk-teams .team-graph-edge{fill:none;stroke:var(--team-border);stroke-width:1.4}
+.ksadk-teams .team-graph-node{display:flex;flex-direction:column;align-items:flex-start;width:100%;height:100%;border:1px solid var(--team-border);border-radius:var(--team-radius);background:var(--team-bg);text-align:left;padding:12px 15px;gap:7px}
+.ksadk-teams .team-graph-node:is([data-status=draft],[data-status=ready],[data-status=blocked]){border-style:dashed}
+.ksadk-teams .team-graph-node[data-status=running]{border-color:var(--team-success);background:var(--team-soft)}
+.ksadk-teams .team-graph-node[data-status=failed]{border-color:var(--team-danger)}
+.ksadk-teams .team-graph-node[aria-pressed=true]{outline:2px solid var(--team-accent);outline-offset:-2px}
+.ksadk-teams .team-graph-node strong{font-size:13px;font-weight:550;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ksadk-teams .team-graph-node small{font-size:11px;color:var(--team-muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ksadk-teams .team-execution-list{padding:20px 28px;overflow:auto}
+.ksadk-teams .team-execution-list button{display:grid;grid-template-columns:minmax(0,1fr) 100px 100px;align-items:center;gap:12px;width:100%;text-align:left;padding:16px 0;border:0;border-bottom:1px solid var(--team-border);background:none}
+.ksadk-teams .team-execution-list strong{font-size:13px;font-weight:500}
+.ksadk-teams .team-execution-list button>span:not(.team-status){color:var(--team-muted);font-size:12px}
+.ksadk-teams .team-execution-list small{grid-column:1/-1;color:var(--team-muted)}
+.ksadk-teams .team-member-timeline{overflow:auto;padding:20px 28px}
+.ksadk-teams .team-member-timeline section{padding:14px 0 20px;border-bottom:1px solid var(--team-border)}
+.ksadk-teams .team-member-timeline h3{font-size:13px;font-weight:550;margin-bottom:12px}
+.ksadk-teams .team-member-timeline h3 span{font-size:10px;color:var(--team-muted);margin-left:10px;font-weight:400}
+.ksadk-teams .team-timeline-task{display:flex;align-items:center;flex-wrap:wrap;gap:10px;width:100%;border:0;border-left:2px solid var(--team-border);border-radius:0;background:var(--team-soft);padding:11px 14px;text-align:left;margin:8px 0;font-size:12px}
+.ksadk-teams .team-timeline-task strong{font-weight:500}
+.ksadk-teams .team-timeline-task>span:not(.team-status){margin-left:auto;font-size:10px;color:var(--team-muted)}
+.ksadk-teams .team-timeline-task p{width:100%;font-size:11px;color:var(--team-muted)}
+.ksadk-teams .team-history-more{display:block;margin:12px auto}
+.ksadk-teams .team-loading{max-width:680px;width:100%;margin:60px auto;padding:30px;display:flex;flex-direction:column;gap:18px}
+.ksadk-teams .team-loading span{display:block;background:var(--team-soft);border-radius:var(--team-radius);width:90%;height:15px}
+.ksadk-teams .team-loading span:first-child{width:35%;height:22px}
+.ksadk-teams .team-loading span:last-child{width:65%}
+.ksadk-teams.team-create-dialog{border:1px solid var(--team-border);border-radius:var(--team-radius);padding:0;margin:auto;height:fit-content;min-height:0;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow:auto;background:var(--team-bg);box-shadow:var(--team-shadow)}
+.ksadk-teams.team-create-dialog::backdrop{background:#20282d59}
+.ksadk-teams.team-create-dialog form{padding:24px}
+.ksadk-teams.team-create-dialog header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:25px}
+.ksadk-teams.team-create-dialog header h2{font-size:20px;font-weight:600;margin:4px 0 8px}
+.ksadk-teams.team-create-dialog header p{font-size:12px;color:var(--team-muted)}
+.ksadk-teams.team-create-dialog fieldset{border:0;padding:0;margin:0 0 20px}
+.ksadk-teams.team-create-dialog legend{font-size:12px;font-weight:500;margin-bottom:10px;width:100%;display:flex;justify-content:space-between}
+.ksadk-teams.team-create-dialog legend span{color:var(--team-muted);font-size:11px}
+.ksadk-teams .team-candidate-list{max-height:240px;overflow:auto;border:1px solid var(--team-border);border-radius:var(--team-radius);padding:4px}
+.ksadk-teams .team-candidate{display:flex;align-items:center;gap:11px;padding:11px 10px;border-radius:var(--team-control-radius);cursor:pointer}
+.ksadk-teams .team-candidate[data-selected=true]{background:var(--team-accent-soft)}
+.ksadk-teams .team-candidate input{margin:0;width:15px;height:15px}
+.ksadk-teams .team-candidate strong{display:block;font-size:13px;font-weight:500}
+.ksadk-teams .team-candidate small{display:block;font-size:11px;color:var(--team-muted);margin-top:3px}
+.ksadk-teams .team-field{display:flex;flex-direction:column;gap:7px;margin:17px 0;font-size:12px;font-weight:500}
+.ksadk-teams .team-field input:not([type=checkbox]):not([type=radio]),.ksadk-teams .team-field select,.ksadk-teams .team-field textarea{width:100%;padding:5px 10px;border:1px solid var(--team-border);border-radius:var(--team-control-radius);background:var(--team-bg);min-height:var(--team-control-height);font-size:12px;line-height:20px;font-weight:400}
+.ksadk-teams .team-field textarea{min-height:80px;resize:vertical}
+.ksadk-teams .team-field :is(input,select,textarea):hover:not(:disabled){border-color:var(--team-accent)}
+.ksadk-teams .team-field small{color:var(--team-muted);font-size:11px;font-weight:400;line-height:1.65}
+.ksadk-teams.team-create-dialog footer{display:flex;justify-content:flex-end;gap:9px;padding-top:10px}
+@container (max-width:900px){.ksadk-teams .team-sidepanel{width:320px;min-width:300px}.ksadk-teams .team-header{padding:15px 20px}.ksadk-teams .team-header-actions>.team-connection{display:none}.ksadk-teams .team-timeline-inner{padding:25px 22px 18px}.ksadk-teams .team-composer-wrap{padding-left:22px;padding-right:22px}}
+@container (max-width:850px){.ksadk-teams[data-panel]:not([data-panel=closed]) .team-chat-pane{display:none}.ksadk-teams .team-sidepanel{width:100%;max-width:none;border-left:0}.ksadk-teams .team-panel-scroll{padding-left:24px;padding-right:24px}.ksadk-teams .team-panel-header{padding-left:24px;padding-right:24px}}
+@container (max-width:480px){.ksadk-teams .team-header{padding:13px 16px;min-height:74px;gap:8px}.ksadk-teams .team-avatar-stack{display:none}.ksadk-teams .team-header h1{font-size:15px}.ksadk-teams .team-header-actions{gap:6px}.ksadk-teams .team-header-actions .team-button{padding:5px 8px;font-size:11px}.ksadk-teams .team-timeline-inner{padding:22px 16px 16px}.ksadk-teams .team-message{gap:9px}.ksadk-teams .team-message>.team-avatar{width:27px;height:27px;border-radius:var(--team-radius);font-size:11px}.ksadk-teams .team-message header time{display:none}.ksadk-teams .team-message-body{font-size:13px}.ksadk-teams .team-composer-wrap{padding:10px 12px 12px}.ksadk-teams .team-composer-toolbar>div{gap:8px}.ksadk-teams .team-composer-toolbar select{max-width:128px}.ksadk-teams .team-progress-card{padding:14px}.ksadk-teams .team-progress-caption{flex-wrap:wrap;gap:6px}.ksadk-teams .team-empty{padding:45px 8px}.ksadk-teams .team-empty h2{font-size:22px}.ksadk-teams .team-attention-banner{width:calc(100% - 24px)}.ksadk-teams .team-execution-list button{grid-template-columns:minmax(0,1fr) 85px}.ksadk-teams .team-execution-list button>span:not(.team-status){display:none}.ksadk-teams .team-view-switch{padding-left:16px;padding-right:16px}}
+@media(prefers-reduced-motion:reduce){.ksadk-teams *{transition:none!important;animation:none!important;scroll-behavior:auto!important}.ksadk-teams button:not(:disabled):active{transform:none}}
+
+.ksadk-teams .team-invocation-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}.ksadk-teams .team-invocation-node{display:grid;grid-template-columns:minmax(0,1fr) auto;text-align:left;gap:8px;width:100%;padding:14px 17px;background:var(--team-bg);border:1px solid var(--team-border);border-radius:var(--team-radius);color:var(--team-ink)}.ksadk-teams .team-invocation-node .team-eyebrow{grid-column:1/-1}.ksadk-teams .team-invocation-node strong{font-size:13px;overflow-wrap:anywhere}.ksadk-teams .team-invocation-node small{grid-column:1/-1;color:var(--team-muted)}.ksadk-teams .team-invocation-node[data-planned=true]{border-style:dashed}.ksadk-teams .team-invocations{padding:0 24px 24px}
+
+.ksadk-teams .team-selected-artifacts{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 12px}.ksadk-teams .team-selected-artifacts .team-attachment{display:flex;gap:10px;align-items:center;font-size:12px}.ksadk-teams .team-composer-toolbar>div{flex-wrap:wrap}
+
+.ksadk-teams .team-run-budget{font-size:11px;color:var(--team-muted);margin:16px 0}.ksadk-teams .team-run-budget summary{cursor:pointer}.ksadk-teams .team-run-budget dl{display:grid;gap:7px;margin-top:12px}.ksadk-teams .team-run-budget dl>div{display:flex;justify-content:space-between;gap:16px}.ksadk-teams .team-run-budget dd{margin:0;font-variant-numeric:tabular-nums}
+
+.ksadk-teams .team-approval-details dl{display:grid;gap:10px;margin:12px 0}
+.ksadk-teams .team-approval-details dt{font-size:11px;color:var(--team-muted);margin-bottom:4px}
+.ksadk-teams .team-approval-details dd{margin:0;font-size:12px;overflow-wrap:anywhere}
+.ksadk-teams .team-approval-details code{white-space:pre-wrap;font-size:12px}
+.ksadk-teams .team-approval-preview{border-top:1px solid var(--team-border);border-bottom:1px solid var(--team-border);padding:10px 0;margin:12px 0}
+.ksadk-teams .team-approval-preview summary{cursor:pointer;font-size:12px;font-weight:550}
+.ksadk-teams .team-approval-preview pre{max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.8;background:var(--team-bg);padding:12px;border-radius:5px;margin:10px 0 0}
+.ksadk-teams .team-interaction-card .team-approval-risk{font-size:11px;margin:6px 0 12px}
+
+.ksadk-teams .team-observer-details summary{cursor:pointer;font-size:12px;margin:8px 0}
+.ksadk-teams .team-observer-details pre{max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.7;padding:10px;background:var(--team-soft);border-radius:5px}
+
+/* Binary controls never inherit the text-field box model, including in portals. */
+.ksadk-teams input:is([type=checkbox],[type=radio]) {
+  appearance: auto;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  accent-color: var(--team-accent);
+}
+.ksadk-teams .team-field > span:has(> input[type=checkbox]) {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 24px;
+}
+.ksadk-teams .team-field :is(input,select,textarea):disabled {
+  background: var(--team-soft);
+  color: var(--team-muted);
+  cursor: not-allowed;
+}
+.ksadk-teams .team-field { min-width: 0; }
+.ksadk-teams .team-field :is(input,select,textarea) { min-width: 0; }
+.ksadk-teams .team-composer:focus-within {
+  border-color: var(--team-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb,var(--team-accent) 12%,transparent);
+}
+.ksadk-teams .team-composer textarea:is(:focus,:hover) {
+  border: 0;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+.ksadk-teams .team-composer-toolbar { align-items: flex-end; }
+.ksadk-teams .team-composer-toolbar > div { flex: 1; }
+.ksadk-teams .team-composer-toolbar > .team-button { flex-shrink: 0; }
+.ksadk-teams .team-composer-toolbar select { width: auto; height: 32px; min-width: 0; padding-block: 4px; }
+@media (max-width: 760px) {
+  .ksadk-teams { --team-control-height: 40px; }
+  .ksadk-teams .team-view-switch button { min-height: 40px; }
+  .ksadk-teams .team-field :is(input,select,textarea),
+  .ksadk-teams .team-composer textarea { font-size: 16px; }
+  .ksadk-teams.team-create-dialog form { padding: 20px; }
+}

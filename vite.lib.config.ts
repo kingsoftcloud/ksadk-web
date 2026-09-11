@@ -1,4 +1,5 @@
 import path from "path"
+import { readFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import packageJson from "./package.json" with { type: "json" }
@@ -9,7 +10,7 @@ const external = [
 ]
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), { name: "teams-styles", generateBundle() { this.emitFile({ type: "asset", fileName: "teams.css", source: readFileSync(path.resolve(__dirname, "src/components/teams/teams.css"), "utf8") }); } }],
   build: {
     outDir: "dist-lib",
     emptyOutDir: true,
@@ -24,6 +25,9 @@ export default defineConfig({
         runtime: path.resolve(__dirname, "src/public/runtime.ts"),
         styles: path.resolve(__dirname, "src/public/styles.ts"),
         types: path.resolve(__dirname, "src/public/types.ts"),
+        teams: path.resolve(__dirname, "src/public/teams.ts"),
+        "team-components": path.resolve(__dirname, "src/public/team-components.ts"),
+        "team-execution": path.resolve(__dirname, "src/public/team-execution.ts"),
       },
       formats: ["es"],
       fileName: (_format, entryName) => `${entryName}.js`,
