@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
-import { useMessageStore } from '../../stores/message.js';
 import { useModelStore } from '../../stores/model.js';
 import { useSessionStore } from '../../stores/session.js';
 import { ChatComposer } from './ChatComposer';
@@ -69,7 +68,6 @@ export function ConnectedComposer({
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
   const queuedDrafts = useUIStore((s: UIStore) => s.queuedDrafts);
-  const messages = useMessageStore(s => s.messages);
   const contextUsage = useSessionStore(s => s.sessions.find(item => item.SessionId === currentSessionId)?.ContextUsage);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
   const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
@@ -83,12 +81,10 @@ export function ConnectedComposer({
   const composerContextIndicator = useMemo<ComposerContextIndicator>(
     () =>
       buildComposerContextIndicator({
-        messages,
-        draftInput: input,
         selectedModel: selectedModelMetadata,
         contextUsage,
       }) as ComposerContextIndicator,
-    [input, messages, selectedModelMetadata, contextUsage],
+    [selectedModelMetadata, contextUsage],
   );
   const executionModeSupport = useMemo<RuntimeExecutionModeSupport>(() => ({
     plan: Boolean(runtimeCapabilityMatrix?.plan?.supported),

@@ -187,7 +187,7 @@ export function ChatComposer({
           </div>
         ) : null}
 
-        <div className="relative rounded-[28px] bg-surface shadow-[0_0_0_0.5px_rgba(15,23,42,0.08),0_5px_18px_rgba(15,23,42,0.07)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06),0_8px_24px_rgba(0,0,0,0.24)]">
+        <div className="relative rounded-[var(--chat-composer-radius,28px)] bg-surface shadow-[0_0_0_0.5px_rgba(15,23,42,0.08),0_5px_18px_rgba(15,23,42,0.07)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06),0_8px_24px_rgba(0,0,0,0.24)]">
           <div className="flex items-center gap-3">
             <form
               onSubmit={handleSubmit}
@@ -196,7 +196,7 @@ export function ChatComposer({
                 event.stopPropagation();
               }}
               onDrop={handleDrop}
-              className="relative flex min-h-[116px] min-w-0 flex-1 flex-col rounded-[28px] border border-border/55 bg-background px-4 pb-3 pt-3 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:px-5"
+              className="relative flex min-h-[116px] min-w-0 flex-1 flex-col rounded-[var(--chat-composer-radius,28px)] border border-border/55 bg-background px-4 pb-3 pt-3 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:px-5"
             >
               {attachments.length > 0 ? (
                 <div className="mb-1.5 flex flex-wrap gap-2">

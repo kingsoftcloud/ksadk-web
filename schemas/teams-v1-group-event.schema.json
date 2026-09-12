@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "teams.ksadk.io/v1"
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "groupId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "groupSeq": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "createdAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "apiVersion",
+    "eventId",
+    "groupId",
+    "groupSeq",
+    "type",
+    "createdAt",
+    "payload"
+  ],
+  "additionalProperties": {},
+  "$id": "https://ksadk.io/schemas/teams/v1/group-event.json",
+  "title": "teams.ksadk.io/v1 group-event"
+}

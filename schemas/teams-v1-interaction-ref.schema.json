@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "authorityRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "groupId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "memberId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "bindingRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "providerRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "itemId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "interactionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    }
+  },
+  "required": [
+    "authorityRef",
+    "groupId",
+    "memberId",
+    "bindingRef",
+    "providerRef",
+    "sessionId",
+    "runId",
+    "interactionId"
+  ],
+  "additionalProperties": {},
+  "$id": "https://ksadk.io/schemas/teams/v1/interaction-ref.json",
+  "title": "teams.ksadk.io/v1 interaction-ref"
+}

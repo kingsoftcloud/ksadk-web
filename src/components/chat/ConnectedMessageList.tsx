@@ -62,7 +62,7 @@ export function ConnectedMessageList({
     currentSessionId ? s.messageHistory[currentSessionId] : null,
   );
   const isLoadingInitialHistory = isLoadingSessions || Boolean(currentMessageHistory?.isLoadingInitial);
-  const input = useUIStore((s: UIStore) => s.input);
+  const contextUsage = useSessionStore(s => s.sessions.find(item => item.SessionId === currentSessionId)?.ContextUsage);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
   const selectedModel = useModelStore((s: ModelStore) => s.selectedModel);
   const previewAttachment = useUIStore((s: UIStore) => s.previewAttachment);
@@ -83,11 +83,10 @@ export function ConnectedMessageList({
   const contextIndicator = useMemo<ComposerContextIndicator>(
     () =>
       buildComposerContextIndicator({
-        messages,
-        draftInput: input,
         selectedModel: selectedModelMetadata,
+        contextUsage,
       }) as ComposerContextIndicator,
-    [input, messages, selectedModelMetadata],
+    [selectedModelMetadata, contextUsage],
   );
 
   const scrollToBottom = useCallback(() => {
