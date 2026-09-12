@@ -431,10 +431,139 @@ it('rejects child content until its actual descriptor item identity is known', (
   expect(() => replay([events[0], events[5]])).toThrow('descriptor first');
 });
 
-it('local cancellation is pre-send only and an identical terminal reconcile is accepted',()=>{
-  const cancelled=JSON.parse(JSON.stringify(events[18]));
-  cancelled.snapshot.parts[0].data.status='cancelled';
-  cancelled.snapshot.parts[0].data.cancel={capability:'unsupported',request_state:'local_confirmed'};
-  expect(()=>replay([events[0],events[3],cancelled,{...cancelled,event_id:'same-local-terminal'}])).not.toThrow();
-  expect(()=>replay([events[0],events[3],events[4],cancelled])).toThrow('Local cancellation after send');
+it('local cancellation is pre-send only and an identical terminal reconcile is accepted', () => {
+  const cancelled = JSON.parse(JSON.stringify(events[18]));
+  cancelled.snapshot.parts[0].data.status = 'cancelled';
+  cancelled.snapshot.parts[0].data.cancel = {
+    capability: 'unsupported',
+    request_state: 'local_confirmed',
+  };
+  expect(() =>
+    replay([
+      events[0],
+      events[3],
+      cancelled,
+      { ...cancelled, event_id: 'same-local-terminal' },
+    ]),
+  ).not.toThrow();
+  expect(() => replay([events[0], events[3], events[4], cancelled])).toThrow(
+    'Local cancellation after send',
+  );
+});
+
+it.each([
+  ['failed', 'error'],
+  ['completed', 'completed'],
+  ['running', 'running'],
+  ['unknown', 'unknown'],
+])(
+  'honors explicit tool executionStatus %s independently of item closure',
+  (executionStatus, expected) => {
+    const state = replay().snapshot();
+    const resultItem = state.items.find(
+      (item) => item.payload.sourceKind === 'tool_result',
+    )!;
+    resultItem.lifecycle =
+      executionStatus === 'completed' ? 'failed' : 'completed';
+    resultItem.payload = {
+      callId: resultItem.payload.callId,
+      sourceKind: 'tool_result',
+      executionStatus,
+      output: 'execution result',
+      orphan: true,
+    };
+    const projected = projectConversationStreamForHostedUi({
+      state,
+      presentation: projectConversationItems(state),
+      cursor: 22,
+      runId: 'root-run-1',
+    });
+    const tool = projected.messages[0].agentBlock!.messages.find((message) =>
+      message.blocks?.some((block) => block.type === 'tool'),
+    )!;
+    expect(tool.blocks?.[0].status).toBe(expected);
+    expect(Object.values(tool.tools!)[0].status).toBe(expected);
+    expect(resultItem.payload.orphan).toBe(true);
+  },
+);
+
+it('selects only the latest safe public child text for the collapsed agent summary', () => {
+  const state = replay().snapshot();
+  const agent = state.items.find((item) => item.kind === 'agent')!;
+  const publicText = state.items.find(
+    (item) => item.nativeRef.parentScopeId && item.kind === 'assistant_text',
+  )!;
+  state.items.push(
+    {
+      ...publicText,
+      itemId: 'internal',
+      visibility: 'internal',
+      payload: { text: 'internal private data' },
+    },
+    {
+      ...publicText,
+      itemId: 'raw-reasoning',
+      kind: 'reasoning',
+      payloadSchemaRef: 'conversation.item.reasoning/v1',
+      payload: { text: 'raw reasoning' },
+    },
+    {
+      ...publicText,
+      itemId: 'credential',
+      payload: { text: 'Bearer fixture-secret' },
+    },
+  );
+  const projected = projectConversationStreamForHostedUi({
+    state,
+    presentation: projectConversationItems(state, { includeInternal: true }),
+    cursor: 22,
+    runId: agent.runId,
+  });
+  expect(projected.messages[0].agentBlock?.summary).toBe('second answer');
+});
+
+it('keeps a failed result-only observation an orphan without fabricating a call', () => {
+  const state = replay([events[0], events[3], events[12]]).snapshot();
+  const result = state.items.find(
+    (item) => item.payload.sourceKind === 'tool_result',
+  )!;
+  result.payload = {
+    ...result.payload,
+    executionStatus: 'failed',
+    output: 'request failed',
+  };
+  delete result.payload.isError;
+  const presentation = projectConversationItems(state);
+  expect(presentation.timeline[0].children?.[0].item.payload.orphan).toBe(true);
+  const projected = projectConversationStreamForHostedUi({
+    state,
+    presentation,
+    cursor: 13,
+    runId: result.runId,
+  });
+  const tool = projected.messages[0].agentBlock?.messages[0].blocks?.[0];
+  expect(tool).toMatchObject({
+    type: 'tool',
+    toolName: 'Tool result',
+    status: 'error',
+    output: 'request failed',
+  });
+});
+it('bounds summaries and omits them when there is no safe public text', () => {
+  const state = replay().snapshot();
+  const textItems = state.items.filter(
+    (item) => item.nativeRef.parentScopeId && item.kind === 'assistant_text',
+  );
+  for (const item of textItems) item.payload.text = '';
+  const project = () =>
+    projectConversationStreamForHostedUi({
+      state,
+      presentation: projectConversationItems(state),
+      cursor: 22,
+      runId: 'root-run-1',
+    }).messages[0].agentBlock?.summary;
+  expect(project()).toBeUndefined();
+  textItems[0].payload.text = '公开 '.repeat(100);
+  expect(Array.from(project()!)).toHaveLength(161);
+  expect(project()).toMatch(/…$/);
 });

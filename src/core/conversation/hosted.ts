@@ -13,6 +13,7 @@ import type { Interaction } from '../interaction/types.js';
 import type {
   ConversationItem,
   ConversationStreamResult,
+  ConversationTimelineEntry,
 } from './types.js';
 
 export type HostedConversationProjection = {
@@ -102,15 +103,18 @@ function toolMessage(item: ConversationItem): Message {
   const output = Object.prototype.hasOwnProperty.call(item.payload, 'output')
     ? displayValue(safeToolValue(item.payload.output))
     : undefined;
-  const failed = item.lifecycle === 'failed' || item.payload.isError === true;
-  const executionCompleted = item.payload.executionStatus ? item.payload.executionStatus === 'completed' : item.lifecycle === 'completed';
-  const status = item.payload.executionStatus === 'unknown'
-    ? 'unknown' as const
-    : failed
-    ? 'error' as const
-    : executionCompleted
-      ? 'completed' as const
-      : 'running' as const;
+  const executionStatuses = {
+    failed: 'error',
+    completed: 'completed',
+    running: 'running',
+    unknown: 'unknown',
+  } as const;
+  const explicit = item.payload.executionStatus;
+  const status = typeof explicit === 'string' && Object.hasOwn(executionStatuses, explicit)
+    ? executionStatuses[explicit as keyof typeof executionStatuses]
+    : item.lifecycle === 'failed' || item.payload.isError === true
+      ? 'error'
+      : item.lifecycle === 'completed' ? 'completed' : 'running';
   return {
     ...messageBase(item),
     role: 'model',
@@ -279,6 +283,22 @@ function fallbackMessage(
   };
 }
 
+/** A collapsed progress excerpt must come from an explicitly public text item. */
+function latestPublicAgentSummary(entries: ConversationTimelineEntry[]): string | undefined {
+  for (const { item } of [...entries].reverse()) {
+    if (item.visibility !== 'public' || item.kind !== 'assistant_text'
+      || item.payloadSchemaRef !== 'conversation.item.assistant_text/v1'
+      || typeof item.payload.text !== 'string') continue;
+    const safe = safeToolValue(item.payload.text);
+    if (typeof safe !== 'string' || safe === '[redacted]') continue;
+    const text = safe.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const characters = Array.from(text);
+    return characters.length > 160 ? `${characters.slice(0, 160).join('')}…` : text;
+  }
+  return undefined;
+}
+
 /** Map one shared canonical snapshot to the existing Hosted UI view models. */
 export function projectConversationStreamForHostedUi(
   result: ConversationStreamResult,
@@ -305,7 +325,17 @@ export function projectConversationStreamForHostedUi(
       if (!entry.children) { messages.push(fallbackMessage(item, 'Remote agent', String(item.payload.status || 'submitted'))); continue; }
       const childResult = {...result, presentation:{...presentation, timeline:entry.children || []}};
       const children = projectConversationStreamForHostedUi(childResult);
-      messages.push({...messageBase(item), role:'model', content:'', agentBlock:{item, messages:children.messages}, status:item.payload.status === 'cancelled' ? 'cancelled' : messageBase(item).status});
+      messages.push({
+        ...messageBase(item),
+        role: 'model',
+        content: '',
+        agentBlock: {
+          item,
+          messages: children.messages,
+          summary: latestPublicAgentSummary(entry.children || []),
+        },
+        status: item.payload.status === 'cancelled' ? 'cancelled' : messageBase(item).status,
+      });
       interactions.push(...children.interactions);
       continue;
     }

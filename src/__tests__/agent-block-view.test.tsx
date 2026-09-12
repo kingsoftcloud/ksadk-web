@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentBlockView } from '../components/chat/AgentBlockView';
 import type { ConversationItem } from '../core/conversation/types';
 const item: ConversationItem = {
@@ -52,8 +52,84 @@ describe('AgentBlockView', () => {
       />,
     );
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain(status);
+    expect(html).toContain(
+      {
+        submitted: '已提交',
+        working: '正在处理',
+        input_required: '等待输入',
+        completed: '已完成',
+        failed: '执行失败',
+        cancelled: '已取消',
+      }[status]!,
+    );
     expect(html).not.toContain('private collapsed detail');
     expect(html).not.toContain('Cancel remote agent');
   });
+});
+
+afterEach(() => vi.useRealTimers());
+it('shows a safe summary and elapsed time while remaining collapsed', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(1011000));
+  const html = renderToStaticMarkup(
+    <AgentBlockView
+      block={{
+        item: {
+          ...item,
+          payload: { ...item.payload, started_at: 1004, ended_at: null },
+        },
+        messages: [],
+        summary: '已获取公开指标',
+      }}
+    />,
+  );
+  expect(html).toContain('已获取公开指标');
+  expect(html).toContain('7 秒');
+  expect(html).not.toContain('agent-block-detail');
+});
+it.each(['completed', 'failed', 'cancelled'])(
+  'retains bounded elapsed duration for %s',
+  (status) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(5000000));
+    const html = renderToStaticMarkup(
+      <AgentBlockView
+        block={{
+          item: {
+            ...item,
+            payload: {
+              ...item.payload,
+              status,
+              started_at: 1004,
+              ended_at: 1019,
+            },
+          },
+          messages: [],
+        }}
+      />,
+    );
+    expect(html).toContain('15 秒');
+    expect(html).not.toContain('agent-block-summary');
+  },
+);
+it('does not invent duration from missing or reversed terminal timestamps', () => {
+  for (const ended_at of [undefined, 999]) {
+    const html = renderToStaticMarkup(
+      <AgentBlockView
+        block={{
+          item: {
+            ...item,
+            payload: {
+              ...item.payload,
+              status: 'completed',
+              started_at: 1004,
+              ended_at,
+            },
+          },
+          messages: [],
+        }}
+      />,
+    );
+    expect(html).not.toContain('agent-block-elapsed');
+  }
 });

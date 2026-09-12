@@ -365,22 +365,32 @@ test('context hover shows model metadata without inventing usage and supports pi
 });
 
 test('remote AgentBlock expands live tool observations without ending its root',async({page})=>{
+  await page.clock.install({time:new Date(1010000)});
+  await page.clock.pauseAt(new Date(1011000));
   await page.goto('/e2e/fixtures/remote-agent-block.html');
   const block=page.getByTestId('agent-block');
   await expect(block).toHaveCount(1);
   await expect(block.getByRole('button',{name:'finance',exact:true})).toHaveAttribute('aria-expanded','false');
-  await expect(page.getByText('first answer',{exact:true})).not.toBeVisible();
+  await expect(block.getByTestId('agent-block-detail')).not.toBeVisible();
+  await expect(block.getByTestId('agent-block-summary')).toHaveText('first answer');
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('7 秒');
+  await page.clock.runFor(2000);
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('9 秒');
   await block.getByRole('button',{name:'finance',exact:true}).click();
-  await expect(page.getByText('first answer',{exact:true})).toBeVisible();
+  await expect(block.getByTestId('agent-block-detail').getByText('first answer',{exact:true})).toBeVisible();
   await expect(block.getByText('query_metrics',{exact:false})).toHaveCount(1);
   await expect(block.getByText('正在运行',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Sequence 13'}).click();
   await expect(block.getByText('已完成',{exact:true})).toBeVisible();
   await expect(block).toHaveCount(1);
   await page.getByRole('button',{name:'Sequence 19'}).click();
-  await expect(block.getByRole('status')).toHaveText('completed');
+  await expect(block.getByRole('status')).toHaveText('已完成');
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('15 秒');
+  await page.clock.runFor(30000);
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('15 秒');
+  await expect(block.getByTestId('agent-block-summary')).toHaveText('second answer');
   await expect(page.getByTestId('root-status')).toHaveText('running');
-  await expect(page.getByText('second answer',{exact:true})).toBeVisible();
+  await expect(block.getByTestId('agent-block-detail').getByText('second answer',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Sequence 22'}).click();
   await expect(page.getByTestId('root-status')).toHaveText('completed');
   await expect(page.getByText('Root final answer',{exact:true})).toBeVisible();

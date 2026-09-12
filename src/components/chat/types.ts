@@ -11,7 +11,12 @@ export type PreviewImageSize = {
 };
 
 export type Message = {
-  agentBlock?: {item: import('../../core/conversation/types.js').ConversationItem; messages: Message[]};
+  agentBlock?: {
+    /** Sanitized excerpt of an explicitly public child text item, prepared by the shared projector. */
+    summary?: string;
+    item: import('../../core/conversation/types.js').ConversationItem;
+    messages: Message[];
+  };
   id: string;
   role: 'user' | 'model' | 'tool' | 'system' | 'a2ui';
   content: string;
