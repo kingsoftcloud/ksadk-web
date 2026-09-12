@@ -1,0 +1,440 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress';
+import { projectConversationItems } from '../core/conversation/presentation';
+const events = readFileSync(
+  new URL(
+    './fixtures/a2a_remote_agent/v1/a2a_stream_tool_terminal.jsonl',
+    import.meta.url,
+  ),
+  'utf8',
+)
+  .trim()
+  .split('\n')
+  .map((line) => JSON.parse(line))
+  .filter((x) => x.kind === 'runtime_event')
+  .map((x) => x.payload);
+function replay(frames = events) {
+  const ingress = new RuntimeConversationIngress('session');
+  frames.forEach((e) => ingress.apply(e));
+  return ingress;
+}
+describe('remote AgentBlock canonical fixture', () => {
+  it('groups trigger/descriptor and scoped children without ending root early', () => {
+    const ingress = replay(events.slice(0, 19));
+    const p = projectConversationItems(ingress.snapshot());
+    expect(p.terminalStatus).toBeUndefined();
+    expect(p.timeline).toHaveLength(1);
+    expect(p.timeline[0].item.kind).toBe('agent');
+    expect(
+      p.timeline[0].children?.filter((e) => e.item.kind === 'assistant_text'),
+    ).toHaveLength(2);
+    expect(
+      p.timeline[0].children?.filter((e) => e.item.kind === 'tool_call'),
+    ).toHaveLength(1);
+    expect(p.output).toBe('');
+  });
+  it('live/full/cursor-13 replay are identical and duplicates no-op', () => {
+    const ingress = replay(events.slice(0, 13));
+    events.slice(13).forEach((e) => ingress.apply(e));
+    const expected = replay().snapshot();
+    expect(ingress.snapshot()).toEqual(expected);
+    events.forEach((e) => ingress.apply(e));
+    expect(ingress.snapshot()).toEqual(expected);
+    expect(projectConversationItems(expected).output).toBe('Root final answer');
+  });
+  it('call completion remains running until a result exists', () => {
+    const p = projectConversationItems(replay(events.slice(0, 11)).snapshot());
+    expect(
+      p.timeline[0].children?.find((e) => e.item.kind === 'tool_call')?.item
+        .payload.executionStatus,
+    ).toBe('running');
+  });
+  it('rejects a child run terminal', () => {
+    const ingress = replay(events.slice(0, 5));
+    expect(() =>
+      ingress.apply({
+        ...events[21],
+        event_id: 'bad',
+        scope_id: 'child-scope-1',
+        parent_scope_id: 'root-scope',
+      }),
+    ).toThrow();
+  });
+});
+
+import { HttpConversationClient } from '../core/conversation/client';
+import { agentBlockProfile } from '../core/conversation/agent';
+import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry';
+import { decodeConversationInput } from '../core/conversation/contracts';
+import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history';
+import { projectConversationStreamForHostedUi } from '../core/conversation/hosted';
+import type {
+  ConversationSurface,
+  ConversationInput,
+} from '../core/conversation/types';
+const surface: ConversationSurface = {
+  apiVersion: 'conversation.ksadk.io/v1',
+  kind: 'ConversationSurface',
+  surfaceId: 'surface',
+  sessionId: 'session',
+  providerRef: 'test',
+  inputs: [
+    { name: 'text', mode: 'native' },
+    { name: 'ksadk.presentation', mode: 'native' },
+  ],
+  outputs: [{ name: 'agent.block', mode: 'translated' }],
+};
+const input: ConversationInput = {
+  apiVersion: 'conversation.ksadk.io/v1',
+  kind: 'ConversationInput',
+  sessionId: 'session',
+  inputId: 'input',
+  idempotencyKey: 'idempotency',
+  parts: [{ kind: 'text', text: 'hello' }],
+};
+const stream = (frames: Record<string, unknown>[]) =>
+  new Response(
+    frames
+      .map(
+        (e) => `id: ${e.seq}\ndata: ${JSON.stringify({ runtimeEvent: e })}\n\n`,
+      )
+      .join(''),
+    { headers: { 'Content-Type': 'text/event-stream' } },
+  );
+describe('shared remote profile, history and reconnect', () => {
+  it('requires producer input/output declaration and trusted renderer', () => {
+    expect(agentBlockProfile(surface)).toBe('flat-v1');
+    expect(agentBlockProfile(surface, agentBlockRendererCatalog)).toBe(
+      'agent-block-v1',
+    );
+    expect(
+      agentBlockProfile({ ...surface, inputs: [] }, agentBlockRendererCatalog),
+    ).toBe('flat-v1');
+    expect(
+      agentBlockProfile({ ...surface, outputs: [] }, agentBlockRendererCatalog),
+    ).toBe('flat-v1');
+    expect(
+      decodeConversationInput({
+        ...input,
+        extensions: { 'ksadk.presentation': { profile: 'invented' } },
+      }),
+    ).toBeNull();
+    expect(
+      decodeConversationInput({
+        ...input,
+        extensions: {
+          'ksadk.presentation': { profile: 'agent-block-v1', url: 'unsafe' },
+        },
+      }),
+    ).toBeNull();
+  });
+  it('selects one lane and retains negotiated profile at cursor 13', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = new HttpConversationClient({
+      rendererCatalog: agentBlockRendererCatalog,
+      sleep: async () => {},
+      fetch: async (url, init) => {
+        calls.push({ url, init });
+        return calls.length === 1
+          ? stream(events.slice(0, 13))
+          : stream(events.slice(13));
+      },
+    });
+    const result = await client.streamTurn({
+      bootstrap: { buildId: 'build', surface },
+      input,
+    });
+    expect(calls).toHaveLength(2);
+    expect(
+      JSON.parse(String(calls[0].init?.body)).input.extensions[
+        'ksadk.presentation'
+      ],
+    ).toEqual({ profile: 'agent-block-v1' });
+    expect(calls[1].url).toContain('after=13');
+    expect(calls[1].url).toContain('presentationProfile=agent-block-v1');
+    expect(result.presentation).toEqual(
+      projectConversationItems(replay().snapshot()),
+    );
+    expect(result.presentation.timeline.map((e) => e.item.kind)).toEqual([
+      'agent',
+      'assistant_text',
+    ]);
+  });
+  it('old surfaces receive no extension and only root final once', async () => {
+    let posted: Record<string, unknown> = {};
+    const updates: string[] = [];
+    const client = new HttpConversationClient({
+      rendererCatalog: agentBlockRendererCatalog,
+      ingressLane: 'runtime',
+      fetch: async (_url, init) => {
+        posted = JSON.parse(String(init?.body));
+        return stream(events);
+      },
+    });
+    const result = await client.streamTurn({
+      bootstrap: {
+        buildId: 'build',
+        surface: { ...surface, inputs: [surface.inputs[0]], outputs: [] },
+      },
+      input,
+      onUpdate: (r) => updates.push(r.presentation.output),
+    });
+    expect((posted.input as ConversationInput).extensions).toBeUndefined();
+    expect(
+      result.presentation.timeline.every((e) => e.item.kind !== 'agent'),
+    ).toBe(true);
+    expect(updates.filter(Boolean)).toEqual(['Root final answer']);
+  });
+  it('rebuilds history through the same projection', () => {
+    const history = rebuildPersistedSessionHistory(
+      [],
+      events.map((e) => ({
+        SeqId: e.seq,
+        EventType: 'runtime_event',
+        Content: { runtime_event: e },
+      })),
+      'session',
+    );
+    const state = replay().snapshot();
+    const live = projectConversationStreamForHostedUi({
+      state,
+      presentation: projectConversationItems(state),
+      cursor: 22,
+      runId: 'root-run-1',
+    });
+    expect(
+      history.messages.map((m) => ({
+        content: m.content,
+        agentBlock: m.agentBlock,
+        blocks: m.blocks,
+      })),
+    ).toEqual(
+      live.messages.map((m) => ({
+        content: m.content,
+        agentBlock: m.agentBlock,
+        blocks: m.blocks,
+      })),
+    );
+  });
+  it('descriptor-first retains the trigger position', () => {
+    const frames = [
+      events[0],
+      events[3],
+      events[19],
+      events[1],
+      ...events.slice(4, 19),
+      events[20],
+      events[21],
+    ];
+    const p = projectConversationItems(replay(frames).snapshot());
+    expect(p.timeline.map((e) => e.item.kind)).toEqual([
+      'assistant_text',
+      'agent',
+    ]);
+    expect(p.timeline[1].sourceItemIds).toHaveLength(2);
+  });
+  it('same native call IDs in concurrent scopes remain separate', () => {
+    const second = events
+      .slice(3, 19)
+      .map((frame) =>
+        JSON.parse(
+          JSON.stringify(frame)
+            .replaceAll('child-scope-1', 'child-scope-2')
+            .replaceAll('scope-descriptor-1', 'scope-descriptor-2')
+            .replaceAll('handoff-1', 'handoff-2'),
+        ),
+      );
+    second.forEach((frame: Record<string, unknown>) => {
+      frame.event_id = `second-${frame.event_id}`;
+    });
+    const p = projectConversationItems(
+      replay([...events.slice(0, 19), ...second]).snapshot(),
+    );
+    expect(p.timeline).toHaveLength(2);
+    expect(
+      p.timeline.map(
+        (e) => e.children?.filter((c) => c.item.kind === 'tool_call').length,
+      ),
+    ).toEqual([1, 1]);
+    expect(
+      p.timeline[0].children?.find((e) => e.item.kind === 'tool_call')?.key,
+    ).not.toBe(
+      p.timeline[1].children?.find((e) => e.item.kind === 'tool_call')?.key,
+    );
+  });
+  it('rejects terminal mutation and scope parent changes', () => {
+    expect(() =>
+      replay([
+        ...events,
+        {
+          ...events[18],
+          event_id: 'terminal-conflict',
+          snapshot: { parts: [] },
+        },
+      ]),
+    ).toThrow();
+    expect(() =>
+      replay([
+        ...events.slice(0, 5),
+        { ...events[5], event_id: 'parent-conflict', parent_scope_id: 'other' },
+      ]),
+    ).toThrow();
+  });
+});
+
+import { safeToolValue } from '../core/conversation/safe-tool-value';
+it('public tool observations exclude credentials, private addresses and diagnostics', () => {
+  const safe = JSON.stringify(
+    safeToolValue({
+      authorization: 'Bearer fixture-secret',
+      url: 'http://127.0.0.1/admin',
+      traceback: 'Traceback: fixture-private',
+      long_field: 'x'.repeat(20000),
+    }),
+  );
+  expect(safe).not.toContain('fixture-secret');
+  expect(safe).not.toContain('127.0.0.1');
+  expect(safe).not.toContain('fixture-private');
+  expect(safe).toContain('[truncated]');
+});
+it('mixed native and runtime lanes do not double project', async () => {
+  const native = replay().snapshot().items;
+  let body = '';
+  for (const item of native) {
+    body += `id: ${body.length + 1}\ndata: ${JSON.stringify({ conversationItem: item })}\n\n`;
+    body += `id: ${body.length + 1}\ndata: ${JSON.stringify({ runtimeEvent: events[0] })}\n\n`;
+  }
+  const client = new HttpConversationClient({
+    rendererCatalog: agentBlockRendererCatalog,
+    fetch: async () => new Response(body),
+  });
+  const result = await client.streamTurn({
+    bootstrap: {
+      buildId: 'build',
+      surface: {
+        ...surface,
+        outputs: [{ name: 'agent.block', mode: 'native' }],
+      },
+    },
+    input,
+  });
+  expect(result.state.items).toHaveLength(native.length);
+  expect(result.presentation.timeline.map((e) => e.item.kind)).toEqual([
+    'agent',
+    'assistant_text',
+  ]);
+});
+it('pure delegation flat answer follows explicit output refs only', () => {
+  const frames = [
+    ...events.slice(0, 19),
+    {
+      ...events[21],
+      output_refs: [{ scope_id: 'child-scope-1', item_id: 'child-message-2' }],
+    },
+  ];
+  const p = projectConversationItems(replay(frames).snapshot(), {
+    profile: 'flat-v1',
+  });
+  expect(p.output).toBe('second answer');
+  expect(
+    p.timeline.filter((e) => e.item.kind === 'assistant_text'),
+  ).toHaveLength(1);
+});
+it('same text in different native message items remains distinct', () => {
+  const frames = events.map((e) =>
+    JSON.parse(
+      JSON.stringify(e)
+        .replaceAll('second answer', 'first answer')
+        .replaceAll('second ', 'first '),
+    ),
+  );
+  const p = projectConversationItems(replay(frames).snapshot());
+  expect(
+    p.timeline[0].children?.filter(
+      (e) => e.item.payload.text === 'first answer',
+    ),
+  ).toHaveLength(2);
+});
+
+it('result-only stays an honest orphan and a late call cannot reopen execution', () => {
+  const ingress = replay([events[0], events[3], events[12]]);
+  let p = projectConversationItems(ingress.snapshot());
+  expect(p.timeline[0].children?.[0].item.payload.orphan).toBe(true);
+  ingress.apply(events[9]);
+  ingress.apply(events[10]);
+  p = projectConversationItems(ingress.snapshot());
+  expect(p.timeline[0].children).toHaveLength(1);
+  expect(p.timeline[0].children?.[0].item.payload.orphan).toBe(false);
+  expect(p.timeline[0].children?.[0].item.payload.executionStatus).toBe(
+    'completed',
+  );
+});
+it('child messages and tools reference the descriptor, and mismatched trigger calls are rejected', () => {
+  const state = replay().snapshot();
+  const agent = state.items.find((item) => item.kind === 'agent')!;
+  expect(
+    state.items
+      .filter((item) => item.nativeRef.parentScopeId && item.kind !== 'agent')
+      .every((item) => item.parentItemId === agent.itemId),
+  ).toBe(true);
+  const bad = JSON.parse(JSON.stringify(events[3]));
+  bad.initial.parts[0].data.trigger_ref.call_id = 'other';
+  expect(() => replay([events[0], events[1], bad])).toThrow(
+    'trigger call mismatch',
+  );
+});
+
+it('rejects transport authority disagreement before sending', async () => {
+  let requests = 0;
+  const client = new HttpConversationClient({
+    ingressLane: 'native',
+    rendererCatalog: agentBlockRendererCatalog,
+    fetch: async () => {
+      requests++;
+      return stream(events);
+    },
+  });
+  await expect(
+    client.streamTurn({ bootstrap: { buildId: 'build', surface }, input }),
+  ).rejects.toMatchObject({ code: 'conversation_contract_mismatch' });
+  expect(requests).toBe(0);
+});
+it('a runtime frame arriving first cannot steal a native-authoritative run', async () => {
+  const native = replay().snapshot().items;
+  const body =
+    `id: 1\ndata: ${JSON.stringify({ runtimeEvent: events[0] })}\n\n` +
+    native
+      .map(
+        (item, index) =>
+          `id: ${index + 2}\ndata: ${JSON.stringify({ conversationItem: item })}\n\n`,
+      )
+      .join('');
+  const client = new HttpConversationClient({
+    rendererCatalog: agentBlockRendererCatalog,
+    fetch: async () => new Response(body),
+  });
+  const result = await client.streamTurn({
+    bootstrap: {
+      buildId: 'build',
+      surface: {
+        ...surface,
+        outputs: [{ name: 'agent.block', mode: 'native' }],
+      },
+    },
+    input,
+  });
+  expect(result.state.items).toHaveLength(native.length);
+  expect(result.presentation.output).toBe('Root final answer');
+});
+it('rejects child content until its actual descriptor item identity is known', () => {
+  expect(() => replay([events[0], events[5]])).toThrow('descriptor first');
+});
+
+it('local cancellation is pre-send only and an identical terminal reconcile is accepted',()=>{
+  const cancelled=JSON.parse(JSON.stringify(events[18]));
+  cancelled.snapshot.parts[0].data.status='cancelled';
+  cancelled.snapshot.parts[0].data.cancel={capability:'unsupported',request_state:'local_confirmed'};
+  expect(()=>replay([events[0],events[3],cancelled,{...cancelled,event_id:'same-local-terminal'}])).not.toThrow();
+  expect(()=>replay([events[0],events[3],events[4],cancelled])).toThrow('Local cancellation after send');
+});

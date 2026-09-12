@@ -1,3 +1,4 @@
+import { safeToolValue } from './safe-tool-value.js';
 /**
  * Hosted UI presentation bridge for an already-reduced canonical snapshot.
  *
@@ -95,16 +96,19 @@ function textMessage(item: ConversationItem): Message {
 }
 
 function toolMessage(item: ConversationItem): Message {
-  const toolName = nonEmptyString(item.payload.tool) || 'Tool';
+  const toolName = nonEmptyString(item.payload.tool) || (item.payload.sourceKind === 'tool_result' ? 'Tool result' : 'Tool');
   const callId = nonEmptyString(item.payload.callId);
-  const args = displayValue(item.payload.args);
+  const args = displayValue(safeToolValue(item.payload.args));
   const output = Object.prototype.hasOwnProperty.call(item.payload, 'output')
-    ? displayValue(item.payload.output)
+    ? displayValue(safeToolValue(item.payload.output))
     : undefined;
   const failed = item.lifecycle === 'failed' || item.payload.isError === true;
-  const status = failed
+  const executionCompleted = item.payload.executionStatus ? item.payload.executionStatus === 'completed' : item.lifecycle === 'completed';
+  const status = item.payload.executionStatus === 'unknown'
+    ? 'unknown' as const
+    : failed
     ? 'error' as const
-    : item.lifecycle === 'completed'
+    : executionCompleted
       ? 'completed' as const
       : 'running' as const;
   return {
@@ -295,7 +299,16 @@ export function projectConversationStreamForHostedUi(
   // The shared presentation is the only place allowed to combine related
   // native items (for example tool_call and tool_result by callId). Iterating
   // raw state here would reintroduce duplicate cards in Hosted UI.
-  for (const { item } of presentation.timeline) {
+  for (const entry of presentation.timeline) {
+    const { item } = entry;
+    if (item.kind === 'agent') {
+      if (!entry.children) { messages.push(fallbackMessage(item, 'Remote agent', String(item.payload.status || 'submitted'))); continue; }
+      const childResult = {...result, presentation:{...presentation, timeline:entry.children || []}};
+      const children = projectConversationStreamForHostedUi(childResult);
+      messages.push({...messageBase(item), role:'model', content:'', agentBlock:{item, messages:children.messages}, status:item.payload.status === 'cancelled' ? 'cancelled' : messageBase(item).status});
+      interactions.push(...children.interactions);
+      continue;
+    }
     if (textById.has(item.itemId)) {
       messages.push(textMessage(item));
       continue;

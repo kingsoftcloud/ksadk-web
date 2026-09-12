@@ -11,6 +11,7 @@ export type PreviewImageSize = {
 };
 
 export type Message = {
+  agentBlock?: {item: import('../../core/conversation/types.js').ConversationItem; messages: Message[]};
   id: string;
   role: 'user' | 'model' | 'tool' | 'system' | 'a2ui';
   content: string;
@@ -65,7 +66,7 @@ export type Message = {
       callId?: string;
       args: string;
       output?: string;
-      status: 'running' | 'completed' | 'error' | 'paused';
+      status: 'running' | 'completed' | 'error' | 'paused' | 'unknown';
       approvalRequestId?: string;
       previousResponseId?: string;
       serverLabel?: string;

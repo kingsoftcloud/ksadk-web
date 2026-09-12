@@ -363,3 +363,26 @@ test('context hover shows model metadata without inventing usage and supports pi
   await trigger.hover();
   await expect(popup).toContainText('模型窗口：200,000 tokens');
 });
+
+test('remote AgentBlock expands live tool observations without ending its root',async({page})=>{
+  await page.goto('/e2e/fixtures/remote-agent-block.html');
+  const block=page.getByTestId('agent-block');
+  await expect(block).toHaveCount(1);
+  await expect(block.getByRole('button',{name:'finance',exact:true})).toHaveAttribute('aria-expanded','false');
+  await expect(page.getByText('first answer',{exact:true})).not.toBeVisible();
+  await block.getByRole('button',{name:'finance',exact:true}).click();
+  await expect(page.getByText('first answer',{exact:true})).toBeVisible();
+  await expect(block.getByText('query_metrics',{exact:false})).toHaveCount(1);
+  await expect(block.getByText('正在运行',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Sequence 13'}).click();
+  await expect(block.getByText('已完成',{exact:true})).toBeVisible();
+  await expect(block).toHaveCount(1);
+  await page.getByRole('button',{name:'Sequence 19'}).click();
+  await expect(block.getByRole('status')).toHaveText('completed');
+  await expect(page.getByTestId('root-status')).toHaveText('running');
+  await expect(page.getByText('second answer',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Sequence 22'}).click();
+  await expect(page.getByTestId('root-status')).toHaveText('completed');
+  await expect(page.getByText('Root final answer',{exact:true})).toBeVisible();
+  await expect(block).toHaveCount(1);
+});
