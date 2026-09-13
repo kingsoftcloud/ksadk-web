@@ -158,12 +158,26 @@ function projectFlatTimeline(items: ConversationItem[]): ConversationTimelineEnt
   return entries.map(entry => entry.item.kind === 'tool_call' ? { ...entry, item:{...entry.item, payload:{...entry.item.payload, ...(entry.item.payload.sourceKind === 'tool_result' ? {orphan:!items.some(item => entry.sourceItemIds.includes(item.itemId) && item.payload.sourceKind === 'tool_call')} : {})}}} : entry);
 }
 
+function triggerFamily(agent: ConversationItem, items: ConversationItem[]): ConversationItem[] {
+  const trigger = agent.payload.trigger_ref as Record<string, unknown> | undefined;
+  if (!trigger) return [];
+  return items.filter((item) => (
+    item.kind === 'tool_call'
+    && item.runId === agent.runId
+    && (item.nativeRef.scopeId || item.nativeRef.scope_id) === trigger.scope_id
+    && (
+      item.payload.callId === trigger.call_id
+      || item.itemId === agent.parentItemId
+    )
+  ));
+}
+
 function projectTimeline(items: ConversationItem[]): ConversationTimelineEntry[] {
   const agents = items.filter(item => item.kind === 'agent');
   const scope = (item: ConversationItem) => String(item.nativeRef.scopeId || item.nativeRef.scope_id || '');
   const childOwner = (item: ConversationItem) => agents.find(agent => agent.runId === item.runId
     && agent.itemId !== item.itemId && (item.parentItemId === agent.itemId || (item.kind === 'agent' ? item.payload.parent_scope_id === agent.payload.scope_id : scope(item) && scope(item) === String(agent.payload.scope_id))));
-  const hidden = new Set(agents.map(a => a.parentItemId).filter(Boolean));
+  const hidden = new Set(agents.flatMap(agent => triggerFamily(agent, items).map(item => item.itemId)));
   const root = items.filter(item => !childOwner(item) && !hidden.has(item.itemId));
   // The trigger controls ordering even when the descriptor arrived first.
   root.sort((a,b) => {
@@ -173,8 +187,19 @@ function projectTimeline(items: ConversationItem[]): ConversationTimelineEntry[]
   });
   return projectFlatTimeline(root).map(entry => {
     if (entry.item.kind !== 'agent') return entry;
-    const children = projectFlatTimeline(items.filter(item => childOwner(item) === entry.item));
-    return {...entry, sourceItemIds:[...new Set([...(entry.item.parentItemId && items.some(item => item.itemId === entry.item.parentItemId) ? [entry.item.parentItemId] : []), ...entry.sourceItemIds])], children};
+    const children = projectFlatTimeline(items.filter(
+      item => childOwner(item) === entry.item && !hidden.has(item.itemId),
+    ));
+    return {
+      ...entry,
+      sourceItemIds: [
+        ...new Set([
+          ...triggerFamily(entry.item, items).map(item => item.itemId),
+          ...entry.sourceItemIds,
+        ]),
+      ],
+      children,
+    };
   });
 }
 
@@ -193,7 +218,7 @@ export function projectConversationItems(
   ));
   if (options.profile === 'flat-v1' && visible.some(item => item.kind === 'agent' || item.nativeRef.parentScopeId || item.nativeRef.parent_scope_id)) {
     const agents = visible.filter(item => item.kind === 'agent');
-    const triggers = new Set(agents.map(item => item.parentItemId));
+    const triggers = new Set(agents.flatMap(agent => triggerFamily(agent, visible).map(item => item.itemId)));
     const agentIds = new Set(agents.map(item => item.itemId));
     const rootTerminal = visible.find(item => conversationTerminalStatus(item));
     let root = visible.filter(item => item.kind !== 'agent' && !agentIds.has(item.parentItemId || '') && !item.nativeRef.parentScopeId && !item.nativeRef.parent_scope_id && !triggers.has(item.itemId));

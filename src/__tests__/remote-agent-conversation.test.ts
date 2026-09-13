@@ -567,3 +567,70 @@ it('bounds summaries and omits them when there is no safe public text', () => {
   expect(Array.from(project()!)).toHaveLength(161);
   expect(project()).toMatch(/…$/);
 });
+
+it('translated flat-v1 preserves the legacy root identity when a child uses the same native ID', async () => {
+  const frames = events.map(frame => JSON.parse(
+    JSON.stringify(frame).replaceAll('root-message-2', 'child-message-1'),
+  ));
+  const client = new HttpConversationClient({
+    ingressLane: 'runtime',
+    fetch: async () => stream(frames),
+  });
+  const result = await client.streamTurn({
+    bootstrap: {
+      buildId: 'build',
+      surface: {...surface, outputs: [], inputs: [surface.inputs[0]]},
+    },
+    input,
+  });
+  expect(result.presentation.output).toBe('Root final answer');
+  expect(result.presentation.timeline.find(
+    entry => entry.item.kind === 'assistant_text',
+  )?.item.itemId).toBe('child-message-1');
+  const collidingItems = result.state.items.filter(
+    item => item.nativeRef.runtimeItemId === 'child-message-1',
+  ).map(item => item.itemId);
+  expect(collidingItems).toHaveLength(2);
+  expect(collidingItems).toEqual(expect.arrayContaining([
+    '["root-run-1","child-scope-1","child-message-1"]',
+    'child-message-1',
+  ]));
+});
+
+it.each(['before', 'after'])(
+  'AgentBlock absorbs its complete scoped trigger family when result arrives %s descriptor',
+  (order) => {
+    const result = {
+      ...events[12],
+      event_id: 'root-trigger-result',
+      scope_id: 'root-scope',
+      parent_scope_id: undefined,
+      item_id: 'root-trigger-result',
+      snapshot: {
+        parts: [{
+          content_type: 'tool_result',
+          part_id: 'result',
+          call_id: 'a2a-call-1',
+          result: 'delegated',
+          is_error: false,
+        }],
+      },
+    };
+    const frames = order === 'before'
+      ? [...events.slice(0, 3), result, ...events.slice(3)]
+      : [...events.slice(0, 19), result, ...events.slice(19)];
+    const state = replay(frames).snapshot();
+    const presentation = projectConversationItems(state);
+    expect(presentation.timeline.map(entry => entry.item.kind)).toEqual([
+      'agent',
+      'assistant_text',
+    ]);
+    const resultItem = state.items.find(
+      item => item.nativeRef.runtimeItemId === 'root-trigger-result',
+    )!;
+    expect(presentation.timeline[0].sourceItemIds).toContain(resultItem.itemId);
+    expect(presentation.timeline[0].children?.filter(
+      entry => entry.item.kind === 'tool_call',
+    )).toHaveLength(1);
+  },
+);

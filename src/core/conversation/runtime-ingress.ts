@@ -25,6 +25,8 @@ export const runtimeConversationIdentity = (
 /** Compatibility ingress only. Native ConversationItem streams use their own authoritative lane. */
 export class RuntimeConversationIngress {
   private readonly runtime = new RuntimeItemReducer();
+  // Flat clients retain bare root IDs. Hidden child facts must never collide in that reducer.
+  private readonly flatChildren = new ConversationItemReducer();
   private readonly seen = new Set<string>();
   private readonly parents = new Map<string, string>();
   private readonly descriptorItemIds = new Map<string, string>();
@@ -36,13 +38,19 @@ export class RuntimeConversationIngress {
     private readonly conversation = new ConversationItemReducer(),
     private readonly profile: 'agent-block-v1' | 'flat-v1' = 'agent-block-v1',
   ) {}
-  private identity(run: string, scope: string, item: string): string {
-    return this.profile === 'agent-block-v1'
+  private identity(run: string, scope: string, item: string, child = false): string {
+    return this.profile === 'agent-block-v1' || child
       ? runtimeConversationIdentity(run, scope, item)
       : item;
   }
   snapshot(): ConversationItemReducerState {
-    return this.conversation.snapshot();
+    const root = this.conversation.snapshot();
+    if (this.profile !== 'flat-v1') return root;
+    const children = this.flatChildren.snapshot();
+    return {
+      items: [...root.items, ...children.items],
+      appliedSources: [...root.appliedSources, ...children.appliedSources],
+    };
   }
   apply(frame: Record<string, unknown>): ConversationItem | null {
     if (frame.schema_version !== 2) return null;
@@ -65,7 +73,7 @@ export class RuntimeConversationIngress {
     if (this.parents.has(scope) && this.parents.get(scope) !== parent)
       throw new Error('Scope parent changed');
     const nativeItem = String(frame.item_id || '');
-    const id = this.identity(run, scope, nativeItem || event);
+    const id = this.identity(run, scope, nativeItem || event, Boolean(parent));
     const source = record(frame.source);
     const nativeRef = Object.fromEntries(
       Object.entries({
@@ -269,6 +277,7 @@ export class RuntimeConversationIngress {
           run,
           String(record(data.trigger_ref).scope_id),
           String(record(data.trigger_ref).item_id),
+          Boolean(this.parents.get(String(record(data.trigger_ref).scope_id))),
         );
         base.capabilityRef = 'agent.block';
       } else if (
@@ -339,7 +348,10 @@ export class RuntimeConversationIngress {
     this.runId = run;
     this.parents.set(scope, parent);
     this.seen.add(event);
-    this.conversation.apply(base);
+    const reducer = this.profile === 'flat-v1' && parent
+      ? this.flatChildren
+      : this.conversation;
+    reducer.apply(base);
     return base;
   }
 }

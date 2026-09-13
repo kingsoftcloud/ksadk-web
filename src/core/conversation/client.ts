@@ -100,8 +100,9 @@ function createResult(
   cursor: number,
   runId: string,
   profile?: 'flat-v1' | 'agent-block-v1',
+  runtime?: RuntimeConversationIngress,
 ): ConversationStreamResult {
-  const state = reducer.snapshot();
+  const state = runtime ? runtime.snapshot() : reducer.snapshot();
   return {
     cursor,
     runId,
@@ -199,12 +200,18 @@ function processFrame(frame: string, context: StreamContext): void {
     throw new ConversationClientError('conversation_contract_mismatch', 'Conversation identity or lifecycle invariant failed.', {cause});
   }
   context.cursor = Math.max(context.cursor, id);
-  if (changed) context.options.onItem?.(item);
+  if (
+    changed
+    && !(context.profile === 'flat-v1' && item.nativeRef.parentScopeId)
+  ) {
+    context.options.onItem?.(item);
+  }
   context.options.onUpdate?.(createResult(
     context.reducer,
     context.cursor,
     context.runId,
     context.profile,
+    context.lane === 'runtime' ? context.runtime : undefined,
   ));
 }
 
@@ -418,7 +425,13 @@ export class HttpConversationClient {
       }
     }
 
-    let result = createResult(context.reducer, context.cursor, context.runId, context.profile);
+    let result = createResult(
+      context.reducer,
+      context.cursor,
+      context.runId,
+      context.profile,
+      context.lane === 'runtime' ? context.runtime : undefined,
+    );
     if (terminal(result)) return result;
     if (!context.runId) {
       throw new ConversationClientError(
@@ -463,7 +476,13 @@ export class HttpConversationClient {
         }
         continue;
       }
-      result = createResult(context.reducer, context.cursor, context.runId, context.profile);
+      result = createResult(
+        context.reducer,
+        context.cursor,
+        context.runId,
+        context.profile,
+        context.lane === 'runtime' ? context.runtime : undefined,
+      );
       if (terminal(result)) return result;
     }
     throw new ConversationClientError(
