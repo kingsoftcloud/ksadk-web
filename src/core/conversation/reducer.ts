@@ -1,3 +1,4 @@
+import { validateAgentItem } from './agent.js';
 import type {
   ConversationItem,
   ConversationItemReducerState,
@@ -51,6 +52,10 @@ export function reduceConversationItem(
 
   const index = state.items.findIndex((item) => item.itemId === incoming.itemId);
   const previous = index >= 0 ? state.items[index] : undefined;
+  validateAgentItem(incoming, previous);
+  if (previous && (previous.runId !== incoming.runId || previous.parentItemId !== incoming.parentItemId)) throw new Error('Conversation item locator changed');
+  if (previous && (previous.nativeRef.scopeId || previous.nativeRef.scope_id) !== (incoming.nativeRef.scopeId || incoming.nativeRef.scope_id)) throw new Error('Conversation item scope changed');
+  if (previous?.payload.callId && incoming.payload.callId && previous.payload.callId !== incoming.payload.callId) throw new Error('Conversation call identity changed');
   if (previous && terminal(previous) && !terminal(incoming)) {
     return { ...state, appliedSources: [...seen] };
   }

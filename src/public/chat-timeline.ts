@@ -9,3 +9,5 @@ export { StatusBanner } from '../components/chat/StatusBanner.js';
 export { A2UIActivityMessage } from '../components/chat/A2UIActivityMessage.js';
 export { MessageMarkdown } from '../components/MessageMarkdown.js';
 export type * from '../components/chat/types.js';
+export { AgentBlockView } from '../components/chat/AgentBlockView.js';
+export type { AgentBlockViewProps } from '../components/chat/AgentBlockView.js';
