@@ -14,6 +14,7 @@ const SUPPORTED_SCHEMAS: Partial<Record<ConversationItemKind, string>> = {
   assistant_text: 'conversation.item.assistant_text/v1',
   reasoning: 'conversation.item.reasoning/v1',
   tool_call: 'conversation.item.tool-call/v1',
+  agent: 'conversation.item.agent/v1',
   approval: 'conversation.item.approval/v1',
   artifact: 'conversation.item.artifact/v1',
   a2ui: 'conversation.item.a2ui/v1',
@@ -43,6 +44,7 @@ const FAILED_RUN_STATUSES = new Set([
 export function conversationTerminalStatus(
   item: ConversationItem,
 ): 'completed' | 'failed' | undefined {
+  if (item.parentItemId || item.nativeRef.parentScopeId || item.nativeRef.parent_scope_id) return undefined;
   if ((item.kind !== 'progress' && item.kind !== 'error')
     || !itemLifecycleTerminal(item)) return undefined;
   const status = typeof item.payload.status === 'string'
@@ -105,7 +107,7 @@ function payloadString(item: ConversationItem, field: string): string | null {
 function presentationKey(item: ConversationItem): string {
   if (item.kind === 'tool_call') {
     const callId = payloadString(item, 'callId');
-    if (callId) return `tool:${callId}`;
+    if (callId) return `tool:${JSON.stringify([item.runId, item.nativeRef.scopeId || item.nativeRef.scope_id || '', callId])}`;
   }
   if (item.kind === 'approval') {
     const interactionId = payloadString(item, 'interactionId');
@@ -129,13 +131,13 @@ function mergeTimelineItem(
     itemId: previous.itemId,
     parentItemId: previous.parentItemId,
     sourceEventIds: [...new Set([...previous.sourceEventIds, ...incoming.sourceEventIds])],
-    payload: { ...previous.payload, ...incoming.payload },
+    payload: { ...previous.payload, ...incoming.payload, ...(previous.payload.sourceKind === 'tool_result' && incoming.payload.sourceKind === 'tool_call' ? {executionStatus:previous.payload.executionStatus, sourceKind:'tool_result'} : {}) },
     nativeRef: { ...previous.nativeRef, ...incoming.nativeRef },
     ...(preserveTerminal ? { lifecycle: previous.lifecycle, operation: previous.operation } : {}),
   };
 }
 
-function projectTimeline(items: ConversationItem[]): ConversationTimelineEntry[] {
+function projectFlatTimeline(items: ConversationItem[]): ConversationTimelineEntry[] {
   const entries: ConversationTimelineEntry[] = [];
   const indices = new Map<string, number>();
   for (const item of items) {
@@ -153,7 +155,52 @@ function projectTimeline(items: ConversationItem[]): ConversationTimelineEntry[]
       sourceItemIds: [...new Set([...previous.sourceItemIds, item.itemId])],
     };
   }
-  return entries;
+  return entries.map(entry => entry.item.kind === 'tool_call' ? { ...entry, item:{...entry.item, payload:{...entry.item.payload, ...(entry.item.payload.sourceKind === 'tool_result' ? {orphan:!items.some(item => entry.sourceItemIds.includes(item.itemId) && item.payload.sourceKind === 'tool_call')} : {})}}} : entry);
+}
+
+function triggerFamily(agent: ConversationItem, items: ConversationItem[]): ConversationItem[] {
+  const trigger = agent.payload.trigger_ref as Record<string, unknown> | undefined;
+  if (!trigger) return [];
+  return items.filter((item) => (
+    item.kind === 'tool_call'
+    && item.runId === agent.runId
+    && (item.nativeRef.scopeId || item.nativeRef.scope_id) === trigger.scope_id
+    && (
+      item.payload.callId === trigger.call_id
+      || item.itemId === agent.parentItemId
+    )
+  ));
+}
+
+function projectTimeline(items: ConversationItem[]): ConversationTimelineEntry[] {
+  const agents = items.filter(item => item.kind === 'agent');
+  const scope = (item: ConversationItem) => String(item.nativeRef.scopeId || item.nativeRef.scope_id || '');
+  const childOwner = (item: ConversationItem) => agents.find(agent => agent.runId === item.runId
+    && agent.itemId !== item.itemId && (item.parentItemId === agent.itemId || (item.kind === 'agent' ? item.payload.parent_scope_id === agent.payload.scope_id : scope(item) && scope(item) === String(agent.payload.scope_id))));
+  const hidden = new Set(agents.flatMap(agent => triggerFamily(agent, items).map(item => item.itemId)));
+  const root = items.filter(item => !childOwner(item) && !hidden.has(item.itemId));
+  // The trigger controls ordering even when the descriptor arrived first.
+  root.sort((a,b) => {
+    const position = (item: ConversationItem) => item.kind === 'agent' && item.parentItemId && items.some(i => i.itemId === item.parentItemId)
+      ? items.findIndex(i => i.itemId === item.parentItemId) : items.indexOf(item);
+    return position(a)-position(b);
+  });
+  return projectFlatTimeline(root).map(entry => {
+    if (entry.item.kind !== 'agent') return entry;
+    const children = projectFlatTimeline(items.filter(
+      item => childOwner(item) === entry.item && !hidden.has(item.itemId),
+    ));
+    return {
+      ...entry,
+      sourceItemIds: [
+        ...new Set([
+          ...triggerFamily(entry.item, items).map(item => item.itemId),
+          ...entry.sourceItemIds,
+        ]),
+      ],
+      children,
+    };
+  });
 }
 
 /**
@@ -165,10 +212,27 @@ export function projectConversationItems(
   state: ConversationItemReducerState,
   options: ConversationProjectionOptions = {},
 ): ConversationPresentation {
-  const visible = state.items.filter((item) => (
+  let visible = state.items.filter((item) => (
     item.visibility === 'public'
     || (options.includeInternal === true && item.visibility === 'internal')
   ));
+  if (options.profile === 'flat-v1' && visible.some(item => item.kind === 'agent' || item.nativeRef.parentScopeId || item.nativeRef.parent_scope_id)) {
+    const agents = visible.filter(item => item.kind === 'agent');
+    const triggers = new Set(agents.flatMap(agent => triggerFamily(agent, visible).map(item => item.itemId)));
+    const agentIds = new Set(agents.map(item => item.itemId));
+    const rootTerminal = visible.find(item => conversationTerminalStatus(item));
+    let root = visible.filter(item => item.kind !== 'agent' && !agentIds.has(item.parentItemId || '') && !item.nativeRef.parentScopeId && !item.nativeRef.parent_scope_id && !triggers.has(item.itemId));
+    const refs = rootTerminal?.payload.outputRefs || rootTerminal?.payload.output_refs;
+    if (Array.isArray(refs) && refs.length) root = root.filter(item => item.kind !== 'assistant_text' || refs.some(ref => item.nativeRef.scopeId === ref.scope_id && item.nativeRef.runtimeItemId === ref.item_id));
+    const rootText = root.filter(item => item.kind === 'assistant_text');
+    if (rootTerminal && !rootText.some(item => item.payload.text)) {
+      if (Array.isArray(refs)) {
+        const referenced = refs.flatMap(ref => visible.filter(item => item.runId === rootTerminal.runId && item.nativeRef.scopeId === ref.scope_id && item.nativeRef.runtimeItemId === ref.item_id && item.kind === 'assistant_text'));
+        if (referenced.length) root.push({...referenced[0], itemId:`${rootTerminal.runId}:delegated-final`, parentItemId:null, nativeRef:{}, payload:{text:referenced.map(item => item.payload.text).join('')}, lifecycle:'completed'});
+      }
+    }
+    visible = root.filter(item => item.kind !== 'assistant_text' || Boolean(rootTerminal));
+  }
   const supported = visible.filter(schemaSupported);
   const unsupported = visible.filter((item) => !schemaSupported(item));
   const textKinds: ReadonlySet<ConversationItemKind> = new Set([
@@ -179,8 +243,9 @@ export function projectConversationItems(
   const textItems = supported
     .filter((item) => textKinds.has(item.kind))
     .map(projectTextItem);
+  const isChild = (item: ConversationItem) => item.nativeRef.parentScopeId || item.nativeRef.parent_scope_id || supported.some(agent => agent.kind === 'agent' && (item.parentItemId === agent.itemId || (agent.runId === item.runId && agent.payload.scope_id === (item.nativeRef.scopeId || item.nativeRef.scope_id))));
   const textSummary = (kind: ConversationItemKind): string => supported
-    .filter((item) => item.kind === kind)
+    .filter((item) => item.kind === kind && !isChild(item))
     .map((item) => typeof item.payload.text === 'string' ? item.payload.text : '')
     .join('');
   const fallbackItems = [

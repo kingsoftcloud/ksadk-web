@@ -1,3 +1,4 @@
+import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useRef, useCallback, useEffect, useMemo } from 'react';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useUIStore } from '../stores/ui.js';
@@ -50,7 +51,7 @@ export function useRunAgent(ctx: RunAgentContext) {
   const drainQueueRef = useRef<() => void>(() => {});
   // Same-origin canonical transport for Hosted UI. It resolves fetch lazily
   // so importing the library stays Node/SSR safe.
-  const defaultConversationClient = useMemo(() => new HttpConversationClient(), []);
+  const defaultConversationClient = useMemo(() => new HttpConversationClient({rendererCatalog:agentBlockRendererCatalog}), []);
   const conversationClient = ctx.conversationClient === undefined
     ? defaultConversationClient
     : ctx.conversationClient;

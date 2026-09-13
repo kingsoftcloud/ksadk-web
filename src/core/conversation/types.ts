@@ -73,6 +73,7 @@ export type ConversationItemKind =
   | 'user_message'
   | 'assistant_text'
   | 'reasoning'
+  | 'agent'
   | 'tool_call'
   | 'approval'
   | 'progress'
@@ -151,6 +152,7 @@ export type ConversationTimelineEntry = {
   key: string;
   item: ConversationItem;
   sourceItemIds: string[];
+  children?: ConversationTimelineEntry[];
 };
 
 /**
@@ -178,6 +180,7 @@ export type ConversationPresentation = {
 };
 
 export type ConversationProjectionOptions = {
+  profile?: 'agent-block-v1' | 'flat-v1';
   /** Internal items are omitted from customer-facing surfaces by default. */
   includeInternal?: boolean;
 };
@@ -218,6 +221,9 @@ export type ConversationFetch = (
 ) => Promise<Response>;
 
 export type ConversationClientOptions = {
+  /** Explicit legacy adapter authority; must agree with agent.block capability when declared. */
+  ingressLane?: 'native' | 'runtime';
+  rendererCatalog?: import('./renderer-registry.js').TrustedRendererCatalog;
   fetch?: ConversationFetch;
   baseUrl?: string;
   maxReconnects?: number;

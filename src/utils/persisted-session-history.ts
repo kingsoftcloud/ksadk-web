@@ -1,3 +1,6 @@
+import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
+import { projectConversationItems } from '../core/conversation/presentation.js';
+import { projectConversationStreamForHostedUi } from '../core/conversation/hosted.js';
 import type { Message } from '../components/chat/types.js';
 import { buildBlocksFromHistory } from '../core/run/blocks.js';
 import {
@@ -325,9 +328,39 @@ export function rebuildPersistedSessionHistory(
       || !completeCanonicalRunIds.has(message.invocationId)
     )
   )).map((message) => partialFallbackMessageById.get(message.id) || message);
-  const messages = [...retainedFallback, ...canonicalMessages].sort(
+  let messages = [...retainedFallback, ...canonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );
+
+  // Remote hierarchy uses exactly the same canonical ingress as live SSE.
+  // Older unscoped histories keep the established compatibility translator.
+  const remoteRuns = new Set(orderedRecords.flatMap(persisted => {
+    const frame = persistedRuntimeFrame(persisted);
+    return frame?.schema_version === 2 && [record(frame.initial),record(frame.snapshot)].some(holder => Array.isArray(holder?.parts) && holder.parts.some(part => record(record(part)?.data)?.schema === 'execution.scope/v1'))
+      ? [String(frame.run_id)] : [];
+  }));
+  for (const runId of remoteRuns) {
+    const ingress = new RuntimeConversationIngress(sessionId);
+    let cursor = 0;
+    let timestamp = 0;
+    for (const persisted of orderedRecords) {
+      const frame = persistedRuntimeFrame(persisted);
+      if (frame?.run_id !== runId) continue;
+      ingress.apply(frame);
+      cursor = Math.max(cursor, Number(frame.seq || 0));
+      if (!timestamp) timestamp = eventTimestamp(frame.timestamp);
+    }
+    const state = ingress.snapshot();
+    const presentation = projectConversationItems(state);
+    const projectedRemote = projectConversationStreamForHostedUi({state,presentation,runId,cursor}).messages
+      .map((message, index) => ({...message, invocationId:runId, timestamp:timestamp + index}));
+    if (projectedRemote.length && fullyObservedRunIds.has(runId)) {
+      const index = messages.findIndex(message => message.invocationId === runId || message.runId === runId);
+      const retained = messages.filter(message => (message.invocationId !== runId && message.runId !== runId) || message.role === 'user');
+      messages = [...retained.slice(0,index < 0 ? retained.length : index), ...projectedRemote, ...retained.slice(index < 0 ? retained.length : index)];
+      completeCanonicalRunIds.add(runId);
+    }
+  }
 
   return {
     messages,
