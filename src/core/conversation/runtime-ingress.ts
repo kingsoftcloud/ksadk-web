@@ -251,6 +251,12 @@ export class RuntimeConversationIngress {
         .snapshot()
         .items.find((i) => i.scopeId === scope && i.itemId === nativeItem);
       if (!item) return null;
+      if (parent && ['artifact', 'tool_call', 'tool_result'].includes(item.itemKind) && !item.parts.length) {
+        this.runId = run;
+        this.parents.set(scope, parent);
+        this.seen.add(event);
+        return null;
+      }
       const values = item.parts.map((p) => record(p.value));
       const data = values
         .map((p) => record(p.data))
@@ -314,7 +320,8 @@ export class RuntimeConversationIngress {
                 : 'running',
           sourceKind: item.itemKind,
         };
-      } else if (item.itemKind === 'message' || item.itemKind === 'reasoning') {
+      } else if (item.itemKind === 'message' || item.itemKind === 'reasoning' ||
+        (item.itemKind === 'artifact' && item.parts.length > 0 && item.parts.every(p => p.contentType === 'text'))) {
         base.kind =
           item.itemKind === 'reasoning'
             ? 'reasoning'

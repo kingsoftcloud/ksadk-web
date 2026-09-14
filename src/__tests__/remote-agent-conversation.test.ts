@@ -20,6 +20,16 @@ function replay(frames = events) {
   return ingress;
 }
 describe('remote AgentBlock canonical fixture', () => {
+  it('renders A2A text artifacts identically to message items during persisted replay', () => {
+    const artifactFrames = events.map(event => event.parent_scope_id && event.item_kind === 'message'
+      ? {...event, item_kind:'artifact'} : event);
+    const expected = projectConversationItems(replay().snapshot());
+    const actual = projectConversationItems(replay(artifactFrames).snapshot());
+    const visible = (value: unknown) => JSON.parse(JSON.stringify(value, (key, entry) => key === 'sourceEventIds' ? undefined : entry));
+    expect(visible(actual.timeline)).toEqual(visible(expected.timeline));
+    expect(actual.artifacts).toEqual([]);
+  });
+
   it('groups trigger/descriptor and scoped children without ending root early', () => {
     const ingress = replay(events.slice(0, 19));
     const p = projectConversationItems(ingress.snapshot());
