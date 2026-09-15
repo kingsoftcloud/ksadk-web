@@ -135,9 +135,16 @@ export type ConversationFallbackCard = {
 };
 
 export type ConversationArtifact = {
+  /** Stable artifact identity from the provider, or the item identity fallback. */
+  artifactId: string;
+  /** Source item/run identities are retained for inspection and audit. */
+  itemId: string;
+  runId: string;
+  sourceEventIds: string[];
   id: string;
   name: string;
   mimeType: string;
+  sizeBytes?: number | null;
   /** Only an absolute HTTP(S) URI without embedded credentials is clickable. */
   uri: string | null;
 };

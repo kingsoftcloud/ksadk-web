@@ -287,10 +287,13 @@ describe('ConversationItem/v1 renderer projection', () => {
       operation: 'completed',
       lifecycle: 'completed',
       payloadSchemaRef: 'conversation.item.artifact/v1',
-      payload: { name: 'report.md', mimeType: 'text/markdown', uri },
+      payload: { artifactId: 'artifact-report', name: 'report.md', mimeType: 'text/markdown', sizeBytes: 42, uri },
     });
     const state = reduceConversationItem(createConversationItemState(), artifact);
-    expect(projectConversationItems(state).artifacts[0]?.uri).toBe(expected);
+    expect(projectConversationItems(state).artifacts[0]).toMatchObject({
+      artifactId: 'artifact-report', itemId: 'item-1', runId: 'run-1',
+      sourceEventIds: ['event-1'], sizeBytes: 42, uri: expected,
+    });
   });
 
   it('omits internal and hidden items unless internal rendering is explicit', () => {

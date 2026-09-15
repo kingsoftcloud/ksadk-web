@@ -85,7 +85,18 @@ function projectTextItem(item: ConversationItem): ConversationTextPresentation {
 }
 
 function projectArtifact(item: ConversationItem): ConversationArtifact {
+  const artifactId = typeof item.payload.artifactId === 'string' && item.payload.artifactId
+    ? item.payload.artifactId
+    : item.itemId;
+  const rawSize = item.payload.sizeBytes ?? item.payload.size;
+  const sizeBytes = typeof rawSize === 'number' && Number.isFinite(rawSize) && rawSize >= 0
+    ? rawSize
+    : null;
   return {
+    artifactId,
+    itemId: item.itemId,
+    runId: item.runId,
+    sourceEventIds: [...item.sourceEventIds],
     id: item.itemId,
     name: typeof item.payload.name === 'string' && item.payload.name
       ? item.payload.name
@@ -93,6 +104,7 @@ function projectArtifact(item: ConversationItem): ConversationArtifact {
     mimeType: typeof item.payload.mimeType === 'string' && item.payload.mimeType
       ? item.payload.mimeType
       : 'application/octet-stream',
+    sizeBytes,
     uri: safeArtifactUri(item.payload.uri),
   };
 }
