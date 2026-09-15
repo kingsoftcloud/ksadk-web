@@ -93,4 +93,13 @@ describe('message markdown layout', () => {
     expect(source).toContain("new URL(candidate");
     expect(source).toContain('href={source.url}');
   });
+
+  it('shows optional tool summaries and durations in the activity row', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ProcessingBlocksView.tsx'), 'utf8');
+
+    expect(source).toContain('formatToolDuration');
+    expect(source).toContain('extra.durationMs');
+    expect(source).toContain('extra.summary');
+    expect(source).toContain('font-mono text-[11px]');
+  });
 });

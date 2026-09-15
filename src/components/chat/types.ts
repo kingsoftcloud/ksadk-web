@@ -65,6 +65,8 @@ export type Message = {
       callId?: string;
       args: string;
       output?: string;
+      summary?: string;
+      durationMs?: number;
       status: 'running' | 'completed' | 'error' | 'paused';
       approvalRequestId?: string;
       previousResponseId?: string;

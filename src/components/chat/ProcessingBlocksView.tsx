@@ -149,6 +149,8 @@ function ToolRow({
   const approvalProtocol = (extra.approvalProtocol as string) || tool?.approvalProtocol;
   const previousResponseId = (extra.previousResponseId as string) || tool?.previousResponseId;
   const running = status === 'running';
+  const summary = String(extra.summary ?? tool?.summary ?? '').trim();
+  const durationMs = Number(extra.durationMs ?? tool?.durationMs);
   // Codex reports a cancelled command as item.failed after the authoritative
   // interaction cancellation. Present that expected terminal state as
   // cancelled instead of turning the user's feedback into an execution error.
@@ -191,6 +193,8 @@ function ToolRow({
           <Wrench className={cn('h-3.5 w-3.5 shrink-0', tone)} />
           <span className={tone}>{prefix}</span>
           <span className="truncate font-medium text-slate-600 dark:text-slate-300">{block.toolName}</span>
+          {summary ? <span className="truncate text-slate-400 dark:text-slate-500">· {summary}</span> : null}
+          {Number.isFinite(durationMs) && durationMs >= 0 ? <span className="shrink-0 font-mono text-[11px] text-slate-400 dark:text-slate-500">· {formatToolDuration(durationMs)}</span> : null}
           {running && args && <span className="ml-0.5 animate-pulse text-slate-400">…</span>}
         </span>
       }
@@ -376,6 +380,10 @@ function WebSearchSourcesChip({ sources }: { sources: { url: string; title: stri
 }
 
 const MAX_TOOL_LOG_PREVIEW_CHARS = 12_000;
+
+function formatToolDuration(durationMs: number): string {
+  return durationMs < 1000 ? `${Math.round(durationMs)}ms` : `${(durationMs / 1000).toFixed(1)}s`;
+}
 
 function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | 'output' | 'error'; value: string }) {
   const [expanded, setExpanded] = useState(false);
