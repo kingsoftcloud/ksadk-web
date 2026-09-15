@@ -85,4 +85,12 @@ describe('message markdown layout', () => {
     expect(source).toContain('Mermaid 渲染失败，已显示源码');
     expect(source).toContain('{chart}');
   });
+
+  it('filters unsafe protocols from tool search source links', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ProcessingBlocksView.tsx'), 'utf8');
+
+    expect(source).toContain("['http:', 'https:'].includes(protocol)");
+    expect(source).toContain("new URL(candidate");
+    expect(source).toContain('href={source.url}');
+  });
 });

@@ -323,7 +323,14 @@ function parseWebSearchSources(output: string): { url: string; title: string }[]
     return arr
       .map((item: unknown) => {
         const obj = item as Record<string, unknown>;
-        const url = String(obj?.url ?? obj?.link ?? obj?.href ?? '');
+        const candidate = String(obj?.url ?? obj?.link ?? obj?.href ?? '');
+        let url = '';
+        try {
+          const protocol = new URL(candidate, typeof window === 'undefined' ? 'http://localhost/' : window.location.href).protocol.toLowerCase();
+          if (['http:', 'https:'].includes(protocol)) url = candidate;
+        } catch {
+          url = '';
+        }
         const title = String(obj?.title ?? obj?.name ?? url);
         return url ? { url, title } : null;
       })
