@@ -36,4 +36,21 @@ describe('ApiSessionFacade', () => {
     await ready.approve({ ...binding, nativeSessionId: 'ses_1' }, { interactionId: 'i_1', runId: 'run_1', expectedRevision: 7, approve: true, idempotencyKey: 'idem_7' });
     expect(api.submitInteraction).toHaveBeenCalledWith(expect.objectContaining({ InteractionId: 'i_1', RunId: 'run_1', ExpectedRevision: 7, IdempotencyKey: 'idem_7' }), {});
   });
+
+  it('single-flights concurrent native session creation', async () => {
+    const api = fakeApi();
+    let release!: (value: { SessionId: string }) => void;
+    api.createSession = vi.fn(() => new Promise(resolve => { release = resolve; }));
+    const facade = new ApiSessionFacade(api, { agentId: 'agent-a' });
+    const controller = new ConversationController();
+    const id = controller.getOrCreate('agent-a', null);
+    const first = facade.ensureExecutionBinding(id);
+    const second = facade.ensureExecutionBinding(id);
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    release({ SessionId: 'ses_once' });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ nativeSessionId: 'ses_once' }),
+      expect.objectContaining({ nativeSessionId: 'ses_once' }),
+    ]);
+  });
 });

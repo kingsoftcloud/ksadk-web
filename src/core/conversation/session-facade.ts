@@ -25,6 +25,7 @@ export type SessionFacade = {
 /** Adapter that gives Studio one Query / Command / Feed boundary over the existing API. */
 export class ApiSessionFacade implements SessionFacade {
   private readonly bindings = new Map<ConversationId, ConversationBinding>();
+  private readonly pendingBindings = new Map<ConversationId, Promise<ConversationBinding>>();
   constructor(private readonly api: ApiFacade, private readonly owner: SessionOwner) {}
 
   async listSessionSummaries(options: { page?: number; pageSize?: number; signal?: AbortSignal } = {}) {
@@ -59,10 +60,25 @@ export class ApiSessionFacade implements SessionFacade {
   async ensureExecutionBinding(conversationId: ConversationId, options: { signal?: AbortSignal } = {}) {
     const existing = this.bindings.get(conversationId);
     if (existing?.nativeSessionId) return existing;
-    const session = await this.api.createSession(this.owner.agentId, options);
-    const binding: ConversationBinding = { conversationId, agentId: this.owner.agentId, targetId: this.owner.targetId, nativeSessionId: session.SessionId };
-    this.bindings.set(conversationId, binding);
-    return binding;
+    const pending = this.pendingBindings.get(conversationId);
+    if (pending) return pending;
+    const creation = this.api.createSession(this.owner.agentId, options)
+      .then((session) => {
+        if (!session.SessionId) throw new Error('Runtime returned no native session identity');
+        const binding: ConversationBinding = {
+          conversationId,
+          agentId: this.owner.agentId,
+          targetId: this.owner.targetId,
+          nativeSessionId: session.SessionId,
+        };
+        this.bindings.set(conversationId, binding);
+        return binding;
+      })
+      .finally(() => {
+        if (this.pendingBindings.get(conversationId) === creation) this.pendingBindings.delete(conversationId);
+      });
+    this.pendingBindings.set(conversationId, creation);
+    return creation;
   }
 
   submit(binding: ConversationBinding, input: { text: string; clientRequestId: string; idempotencyKey: string }, options: { signal?: AbortSignal } = {}) {
