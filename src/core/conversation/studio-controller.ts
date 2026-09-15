@@ -17,6 +17,13 @@ export type DraftSession = {
   attachments: File[];
 };
 
+export type DraftConflict = {
+  conversationId: ConversationId;
+  local: DraftSession;
+  remote: Pick<DraftSession, 'text' | 'revision' | 'updatedAt'> | null;
+  detectedAt: number;
+};
+
 export type OutboxStatus = 'pending' | 'sending' | 'unknown' | 'failed' | 'completed' | 'cancelled';
 
 export type OutboxAttachment = { name: string; type: string; size: number };
@@ -203,12 +210,21 @@ export function createNavigationEpoch(): { readonly current: number; next: () =>
 
 export class DraftStore {
   private readonly drafts = new Map<ConversationId, DraftSession>();
+  private readonly conflicts = new Map<ConversationId, DraftConflict>();
+  private readonly listeners = new Set<() => void>();
   private readonly storageKey: string;
   private readonly maxEntries: number;
+  private readonly storageListener?: (event: StorageEvent) => void;
   constructor(storageKey = 'ksadk.conversation-drafts', maxEntries = 128) {
     this.storageKey = storageKey;
     this.maxEntries = Math.max(1, maxEntries);
     this.restore();
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      this.storageListener = event => {
+        if (event.key === this.storageKey) this.applyExternal(event.newValue);
+      };
+      window.addEventListener('storage', this.storageListener);
+    }
   }
   get(conversationId: ConversationId): DraftSession {
     let draft = this.drafts.get(conversationId);
@@ -224,16 +240,67 @@ export class DraftStore {
   set(conversationId: ConversationId, text: string, attachments?: File[]): DraftSession {
     const previous = this.get(conversationId);
     const files = attachments ?? previous.attachments;
-    if (previous.text === text && previous.attachments === files) return previous;
+    const sameAttachments = previous.attachments.length === files.length
+      && previous.attachments.every((file, index) => file === files[index]);
+    if (previous.text === text && sameAttachments) return previous;
     const next = { conversationId, text, attachments: files, revision: previous.revision + 1, updatedAt: Date.now() };
     this.drafts.set(conversationId, next);
+    this.conflicts.delete(conversationId);
     this.evict(conversationId);
     this.persist();
     return next;
   }
-  delete(conversationId: ConversationId): void { this.drafts.delete(conversationId); this.persist(); }
-  clear(): void { this.drafts.clear(); this.persist(); }
+  delete(conversationId: ConversationId): void { this.drafts.delete(conversationId); this.conflicts.delete(conversationId); this.persist(); }
+  clear(): void { this.drafts.clear(); this.conflicts.clear(); this.persist(); }
   size(): number { return this.drafts.size; }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  getConflict(conversationId: ConversationId): DraftConflict | undefined {
+    const conflict = this.conflicts.get(conversationId);
+    return conflict ? { ...conflict, local: { ...conflict.local, attachments: [...conflict.local.attachments] } } : undefined;
+  }
+
+  resolveConflict(conversationId: ConversationId, choice: 'local' | 'remote'): DraftSession | undefined {
+    const conflict = this.conflicts.get(conversationId);
+    if (!conflict) return this.drafts.get(conversationId);
+    if (choice === 'remote') {
+      if (!conflict.remote) {
+        this.drafts.delete(conversationId);
+        this.conflicts.delete(conversationId);
+        this.persist();
+        return undefined;
+      }
+      const remote = {
+        conversationId,
+        text: conflict.remote.text,
+        revision: conflict.remote.revision,
+        updatedAt: conflict.remote.updatedAt,
+        attachments: [],
+      };
+      this.drafts.set(conversationId, remote);
+      this.conflicts.delete(conversationId);
+      this.notify();
+      return remote;
+    }
+    const local = this.drafts.get(conversationId);
+    if (!local) return undefined;
+    // Advance the revision before writing so the other window can observe
+    // that this choice supersedes its competing edit.
+    const next = { ...local, revision: Math.max(local.revision, conflict.remote?.revision || 0) + 1, updatedAt: Date.now() };
+    this.drafts.set(conversationId, next);
+    this.conflicts.delete(conversationId);
+    this.persist();
+    return next;
+  }
+
+  dispose(): void {
+    if (this.storageListener && typeof window !== 'undefined') window.removeEventListener('storage', this.storageListener);
+    this.listeners.clear();
+  }
 
   private restore(): void {
     try {
@@ -282,6 +349,55 @@ export class DraftStore {
     } catch {
       // Storage is best effort; in-memory drafts remain authoritative.
     }
+    this.notify();
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  private applyExternal(raw: string | null): void {
+    let parsed: Record<string, unknown> = {};
+    try {
+      const value = raw ? JSON.parse(raw) : {};
+      if (value && typeof value === 'object' && !Array.isArray(value)) parsed = value as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const ids = new Set<ConversationId>([
+      ...this.drafts.keys(),
+      ...Object.keys(parsed).filter(id => id.startsWith('conversation_')) as ConversationId[],
+    ]);
+    let changed = false;
+    for (const id of ids) {
+      const current = this.drafts.get(id);
+      const value = parsed[id] as Partial<DraftSession> | undefined;
+      const remote = value && typeof value.text === 'string'
+        ? { text: value.text, revision: Number(value.revision || 0), updatedAt: Number(value.updatedAt || 0) }
+        : null;
+      if (!current && remote) {
+        this.drafts.set(id, { conversationId: id, ...remote, attachments: [] });
+        changed = true;
+        continue;
+      }
+      if (!current) continue;
+      const sameRevisionDifferentText = remote
+        && remote.revision === current.revision
+        && (remote.text !== current.text || remote.updatedAt !== current.updatedAt);
+      const remoteNewer = remote && remote.revision > current.revision;
+      const localDeletedRemotely = !remote && current.text;
+      if (sameRevisionDifferentText || localDeletedRemotely) {
+        this.conflicts.set(id, { conversationId: id, local: { ...current, attachments: [...current.attachments] }, remote, detectedAt: Date.now() });
+        changed = true;
+      } else if (remoteNewer) {
+        // File bytes are runtime-only; preserve this window's in-memory files
+        // while adopting the newer text revision from the other window.
+        this.drafts.set(id, { conversationId: id, ...remote, attachments: current.attachments });
+        this.conflicts.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) this.notify();
   }
 }
 

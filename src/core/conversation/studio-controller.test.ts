@@ -40,6 +40,60 @@ describe('Studio conversation primitives', () => {
     delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 
+  it('detects divergent same-revision edits from another window and resolves them explicitly', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: () => {}, clear: () => {}, key: () => null, length: 0 } as unknown as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const fakeWindow = new EventTarget();
+    Object.defineProperty(globalThis, 'window', { value: fakeWindow, configurable: true });
+    const id = createConversationId(() => 0.4);
+    const first = new DraftStore('multi-window-drafts');
+    const second = new DraftStore('multi-window-drafts');
+    first.set(id, '本窗口版本');
+    second.set(id, '另一个窗口版本');
+    const event = new Event('storage');
+    Object.defineProperties(event, { key: { value: 'multi-window-drafts' }, newValue: { value: values.get('multi-window-drafts') || null } });
+    fakeWindow.dispatchEvent(event);
+    expect(first.get(id).text).toBe('本窗口版本');
+    expect(first.getConflict(id)).toMatchObject({
+      conversationId: id,
+      local: { text: '本窗口版本', revision: 1 },
+      remote: { text: '另一个窗口版本', revision: 1 },
+    });
+    expect(first.resolveConflict(id, 'remote')?.text).toBe('另一个窗口版本');
+    expect(first.getConflict(id)).toBeUndefined();
+    first.dispose();
+    second.dispose();
+    delete (globalThis as { window?: unknown }).window;
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it('advances the revision when keeping the local side of a conflict', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: () => {}, clear: () => {}, key: () => null, length: 0 } as unknown as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const fakeWindow = new EventTarget();
+    Object.defineProperty(globalThis, 'window', { value: fakeWindow, configurable: true });
+    const id = createConversationId(() => 0.5);
+    const first = new DraftStore('multi-window-local-choice');
+    const second = new DraftStore('multi-window-local-choice');
+    first.set(id, '本窗口版本');
+    second.set(id, '另一个窗口版本');
+    const event = new Event('storage');
+    Object.defineProperties(event, { key: { value: 'multi-window-local-choice' }, newValue: { value: values.get('multi-window-local-choice') || null } });
+    fakeWindow.dispatchEvent(event);
+    expect(first.resolveConflict(id, 'local')?.revision).toBe(2);
+    expect(first.get(id).text).toBe('本窗口版本');
+    first.dispose();
+    second.dispose();
+    delete (globalThis as { window?: unknown }).window;
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
   it('bounds persisted drafts to the most recently edited entries', () => {
     const values = new Map<string, string>();
     const storage = { getItem: (key: string) => values.get(key) ?? null,

@@ -96,6 +96,22 @@ export function ConnectedComposer({
       }
     });
   }, [draftKey, drafts]);
+  useEffect(() => {
+    if (!draftKey || !draftStore) return;
+    const syncExternalDraft = () => {
+      // Keep divergent edits untouched until the host asks the user which
+      // side to keep. A newer, non-conflicting revision can hydrate directly.
+      if (drafts.getConflict(draftKey)) return;
+      const latest = drafts.get(draftKey);
+      const current = useUIStore.getState();
+      const sameAttachments = latest.attachments.length === current.attachments.length
+        && latest.attachments.every((file, index) => file === current.attachments[index]);
+      if (latest.text !== current.input || !sameAttachments) {
+        useUIStore.setState({ input: latest.text, attachments: latest.attachments });
+      }
+    };
+    return drafts.subscribe(syncExternalDraft);
+  }, [draftKey, draftStore, drafts]);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
