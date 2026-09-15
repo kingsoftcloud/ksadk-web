@@ -145,11 +145,16 @@ export class OutboxStore {
 
   private evict(): void {
     while (this.entries.size > this.maxEntries) {
-      const completed = [...this.entries.values()].find(entry => ['completed', 'cancelled', 'failed'].includes(entry.status));
-      const oldest = completed || this.entries.values().next().value;
-      if (!oldest) return;
-      this.entries.delete(oldest.requestId);
-      this.runtimeAttachments.delete(oldest.requestId);
+      // Unresolved intent is durable user work and must never be silently
+      // dropped just because the bounded cache is full. Evict terminal facts
+      // first; if every entry still needs reconciliation, keep them all until
+      // the host explicitly resolves one.
+      const terminal = [...this.entries.values()].find(entry =>
+        ['completed', 'cancelled', 'failed'].includes(entry.status),
+      );
+      if (!terminal) return;
+      this.entries.delete(terminal.requestId);
+      this.runtimeAttachments.delete(terminal.requestId);
     }
   }
 

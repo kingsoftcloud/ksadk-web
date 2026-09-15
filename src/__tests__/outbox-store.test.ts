@@ -42,6 +42,16 @@ describe('OutboxStore', () => {
     expect(store.get('new')).toBeDefined();
   });
 
+  it('keeps unresolved intent when the bounded store has no terminal entry to evict', () => {
+    const store = new OutboxStore('unresolved-capacity', 1);
+    store.enqueue({ requestId: 'first', conversationId, agentId: 'agent-a', text: 'first', attachments: [] });
+    store.update('first', { status: 'unknown', error: 'network lost' });
+    store.enqueue({ requestId: 'second', conversationId, agentId: 'agent-a', text: 'second', attachments: [] });
+
+    expect(store.list(conversationId).map(entry => entry.requestId)).toEqual(['first', 'second']);
+    expect(store.listUnresolved(conversationId).map(entry => entry.requestId)).toEqual(['first', 'second']);
+  });
+
   it('requires an explicit requeue for failed or unknown work', () => {
     const store = new OutboxStore('retry-outbox');
     store.enqueue({ requestId: 'unknown', conversationId, agentId: 'agent-a', text: 'retry me', attachments: [] });
