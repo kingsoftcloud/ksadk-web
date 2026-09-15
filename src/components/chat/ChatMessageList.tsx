@@ -80,6 +80,8 @@ export type ChatMessageListProps = {
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
   className?: string;
+  /** Explicit navigation to a row that may be outside the virtual window. */
+  revealMessage?: { id: string; request: number } | null;
 };
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
@@ -105,11 +107,13 @@ function MeasuredMessageRow({
   top,
   onMeasure,
   children,
+  highlighted,
 }: {
   messageId: string;
   top: number;
   onMeasure: (messageId: string, height: number, top: number) => void;
   children: ReactNode;
+  highlighted?: boolean;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +131,9 @@ function MeasuredMessageRow({
   return (
     <div
       ref={rowRef}
+      data-message-id={messageId}
+      data-search-target={highlighted || undefined}
+      tabIndex={-1}
       style={{ position: 'absolute', top, left: 0, right: 0 }}
     >
       {children}
@@ -979,6 +986,7 @@ export function ChatMessageList({
   interactionRecords,
   scrollRef,
   className,
+  revealMessage,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
   void checkpoints;
@@ -1037,6 +1045,46 @@ export function ChatMessageList({
 
   const visibleItems = virtualWindow.visibleItems;
 
+  useEffect(() => {
+    if (!revealMessage) return;
+    const scroller = scrollRef.current;
+    const index = messages.findIndex(message => message.id === revealMessage.id);
+    if (!scroller || index < 0) return;
+    const behavior = scroller.style.scrollBehavior;
+    scroller.style.scrollBehavior = 'auto';
+    let frame = 0;
+    let attempts = 0;
+    let stableFrames = 0;
+    let previousTop = -1;
+    // Measuring a new virtual window can replace several estimated heights
+    // before the requested row mounts. Recompute that row's offset until the
+    // window settles, rather than assuming one animation frame is sufficient.
+    const reveal = () => {
+      const top = messages.slice(0, index).reduce((sum, message) =>
+        sum + (measuredHeightsRef.current.get(message.id) || DEFAULT_MESSAGE_ROW_HEIGHT), 0);
+      scroller.scrollTop = Math.max(0, top - 24);
+      setScrollTop(scroller.scrollTop);
+      setViewportHeight(scroller.clientHeight);
+      const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]'))
+        .find(element => element.dataset.messageId === revealMessage.id);
+      stableFrames = row && Math.abs(previousTop - top) < 1 ? stableFrames + 1 : 0;
+      previousTop = top;
+      if (row && (stableFrames >= 3 || attempts >= 30)) {
+        scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24;
+        row.focus({ preventScroll: true });
+        scroller.dispatchEvent(new Event('scroll'));
+        scroller.style.scrollBehavior = behavior;
+        return;
+      }
+      if (++attempts < 30) frame = requestAnimationFrame(reveal);
+      else scroller.style.scrollBehavior = behavior;
+    };
+    frame = requestAnimationFrame(reveal);
+    return () => { cancelAnimationFrame(frame); scroller.style.scrollBehavior = behavior; };
+    // A reveal request is explicit navigation, not an instruction to re-center
+    // the reader on every subsequent streaming or history update.
+  }, [revealMessage, scrollRef]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const updateMeasuredHeight = useCallback((messageId: string, height: number, top: number) => {
     if (!messageId || !Number.isFinite(height) || height <= 0) {
       return;
@@ -1078,6 +1126,7 @@ export function ChatMessageList({
         className,
       )}
       data-slot="message-list"
+      style={{ overflowAnchor: 'none' }}
     >
       <div className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
@@ -1091,6 +1140,7 @@ export function ChatMessageList({
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}
                 messageId={entry.item.id || String(entry.index)}
+                highlighted={entry.item.id === revealMessage?.id}
                 top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >

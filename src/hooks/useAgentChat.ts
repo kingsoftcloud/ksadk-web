@@ -5,6 +5,7 @@ import type { ApiFacade } from '../core/api/types.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
 import type { ConversationClient } from '../core/conversation/types.js';
 import type { ConversationController } from '../core/conversation/studio-controller.js';
+import { scanConversationHistory, type HistorySearchResult } from '../core/conversation/history-search.js';
 import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
 import { useBootstrapStore, type BootstrapStore } from '../stores/bootstrap.js';
 import { useMessageStore } from '../stores/message.js';
@@ -105,6 +106,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     loadSession,
     followAcceptedInteraction,
     loadOlderSessionMessages,
+    historySearchSnapshot,
     createNewSession,
     startNewConversation: resetConversationView,
     adoptCreatedSession,
@@ -294,6 +296,13 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     [currentSessionIdRef, loadOlderSessionMessages],
   );
 
+  const searchConversation = useCallback((query: string, signal: AbortSignal,
+    onProgress?: (result: HistorySearchResult) => void) => {
+    const sessionId = currentSessionIdRef.current || '';
+    return scanConversationHistory({ query, signal, onProgress, snapshot: historySearchSnapshot,
+      readOlder: searchSignal => loadOlderSessionMessages(sessionId, searchSignal) });
+  }, [currentSessionIdRef, historySearchSnapshot, loadOlderSessionMessages]);
+
   const refresh = useCallback(async () => {
     await fetchSessions(agentIdRef.current, currentSessionIdRef.current);
     if (currentSessionIdRef.current) await loadSession(currentSessionIdRef.current);
@@ -330,6 +339,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     loadMoreSessions,
     loadOlderMessages,
     refresh,
+    searchConversation,
     messages,
     activity,
     compactContext,
