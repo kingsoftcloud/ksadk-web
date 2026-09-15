@@ -24,6 +24,8 @@ export type ApprovalPolicyCapability = {
 };
 
 export type UiCapabilities = {
+  /** Provider-declared presentation strategy; UI must not branch on engine names. */
+  ConversationPresentation?: { Timeline?: 'standard' | 'compact' };
   Attachments?: boolean;
   Approval?: boolean;
   ApprovalPolicy?: ApprovalPolicyCapability;
