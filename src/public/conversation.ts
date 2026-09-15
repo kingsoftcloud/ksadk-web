@@ -76,6 +76,8 @@ export {
 } from '../core/conversation/studio-controller.js';
 export { ApiSessionFacade } from '../core/conversation/session-facade.js';
 export type { SessionFacade, SessionOwner, SessionSummary } from '../core/conversation/session-facade.js';
+export { ConversationProjectionStore } from '../core/conversation/projection-store.js';
+export type { ProjectionCheckpoint } from '../core/conversation/projection-store.js';
 export type {
   ConversationId,
   ConversationBinding,
