@@ -198,6 +198,42 @@ const KNOWN_FAMILIES: ReadonlyMap<string, number> = new Map([
   ['runtime', 2],
 ]);
 
+/**
+ * Older Hosted UI endpoints used JavaScript/PascalCase field names for the
+ * same envelope. Normalize those aliases at the compatibility boundary so
+ * the cursor and reducer can continue to operate on one canonical schema.
+ * Canonical snake_case values always win when both forms are present.
+ */
+const ENVELOPE_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  schema_version: ['schemaVersion', 'SchemaVersion'],
+  event_id: ['eventId', 'EventId'],
+  session_id: ['sessionId', 'SessionId'],
+  seq: ['seqId', 'SeqId', 'Seq'],
+  timestamp: ['Timestamp'],
+  family: ['Family'],
+  family_version: ['familyVersion', 'FamilyVersion'],
+  event_type: ['eventType', 'EventType'],
+  payload: ['Payload'],
+  run_id: ['runId', 'RunId'],
+  causation_id: ['causationId', 'CausationId'],
+  correlation_id: ['correlationId', 'CorrelationId'],
+  actor_ref: ['actorRef', 'ActorRef'],
+};
+
+function normalizeEnvelopeAliases(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const source = raw as Record<string, unknown>;
+  const normalized: Record<string, unknown> = { ...source };
+  for (const [canonical, aliases] of Object.entries(ENVELOPE_ALIASES)) {
+    if (normalized[canonical] === undefined) {
+      const alias = aliases.find(key => source[key] !== undefined);
+      if (alias) normalized[canonical] = source[alias];
+    }
+    for (const alias of aliases) delete normalized[alias];
+  }
+  return normalized;
+}
+
 const envelopeSchema = z
   .object({
     schema_version: z.literal(1),
@@ -221,7 +257,7 @@ const envelopeSchema = z
  * the cursor can still advance; only structural violations fail.
  */
 export function decodeSessionEventEnvelope(raw: unknown): DecodedSessionEventEnvelope {
-  const parsed = envelopeSchema.safeParse(raw);
+  const parsed = envelopeSchema.safeParse(normalizeEnvelopeAliases(raw));
   if (!parsed.success) {
     return {
       ok: false,

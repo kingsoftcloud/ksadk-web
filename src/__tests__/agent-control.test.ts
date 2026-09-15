@@ -135,6 +135,57 @@ describe('agent-kernel/v1 contract decoders', () => {
     }
   });
 
+  it('normalizes legacy camelCase session event envelopes at the compatibility boundary', () => {
+    const envelope = decodeSessionEventEnvelope({
+      schemaVersion: 1,
+      eventId: 'legacy-event-1',
+      sessionId: 'session-legacy',
+      seq: 7,
+      timestamp: '2026-08-17T00:00:01Z',
+      family: 'runtime',
+      familyVersion: 2,
+      eventType: 'run.message.delta',
+      payload: { text: 'legacy' },
+      runId: 'run-legacy',
+      correlationId: 'corr-legacy',
+      legacyDebugTag: 'preserved',
+    });
+    expect(envelope.ok).toBe(true);
+    if (envelope.ok) {
+      expect(envelope.value).toMatchObject({
+        schema_version: 1,
+        event_id: 'legacy-event-1',
+        session_id: 'session-legacy',
+        seq: 7,
+        family_version: 2,
+        event_type: 'run.message.delta',
+        run_id: 'run-legacy',
+        correlation_id: 'corr-legacy',
+        extensions: { legacyDebugTag: 'preserved' },
+      });
+    }
+  });
+
+  it('accepts PascalCase aliases emitted by older session history endpoints', () => {
+    const envelope = decodeSessionEventEnvelope({
+      SchemaVersion: 1,
+      EventId: 'legacy-event-2',
+      SessionId: 'session-legacy',
+      SeqId: 8,
+      Timestamp: '2026-08-17T00:00:02Z',
+      Family: 'runtime',
+      FamilyVersion: 2,
+      EventType: 'run.completed',
+      Payload: { status: 'completed' },
+    });
+    expect(envelope.ok).toBe(true);
+    if (envelope.ok) {
+      expect(envelope.value.seq).toBe(8);
+      expect(envelope.value.event_type).toBe('run.completed');
+      expect(envelope.value.payload).toEqual({ status: 'completed' });
+    }
+  });
+
   it('keeps unknown families addressable for the cursor without displaying them', () => {
     const envelope = decodeSessionEventEnvelope({
       ...RUNTIME_EVENT,
