@@ -195,6 +195,7 @@ export function useRunAgent(ctx: RunAgentContext) {
   const submitDraft = useCallback(async (
     draftText: string, draftAttachments: File[], responsesInput?: unknown,
     previousResponseId?: string, executionMode?: RuntimeExecutionMode,
+    outboxRequestId?: string,
   ) => {
     // Capture the owner before the first await. Navigation can happen while a
     // legacy CreateSession or an attachment upload is still pending.
@@ -207,6 +208,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     const ledger = owner.conversationId && outbox ? outbox : undefined;
     const outboxEntry = owner.conversationId && ledger
       ? ledger.enqueue({
+          requestId: outboxRequestId,
           conversationId: owner.conversationId,
           agentId: owner.agentId,
           text: draftText,

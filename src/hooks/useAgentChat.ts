@@ -281,6 +281,19 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     );
   }, [submitDraft]);
 
+  const retryOutbox = useCallback(async (requestId: string): Promise<boolean> => {
+    if (!controller || !conversationId) return false;
+    const entry = controller.outbox.get(requestId);
+    if (!entry || entry.conversationId !== conversationId || entry.agentId !== agentId
+      || !['failed', 'unknown'].includes(entry.status)) return false;
+    // Reuse the same request ID so an explicit retry updates the existing
+    // ledger entry instead of creating a second side effect with a new key.
+    controller.outbox.requeue(requestId);
+    await submitDraft(entry.text, [], undefined, undefined,
+      entry.executionMode as RuntimeExecutionMode | undefined, requestId);
+    return true;
+  }, [agentId, controller, conversationId, submitDraft]);
+
   const selectSession = useCallback((sessionId: string | null) => {
     useSessionStore.getState().setCurrentSessionId(sessionId);
     if (sessionId) void loadSession(sessionId);
@@ -331,6 +344,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     currentSessionId,
     conversationId,
     conversationDrafts: controller?.drafts,
+    conversationOutbox: controller?.outbox,
     messageHistory,
     isLoadingSessions,
     hasMoreSessions,
@@ -349,6 +363,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     isStreaming,
     queuedDrafts,
     send,
+    retryOutbox,
     stop,
     cancelRemote,
     resumeCheckpoint,

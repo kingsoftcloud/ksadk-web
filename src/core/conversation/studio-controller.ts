@@ -45,6 +45,7 @@ export class OutboxStore {
   private readonly entries = new Map<string, OutboxEntry>();
   private readonly storageKey: string;
   private readonly maxEntries: number;
+  private readonly listeners = new Set<() => void>();
 
   constructor(storageKey = 'ksadk.conversation-outbox', maxEntries = 128) {
     this.storageKey = storageKey;
@@ -73,6 +74,11 @@ export class OutboxStore {
   }
 
   get(requestId: string): OutboxEntry | undefined { return this.entries.get(requestId); }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   list(conversationId?: ConversationId): OutboxEntry[] {
     return [...this.entries.values()]
@@ -154,6 +160,7 @@ export class OutboxStore {
 
   private persist(): void {
     try { globalThis.localStorage?.setItem(this.storageKey, JSON.stringify([...this.entries.values()])); } catch { /* best effort */ }
+    for (const listener of this.listeners) listener();
   }
 }
 
