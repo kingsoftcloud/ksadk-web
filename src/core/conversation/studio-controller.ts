@@ -126,7 +126,7 @@ export class OutboxStore {
    */
   requeue(requestId: string): OutboxEntry | undefined {
     const current = this.entries.get(requestId);
-    if (!current || !['failed', 'unknown'].includes(current.status)) return current;
+    if (!current || !['pending', 'failed', 'unknown'].includes(current.status)) return current;
     return this.update(requestId, { status: 'pending', error: undefined });
   }
 
@@ -154,6 +154,10 @@ export class OutboxStore {
         if (!entry.requestId || !entry.conversationId || !entry.agentId || typeof entry.text !== 'string') continue;
         const status = entry.status;
         if (!status || !['pending', 'sending', 'unknown', 'failed', 'completed', 'cancelled'].includes(status)) continue;
+        // A renderer restart cannot prove that an in-flight request reached
+        // the runtime. Do not restore a permanently “sending” row; surface it
+        // as unknown so reconciliation remains an explicit user decision.
+        const restoredStatus = status === 'sending' ? 'unknown' : status;
         this.entries.set(entry.requestId, {
           requestId: entry.requestId, conversationId: entry.conversationId,
           agentId: entry.agentId, text: entry.text,
@@ -163,9 +167,11 @@ export class OutboxStore {
           executionMode: entry.executionMode,
           nativeSessionId: entry.nativeSessionId,
           invocationId: entry.invocationId,
-          status, attempt: Number(entry.attempt || 0),
+          status: restoredStatus, attempt: Number(entry.attempt || 0),
           createdAt: Number(entry.createdAt || Date.now()), updatedAt: Number(entry.updatedAt || Date.now()),
-          error: entry.error,
+          error: restoredStatus === 'unknown' && status === 'sending'
+            ? (entry.error || '应用重启后投递状态待确认。')
+            : entry.error,
         });
       }
       this.evict();

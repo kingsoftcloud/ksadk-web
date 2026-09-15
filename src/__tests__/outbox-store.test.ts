@@ -22,6 +22,8 @@ describe('OutboxStore', () => {
       attachments: [{ name: 'notes.txt', type: 'text/plain', size: 12 }] });
     expect(entry.status).toBe('pending');
     expect(store.markSending('request-1')?.attempt).toBe(1);
+    const restarted = new OutboxStore('test-outbox');
+    expect(restarted.get('request-1')).toMatchObject({ status: 'unknown', error: '应用重启后投递状态待确认。' });
     expect(store.update('request-1', { status: 'unknown', error: 'connection lost' })).toMatchObject({ status: 'unknown', error: 'connection lost' });
     const restored = new OutboxStore('test-outbox');
     expect(restored.list(conversationId)).toEqual([expect.objectContaining({ requestId: 'request-1', status: 'unknown',

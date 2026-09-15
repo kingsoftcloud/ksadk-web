@@ -285,7 +285,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     if (!controller || !conversationId) return false;
     const entry = controller.outbox.get(requestId);
     if (!entry || entry.conversationId !== conversationId || entry.agentId !== agentId
-      || !['failed', 'unknown'].includes(entry.status)) return false;
+      || !['pending', 'failed', 'unknown'].includes(entry.status)) return false;
     const attachments = controller.outbox.getRuntimeAttachments(requestId);
     if (entry.attachments.length > 0 && attachments.length !== entry.attachments.length) return false;
     if (entry.status === 'unknown' && entry.nativeSessionId) {
