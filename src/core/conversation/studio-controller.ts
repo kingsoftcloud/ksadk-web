@@ -31,6 +31,11 @@ export function createNavigationEpoch(): { readonly current: number; next: () =>
 
 export class DraftStore {
   private readonly drafts = new Map<ConversationId, DraftSession>();
+  private readonly storageKey: string;
+  constructor(storageKey = 'ksadk.conversation-drafts') {
+    this.storageKey = storageKey;
+    this.restore();
+  }
   get(conversationId: ConversationId): DraftSession {
     let draft = this.drafts.get(conversationId);
     if (!draft) {
@@ -45,19 +50,61 @@ export class DraftStore {
     if (previous.text === text && previous.attachments === files) return previous;
     const next = { conversationId, text, attachments: files, revision: previous.revision + 1, updatedAt: Date.now() };
     this.drafts.set(conversationId, next);
+    this.persist();
     return next;
   }
-  delete(conversationId: ConversationId): void { this.drafts.delete(conversationId); }
-  clear(): void { this.drafts.clear(); }
+  delete(conversationId: ConversationId): void { this.drafts.delete(conversationId); this.persist(); }
+  clear(): void { this.drafts.clear(); this.persist(); }
   size(): number { return this.drafts.size; }
+
+  private restore(): void {
+    try {
+      const raw = globalThis.localStorage?.getItem(this.storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const [id, value] of Object.entries(parsed)) {
+        const draft = value as Partial<DraftSession>;
+        if (!id.startsWith('conversation_') || typeof draft.text !== 'string') continue;
+        this.drafts.set(id as ConversationId, {
+          conversationId: id as ConversationId,
+          text: draft.text,
+          revision: Number.isFinite(draft.revision) ? Number(draft.revision) : 0,
+          updatedAt: Number.isFinite(draft.updatedAt) ? Number(draft.updatedAt) : Date.now(),
+          attachments: [],
+        });
+      }
+    } catch {
+      // Storage is best effort and may be unavailable in private/SSR contexts.
+    }
+  }
+
+  private persist(): void {
+    try {
+      if (!globalThis.localStorage) return;
+      const serializable: Record<string, Pick<DraftSession, 'text' | 'revision' | 'updatedAt'>> = {};
+      for (const [id, draft] of this.drafts) {
+        if (draft.text) serializable[id] = { text: draft.text, revision: draft.revision, updatedAt: draft.updatedAt };
+      }
+      globalThis.localStorage.setItem(this.storageKey, JSON.stringify(serializable));
+    } catch {
+      // Storage is best effort; in-memory drafts remain authoritative.
+    }
+  }
 }
 
 /** Coordinates view identity without owning a runtime or cancelling runs. */
 export class ConversationController {
-  readonly drafts = new DraftStore();
+  readonly drafts: DraftStore;
+  private readonly storageKey: string;
   private readonly ids = new Map<string, ConversationId>();
   private readonly bindings = new Map<ConversationId, ConversationBinding>();
   private readonly epoch = createNavigationEpoch();
+
+  constructor(storageKey = 'ksadk.conversation-bindings') {
+    this.storageKey = storageKey;
+    this.drafts = new DraftStore(`${storageKey}:drafts`);
+    this.restoreIds();
+  }
 
   navigate(): number { return this.epoch.next(); }
   get navigationEpoch(): number { return this.epoch.current; }
@@ -65,10 +112,16 @@ export class ConversationController {
   getOrCreate(agentId: string, sessionId: string | null, targetId?: string): ConversationId {
     const key = this.key(agentId, sessionId, targetId);
     const existing = this.ids.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (!this.bindings.has(existing)) {
+        this.bindings.set(existing, { conversationId: existing, agentId, targetId, nativeSessionId: sessionId || undefined });
+      }
+      return existing;
+    }
     const id = createConversationId();
     this.ids.set(key, id);
     this.bindings.set(id, { conversationId: id, agentId, targetId, nativeSessionId: sessionId || undefined });
+    this.persistIds();
     return id;
   }
 
@@ -87,6 +140,7 @@ export class ConversationController {
     this.ids.set(nativeKey, conversationId);
     const draftKey = this.key(current.agentId, null, current.targetId);
     if (this.ids.get(draftKey) === conversationId) this.ids.delete(draftKey);
+    this.persistIds();
     return next;
   }
 
@@ -102,6 +156,28 @@ export class ConversationController {
     this.ids.clear();
     this.bindings.clear();
     this.drafts.clear();
+    this.persistIds();
+  }
+
+  private restoreIds(): void {
+    try {
+      const raw = globalThis.localStorage?.getItem(this.storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === 'string' && value.startsWith('conversation_')) this.ids.set(key, value as ConversationId);
+      }
+    } catch {
+      // Storage is best effort and may be unavailable in private/SSR contexts.
+    }
+  }
+
+  private persistIds(): void {
+    try {
+      globalThis.localStorage?.setItem(this.storageKey, JSON.stringify(Object.fromEntries(this.ids)));
+    } catch {
+      // Storage is best effort; in-memory identity remains authoritative.
+    }
   }
 
   private key(agentId: string, sessionId: string | null, targetId?: string): string {

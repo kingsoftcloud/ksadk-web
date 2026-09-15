@@ -22,6 +22,38 @@ describe('Studio conversation primitives', () => {
     expect(isCurrentNavigation(epoch.current, second)).toBe(true);
   });
 
+  it('restores text drafts without serializing attachments', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: () => {}, clear: () => {}, key: () => null, length: 0,
+    } as unknown as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const id = createConversationId(() => 0.3);
+    const first = new DraftStore('test-drafts');
+    first.set(id, 'recover me', [new File(['x'], 'secret.txt')]);
+    const second = new DraftStore('test-drafts');
+    expect(second.get(id).text).toBe('recover me');
+    expect(second.get(id).attachments).toEqual([]);
+    expect(values.get('test-drafts')).not.toContain('secret.txt');
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it('restores the stable identity that owns a draft after reload', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); } } as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const first = new ConversationController('test-bindings');
+    const id = first.getOrCreate('agent-a', 'session-a');
+    first.drafts.set(id, 'draft survives reload');
+    const second = new ConversationController('test-bindings');
+    expect(second.getOrCreate('agent-a', 'session-a')).toBe(id);
+    expect(second.drafts.get(id).text).toBe('draft survives reload');
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
   it('maps a local conversation to a native session without changing its id', () => {
     const controller = new ConversationController();
     const conversation = controller.getOrCreate('agent-a', null);
