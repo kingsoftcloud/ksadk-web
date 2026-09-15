@@ -170,6 +170,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     },
     waitForPendingSessionCreation,
     conversationClient: options.conversationClient,
+    outbox: controller?.outbox,
   });
 
   useEffect(() => {

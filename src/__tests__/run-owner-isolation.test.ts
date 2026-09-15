@@ -49,6 +49,7 @@ function probe(api: Partial<ApiFacade>) {
     actions = useRunAgent({ ...config, api: api as ApiFacade, uiCapabilities: {}, isMobile: false,
       currentSessionId: currentSessionIdRef.current, currentSessionIdRef, agentIdRef,
       conversationIdRef, queuedDraftRef: { current: [] }, conversationClient: null,
+      outbox: controller.outbox,
       onRunSettled: onSettled,
       onSessionCreated: (id, owner) => {
         controller.bindNative(owner as ConversationId, id);
@@ -110,11 +111,12 @@ describe('submitted conversation ownership', () => {
 
     streams[1].delta('offscreen A');
     streams[1].close();
-    await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledWith('native-a', 'agent-a'));
+    await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledWith('native-a', 'agent-a', 'completed'));
     expect(useMessageStore.getState().messages.some(item => item.content.includes('offscreen A'))).toBe(false);
     expect(useStreamingStore.getState().isSessionStreaming('native-b')).toBe(true);
     streams[0].close();
-    await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledWith('native-b', 'agent-a'));
+    await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledWith('native-b', 'agent-a', 'completed'));
+    expect(p.controller.outbox.list(ownerA).map(entry => entry.status)).toEqual(['completed']);
   });
 
   it('drains a queued message into its original session while another draft is selected', async () => {
@@ -151,6 +153,7 @@ describe('submitted conversation ownership', () => {
       expect(p.currentSessionIdRef.current).toBeNull();
       expect(useMessageStore.getState().messages.map(item => item.content).join('\n')).toContain('creation uncertain');
       expect(useStreamingStore.getState().isSessionStreaming(p.conversationIdRef.current)).toBe(false);
+      expect(p.controller.outbox.list(p.conversationIdRef.current as ConversationId).at(-1)?.status).toBe('failed');
     } finally { errorLog.mockRestore(); }
   });
 

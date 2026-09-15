@@ -108,7 +108,7 @@ export interface RunEngine {
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   disconnect(): void;
   stop(): void;
@@ -124,14 +124,14 @@ export interface RunEngine {
     runId: string;
     checkpointId: string;
     resumeAttemptId?: string;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   resumeAguiInterrupt(params: {
     sessionId?: string | null;
     interruptId: string;
     status: 'resolved' | 'cancelled';
     payload?: unknown;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   readonly stage: RunStage;
   readonly controlState: RunControlState;
@@ -139,6 +139,8 @@ export interface RunEngine {
   retryControl(): Promise<RunControlState>;
   subscribe(listener: (event: RunEvent) => void): () => void;
 }
+
+export type RunSettlement = 'completed' | 'failed' | 'cancelled' | 'unknown';
 
 /**
  * agent-kernel/v1 control surface state. `accepted`/`duplicate` receipts move

@@ -72,6 +72,7 @@ export {
   createNavigationEpoch,
   ConversationController,
   DraftStore,
+  OutboxStore,
   isCurrentNavigation,
 } from '../core/conversation/studio-controller.js';
 export { ApiSessionFacade } from '../core/conversation/session-facade.js';
@@ -84,4 +85,7 @@ export type {
   ConversationId,
   ConversationBinding,
   DraftSession,
+  OutboxEntry,
+  OutboxAttachment,
+  OutboxStatus,
 } from '../core/conversation/studio-controller.js';

@@ -17,6 +17,131 @@ export type DraftSession = {
   attachments: File[];
 };
 
+export type OutboxStatus = 'pending' | 'sending' | 'unknown' | 'failed' | 'completed' | 'cancelled';
+
+export type OutboxAttachment = { name: string; type: string; size: number };
+
+export type OutboxEntry = {
+  requestId: string;
+  conversationId: ConversationId;
+  agentId: string;
+  text: string;
+  attachments: OutboxAttachment[];
+  executionMode?: string;
+  status: OutboxStatus;
+  attempt: number;
+  createdAt: number;
+  updatedAt: number;
+  error?: string;
+};
+
+/**
+ * Durable client submission ledger. It stores intent and file metadata only;
+ * file bytes stay in the in-memory composer until the runtime accepts them.
+ * Unknown outcomes are retained for reconciliation and are never retried by
+ * this class implicitly.
+ */
+export class OutboxStore {
+  private readonly entries = new Map<string, OutboxEntry>();
+  private readonly storageKey: string;
+  private readonly maxEntries: number;
+
+  constructor(storageKey = 'ksadk.conversation-outbox', maxEntries = 128) {
+    this.storageKey = storageKey;
+    this.maxEntries = Math.max(1, maxEntries);
+    this.restore();
+  }
+
+  enqueue(input: Omit<OutboxEntry, 'requestId' | 'status' | 'attempt' | 'createdAt' | 'updatedAt'> & { requestId?: string }): OutboxEntry {
+    const requestId = input.requestId || `request_${Date.now().toString(36)}_${(++outboxSequence).toString(36)}`;
+    const existing = this.entries.get(requestId);
+    if (existing) return existing;
+    const now = Date.now();
+    const entry: OutboxEntry = {
+      ...input,
+      requestId,
+      attachments: input.attachments.map(file => ({ ...file })),
+      status: 'pending',
+      attempt: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.entries.set(requestId, entry);
+    this.evict();
+    this.persist();
+    return entry;
+  }
+
+  get(requestId: string): OutboxEntry | undefined { return this.entries.get(requestId); }
+
+  list(conversationId?: ConversationId): OutboxEntry[] {
+    return [...this.entries.values()]
+      .filter(entry => !conversationId || entry.conversationId === conversationId)
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  update(requestId: string, patch: Partial<Pick<OutboxEntry, 'status' | 'error'>> & { attempt?: number }): OutboxEntry | undefined {
+    const current = this.entries.get(requestId);
+    if (!current) return undefined;
+    const next = { ...current, ...patch, updatedAt: Date.now() };
+    this.entries.set(requestId, next);
+    this.persist();
+    return next;
+  }
+
+  markSending(requestId: string): OutboxEntry | undefined {
+    const current = this.entries.get(requestId);
+    return current ? this.update(requestId, { status: 'sending', attempt: current.attempt + 1, error: undefined }) : undefined;
+  }
+
+  remove(requestId: string): void { this.entries.delete(requestId); this.persist(); }
+  clear(): void { this.entries.clear(); this.persist(); }
+
+  private evict(): void {
+    while (this.entries.size > this.maxEntries) {
+      const completed = [...this.entries.values()].find(entry => ['completed', 'cancelled', 'failed'].includes(entry.status));
+      const oldest = completed || this.entries.values().next().value;
+      if (!oldest) return;
+      this.entries.delete(oldest.requestId);
+    }
+  }
+
+  private restore(): void {
+    try {
+      const raw = globalThis.localStorage?.getItem(this.storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      for (const value of parsed) {
+        const entry = value as Partial<OutboxEntry>;
+        if (!entry.requestId || !entry.conversationId || !entry.agentId || typeof entry.text !== 'string') continue;
+        const status = entry.status;
+        if (!status || !['pending', 'sending', 'unknown', 'failed', 'completed', 'cancelled'].includes(status)) continue;
+        this.entries.set(entry.requestId, {
+          requestId: entry.requestId, conversationId: entry.conversationId,
+          agentId: entry.agentId, text: entry.text,
+          attachments: Array.isArray(entry.attachments) ? entry.attachments.map(file => ({
+            name: String(file.name || ''), type: String(file.type || ''), size: Number(file.size || 0),
+          })) : [],
+          executionMode: entry.executionMode,
+          status, attempt: Number(entry.attempt || 0),
+          createdAt: Number(entry.createdAt || Date.now()), updatedAt: Number(entry.updatedAt || Date.now()),
+          error: entry.error,
+        });
+      }
+      this.evict();
+    } catch {
+      // Storage is best effort; an unavailable ledger never blocks editing.
+    }
+  }
+
+  private persist(): void {
+    try { globalThis.localStorage?.setItem(this.storageKey, JSON.stringify([...this.entries.values()])); } catch { /* best effort */ }
+  }
+}
+
+let outboxSequence = 0;
+
 export function createConversationId(random: () => number = Math.random): ConversationId {
   const suffix = `${Date.now().toString(36)}_${(++conversationSequence).toString(36)}_${Math.floor(random() * 0x100000000).toString(36)}`;
   return `conversation_${suffix}`;
@@ -95,6 +220,7 @@ export class DraftStore {
 /** Coordinates view identity without owning a runtime or cancelling runs. */
 export class ConversationController {
   readonly drafts: DraftStore;
+  readonly outbox: OutboxStore;
   private readonly storageKey: string;
   private readonly ids = new Map<string, ConversationId>();
   private readonly bindings = new Map<ConversationId, ConversationBinding>();
@@ -103,6 +229,7 @@ export class ConversationController {
   constructor(storageKey = 'ksadk.conversation-bindings') {
     this.storageKey = storageKey;
     this.drafts = new DraftStore(`${storageKey}:drafts`);
+    this.outbox = new OutboxStore(`${storageKey}:outbox`);
     this.restoreIds();
   }
 
@@ -156,6 +283,7 @@ export class ConversationController {
     this.ids.clear();
     this.bindings.clear();
     this.drafts.clear();
+    this.outbox.clear();
     this.persistIds();
   }
 

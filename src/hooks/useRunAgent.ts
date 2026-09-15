@@ -12,8 +12,9 @@ import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 import type { PermissionMode, RuntimeExecutionMode, RunEngineConfig } from '../core/run/types.js';
-import { HttpConversationClient } from '../core/conversation/index.js';
+import { HttpConversationClient, type OutboxStore } from '../core/conversation/index.js';
 import type { ConversationClient } from '../core/conversation/types.js';
+import type { ConversationId } from '../core/conversation/studio-controller.js';
 
 type QueuedDraft = {
   text: string;
@@ -37,19 +38,20 @@ type RunAgentContext = {
   currentSessionIdRef: React.MutableRefObject<string | null>;
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
-  onRunSettled?: (sessionId: string | null, agentId?: string) => void;
+  onRunSettled?: (sessionId: string | null, agentId?: string, outcome?: import('../core/run/types.js').RunSettlement) => void;
   onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
   /** Stable owner before native creation. Omit for the legacy Hosted shell. */
-  conversationIdRef?: React.MutableRefObject<string | undefined>;
+  conversationIdRef?: React.MutableRefObject<ConversationId | undefined>;
   waitForPendingSessionCreation?: () => Promise<string | null>;
   /** `null` keeps an embedded host on the legacy action transport. */
   conversationClient?: ConversationClient | null;
+  outbox?: OutboxStore;
 };
 
 type RunOwner = {
   key: string;
   agentId: string;
-  conversationId?: string;
+  conversationId?: ConversationId;
   sessionId: string | null;
   engine: RunEngineImpl;
   queue: Array<{ draft: QueuedDraft; launch: () => boolean }>;
@@ -79,6 +81,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     onSessionCreated,
     waitForPendingSessionCreation,
     uiCapabilities,
+    outbox,
   } = ctx;
 
   const config = useMemo<RunEngineConfig>(() => ({
@@ -201,12 +204,23 @@ export function useRunAgent(ctx: RunAgentContext) {
       text: draftText, attachments: [...draftAttachments], responsesInput, previousResponseId, executionMode,
       optimisticMessageId: appendOptimisticMessage({ text: draftText, attachments: draftAttachments }),
     };
+    const ledger = owner.conversationId && outbox ? outbox : undefined;
+    const outboxEntry = owner.conversationId && ledger
+      ? ledger.enqueue({
+          conversationId: owner.conversationId,
+          agentId: owner.agentId,
+          text: draftText,
+          attachments: draftAttachments.map(file => ({ name: file.name, type: file.type, size: file.size })),
+          executionMode,
+        })
+      : undefined;
     const pendingSessionId = await waitForPendingSessionCreation?.();
     if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
 
     const launch = (): boolean => {
       if (owner.engine.stage !== 'idle') return false;
       owner.engine.updateConfig(config);
+      if (outboxEntry && ledger) ledger.markSending(outboxEntry.requestId);
       if (owner.isVisible()) {
         useUIStore.getState().setMobileActionsOpen(false);
         // Queued turns already have user echoes, but their assistant row must
@@ -234,9 +248,12 @@ export function useRunAgent(ctx: RunAgentContext) {
           if (wasVisible) writePersistedSessionId(owner.agentId, sessionId);
         },
         onSessionUpsert: () => {},
-        onSettled: sessionId => {
-          onRunSettled?.(sessionId, owner.agentId);
-          drainQueue(owner);
+        onSettled: (sessionId, outcome = 'unknown') => {
+          if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, {
+            status: outcome === 'completed' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
+          });
+          onRunSettled?.(sessionId, owner.agentId, outcome);
+          if (outcome === 'completed') drainQueue(owner);
         },
       });
       if (!accepted) useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, false);
@@ -246,7 +263,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       owner.queue.push({ draft, launch });
       publishQueue(owner);
     }
-  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunSettled, onSessionCreated, publishQueue, waitForPendingSessionCreation]);
+  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunSettled, onSessionCreated, outbox, publishQueue, waitForPendingSessionCreation]);
 
   const stopGeneration = useCallback(() => {
     const engine = getEngine(currentSessionIdRef.current);

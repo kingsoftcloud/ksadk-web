@@ -5,6 +5,7 @@ import type {
   RunEvent,
   RunEngineConfig,
   RuntimeExecutionMode,
+  RunSettlement,
   SubmitControlCommand,
 } from './types.js';
 import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
@@ -300,7 +301,7 @@ export class RunEngineImpl implements RunEngine {
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
 
@@ -313,6 +314,7 @@ export class RunEngineImpl implements RunEngine {
 
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
+      let settlement: RunSettlement = 'unknown';
       try {
         if (!sessionId) {
           sessionId = await this.createSession(draft);
@@ -366,6 +368,7 @@ export class RunEngineImpl implements RunEngine {
             },
           });
           if (result.presentation.terminalStatus === 'failed') {
+            settlement = 'failed';
             this.setStage('error');
             this.emit({
               type: 'activity',
@@ -376,6 +379,7 @@ export class RunEngineImpl implements RunEngine {
             return;
           }
           this.setStage('completing');
+          settlement = 'completed';
           this.emit({
             type: 'activity',
             phase: '运行完成',
@@ -412,16 +416,19 @@ export class RunEngineImpl implements RunEngine {
             this.abortController?.signal,
           );
           if (aguiResult.status === 'interrupted') {
+            settlement = 'cancelled';
             this.setStage('completing');
             this.emit({ type: 'stream_ended' });
             return;
           }
           if (aguiResult.status !== 'completed') {
+            settlement = 'failed';
             this.setStage('error');
             this.emit({ type: 'activity', phase: 'AG-UI 运行失败', status: 'failed', countEvent: false });
             return;
           }
           this.setStage('completing');
+          settlement = 'completed';
           this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
           this.emit({ type: 'stream_ended' });
           return;
@@ -458,6 +465,7 @@ export class RunEngineImpl implements RunEngine {
         }
 
         if (streamResult.terminalStatus === 'cancelled') {
+          settlement = 'cancelled';
           this.setStage('stopping');
           this.stopActivity('运行时已取消本次执行。');
           this.emit({
@@ -471,6 +479,7 @@ export class RunEngineImpl implements RunEngine {
         }
 
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
+          settlement = 'failed';
           this.setStage('error');
           this.emit({
             type: 'activity',
@@ -482,6 +491,7 @@ export class RunEngineImpl implements RunEngine {
         }
 
         this.setStage('completing');
+        settlement = 'completed';
         this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
@@ -489,8 +499,9 @@ export class RunEngineImpl implements RunEngine {
         const isAbort = (error instanceof DOMException && error.name === 'AbortError')
           || (error instanceof ConversationClientError && error.code === 'conversation_aborted');
         if (!isAbort) {
-          console.error('[RunEngine] start() error:', error);
           const isNetwork = error instanceof TypeError && error.message.includes('fetch');
+          settlement = isNetwork ? 'unknown' : 'failed';
+          console.error('[RunEngine] start() error:', error);
           if (isNetwork) {
             this.setStage('recovering');
             this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
@@ -524,13 +535,15 @@ export class RunEngineImpl implements RunEngine {
             this.setStage('error');
             this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
           }
+        } else {
+          settlement = 'cancelled';
         }
       } finally {
         useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
         this.setStage('idle');
         this.activeCompactionId = null;
         this.activeSessionId = null;
-        draft.onSettled?.(sessionId);
+        draft.onSettled?.(sessionId, settlement);
       }
     })();
     return true;
@@ -666,7 +679,7 @@ export class RunEngineImpl implements RunEngine {
     runId: string;
     checkpointId: string;
     resumeAttemptId?: string;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
 
@@ -676,6 +689,7 @@ export class RunEngineImpl implements RunEngine {
     this.publishInvocation(invocationId);
 
     (async () => {
+      let settlement: RunSettlement = 'unknown';
       try {
         this.setStage('connecting');
         this.emit({
@@ -739,6 +753,7 @@ export class RunEngineImpl implements RunEngine {
         );
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
           if (streamResult.terminalStatus === 'cancelled') {
+            settlement = 'cancelled';
             this.setStage('stopping');
             this.stopActivity('运行时已取消本次恢复。');
             this.emit({
@@ -752,6 +767,7 @@ export class RunEngineImpl implements RunEngine {
             return;
           }
           this.setStage('error');
+          settlement = 'failed';
           this.emit({
             type: 'activity',
             source: 'restore',
@@ -762,21 +778,25 @@ export class RunEngineImpl implements RunEngine {
           return;
         }
         this.setStage('completing');
+        settlement = 'completed';
         this.emit({ type: 'activity', source: 'restore', phase: '恢复完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
         const isAbort = error instanceof DOMException && error.name === 'AbortError';
         if (!isAbort) {
+          settlement = 'failed';
           console.error('[RunEngine] resumeCheckpoint() error:', error);
           this.setStage('error');
           this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
+        } else {
+          settlement = 'cancelled';
         }
       } finally {
         useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
         this.publishInvocation('');
         this.setStage('idle');
         this.activeSessionId = null;
-        params.onSettled?.(params.sessionId);
+        params.onSettled?.(params.sessionId, settlement);
       }
     })();
 
@@ -788,7 +808,7 @@ export class RunEngineImpl implements RunEngine {
     interruptId: string;
     status: 'resolved' | 'cancelled';
     payload?: unknown;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
 
@@ -803,6 +823,7 @@ export class RunEngineImpl implements RunEngine {
     this.emit({ type: 'activity', phase: '提交人工确认', status: 'connecting', countEvent: false });
 
     void (async () => {
+      let settlement: RunSettlement = 'unknown';
       try {
         this.setStage('streaming');
         const result = await aguiClient.resume(invocationId, {
@@ -824,26 +845,30 @@ export class RunEngineImpl implements RunEngine {
             : 'approved',
         });
         if (result.status === 'interrupted') {
+          settlement = 'cancelled';
           this.setStage('completing');
           this.emit({ type: 'stream_ended' });
           return;
         }
         if (result.status !== 'completed') {
+          settlement = 'failed';
           this.setStage('error');
           this.emit({ type: 'activity', phase: '人工确认恢复失败', status: 'failed', countEvent: false });
           return;
         }
         this.setStage('completing');
+        settlement = 'completed';
         this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
+        settlement = error instanceof DOMException && error.name === 'AbortError' ? 'cancelled' : 'failed';
         this.setStage('error');
         this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
       } finally {
         this.publishInvocation('');
         this.setStage('idle');
         this.activeSessionId = null;
-        params.onSettled?.(sessionId);
+        params.onSettled?.(sessionId, settlement);
       }
     })();
     return true;

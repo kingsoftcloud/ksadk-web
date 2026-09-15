@@ -35,11 +35,14 @@ npm run build:lib
 - 中文输入法确认、空白 Enter 和生成时排队。
 - 连续三个排队请求的回答按各自问题排序；规范快照重复更新不吞掉后续排队输入。
 
+已提交草稿还会写入 owner-scoped `OutboxStore`：账本保存请求 ID、会话/Agent、正文、执行模式和附件元数据，状态可为 `pending`、`sending`、`unknown`、`failed`、`cancelled` 或 `completed`。文件字节不进入 localStorage；未知结果不会被存储层自动重放。
+
 报告位于 `output/playwright/run-owners-report.json`，包含源码 SHA-256。
 结果目录包含请求归属审计；失败保留截图及浏览器 trace。
 单元测试另覆盖各运行续订游标隔离、后台审批保留、后台停止不覆盖前台状态。
+Outbox 单测覆盖重启恢复、请求 ID 去重和有界淘汰。
 
 ## 验证范围
 
 这些检查证明浏览器端归属和交互，不能替代真实 Codex/ksadk 运行时、网络故障恢复、云端权限或全页面视觉验收。
-离线 outbox、队列持久化、跨工作区缓存清理和完整重连状态核对仍需各自验证。
+离线联网策略、跨工作区缓存清理和完整重连状态核对仍需各自验证。
