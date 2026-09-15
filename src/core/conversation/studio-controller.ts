@@ -194,6 +194,7 @@ export function createConversationId(random: () => number = Math.random): Conver
 }
 
 let conversationSequence = 0;
+const MAX_UNBOUND_DRAFT_BINDINGS = 128;
 
 export function createNavigationEpoch(): { readonly current: number; next: () => number } {
   let current = 0;
@@ -291,6 +292,8 @@ export class ConversationController {
   private readonly storageKey: string;
   private readonly ids = new Map<string, ConversationId>();
   private readonly bindings = new Map<ConversationId, ConversationBinding>();
+  /** In-memory order of local drafts that have not acquired a native session. */
+  private readonly unboundDrafts = new Map<ConversationId, true>();
   private readonly epoch = createNavigationEpoch();
 
   constructor(storageKey = 'ksadk.conversation-bindings') {
@@ -310,11 +313,16 @@ export class ConversationController {
       if (!this.bindings.has(existing)) {
         this.bindings.set(existing, { conversationId: existing, agentId, targetId, nativeSessionId: sessionId || undefined });
       }
+      if (!sessionId) this.unboundDrafts.set(existing, true);
       return existing;
     }
     const id = createConversationId();
     this.ids.set(key, id);
     this.bindings.set(id, { conversationId: id, agentId, targetId, nativeSessionId: sessionId || undefined });
+    if (!sessionId) {
+      this.unboundDrafts.set(id, true);
+      this.pruneUnboundDrafts();
+    }
     this.persistIds();
     return id;
   }
@@ -331,6 +339,7 @@ export class ConversationController {
     if (existing && existing !== conversationId) throw new Error('Native session is already bound');
     const next = { ...current, nativeSessionId };
     this.bindings.set(conversationId, next);
+    this.unboundDrafts.delete(conversationId);
     this.ids.set(nativeKey, conversationId);
     const draftKey = this.key(current.agentId, null, current.targetId);
     if (this.ids.get(draftKey) === conversationId) this.ids.delete(draftKey);
@@ -349,6 +358,7 @@ export class ConversationController {
     this.navigate();
     this.ids.clear();
     this.bindings.clear();
+    this.unboundDrafts.clear();
     this.drafts.clear();
     this.outbox.clear();
     this.persistIds();
@@ -360,8 +370,17 @@ export class ConversationController {
       if (!raw) return;
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       for (const [key, value] of Object.entries(parsed)) {
-        if (typeof value === 'string' && value.startsWith('conversation_')) this.ids.set(key, value as ConversationId);
+        if (typeof value !== 'string' || !value.startsWith('conversation_')) continue;
+        const conversationId = value as ConversationId;
+        this.ids.set(key, conversationId);
+        try {
+          const identity = JSON.parse(key) as unknown;
+          if (Array.isArray(identity) && identity[2] === null) this.unboundDrafts.set(conversationId, true);
+        } catch {
+          // Ignore malformed legacy keys while retaining valid mappings.
+        }
       }
+      this.pruneUnboundDrafts();
     } catch {
       // Storage is best effort and may be unavailable in private/SSR contexts.
     }
@@ -373,6 +392,26 @@ export class ConversationController {
     } catch {
       // Storage is best effort; in-memory identity remains authoritative.
     }
+  }
+
+  /** Bound local drafts cannot evict native sessions or unresolved commands. */
+  private pruneUnboundDrafts(): void {
+    let changed = false;
+    while (this.unboundDrafts.size > MAX_UNBOUND_DRAFT_BINDINGS) {
+      const candidate = [...this.unboundDrafts.keys()].find(conversationId => (
+        !this.bindings.get(conversationId)?.nativeSessionId
+        && this.outbox.listUnresolved(conversationId).length === 0
+      ));
+      if (!candidate) break;
+      this.unboundDrafts.delete(candidate);
+      this.bindings.delete(candidate);
+      for (const [key, value] of this.ids) {
+        if (value === candidate) this.ids.delete(key);
+      }
+      this.drafts.delete(candidate);
+      changed = true;
+    }
+    if (changed) this.persistIds();
   }
 
   private key(agentId: string, sessionId: string | null, targetId?: string): string {

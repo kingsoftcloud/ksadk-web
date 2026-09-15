@@ -92,6 +92,26 @@ describe('Studio conversation primitives', () => {
     delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 
+  it('bounds unbound draft identity mappings without evicting native sessions', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); } } as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const controller = new ConversationController('bounded-bindings');
+    const native = controller.createDraft('agent-native', 'local');
+    controller.bindNative(native, 'native-session');
+    const drafts = Array.from({ length: 129 }, (_, index) => (
+      controller.createDraft(`agent-draft-${index}`, 'local')
+    ));
+    expect(controller.binding(native)?.nativeSessionId).toBe('native-session');
+    expect(controller.binding(drafts[0])).toBeUndefined();
+    expect(controller.binding(drafts.at(-1)!)).toMatchObject({ agentId: 'agent-draft-128' });
+    const persisted = JSON.parse(values.get('bounded-bindings') || '{}');
+    expect(Object.values(persisted)).not.toContain(drafts[0]);
+    expect(Object.values(persisted)).toContain(native);
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
   it('maps a local conversation to a native session without changing its id', () => {
     const controller = new ConversationController();
     const conversation = controller.getOrCreate('agent-a', null);
