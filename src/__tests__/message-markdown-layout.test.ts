@@ -28,4 +28,14 @@ describe('message markdown layout', () => {
       expect(source).toContain('align-top');
     });
   }
+
+  it('keeps long code and diff blocks inspectable with line numbers, folding, and a hard cap', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/CodeBlock.tsx'), 'utf8');
+
+    expect(source).toContain('showLineNumbers');
+    expect(source).toContain('FOLD_THRESHOLD_LINES = 80');
+    expect(source).toContain('MAX_VISIBLE_LINES = 500');
+    expect(source).toContain('aria-expanded={expanded}');
+    expect(source).toContain('超过单块');
+  });
 });

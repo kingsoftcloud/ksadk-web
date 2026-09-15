@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Eye, X, TextWrap } from 'lucide-react';
+import { Copy, Check, Eye, X, TextWrap, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { buildSandboxedHtml, useIframeMessageHandler } from '../../utils/sandbox.js';
@@ -13,6 +13,8 @@ interface CodeBlockProps {
 
 const PREVIEWABLE_LANGS = new Set(['html', 'svg']);
 const WRAPPABLE_LANGS = new Set(['markdown', 'md']);
+const FOLD_THRESHOLD_LINES = 80;
+const MAX_VISIBLE_LINES = 500;
 // wrap 状态按内容 key 记忆(wework 做法),同一段代码切换会话也保留。
 const wrapStateByKey = new Map<string, boolean>();
 const wrapKey = (value: string) => `len:${value.length}|head:${value.slice(0, 64)}`;
@@ -20,6 +22,7 @@ const wrapKey = (value: string) => `len:${value.length}|head:${value.slice(0, 64
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const key = wrapKey(value);
   const [wrap, setWrap] = useState<boolean>(() => wrapStateByKey.get(key) ?? false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -52,6 +55,14 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   };
 
   const isPreviewable = PREVIEWABLE_LANGS.has(language.toLowerCase());
+  const lines = String(value).replace(/\n$/, '').split('\n');
+  const canFold = lines.length > FOLD_THRESHOLD_LINES;
+  const visibleLines = expanded
+    ? lines.slice(0, MAX_VISIBLE_LINES)
+    : lines.slice(0, Math.min(FOLD_THRESHOLD_LINES, MAX_VISIBLE_LINES));
+  const truncated = visibleLines.length < lines.length;
+  const hardTruncated = lines.length > MAX_VISIBLE_LINES;
+  const displayValue = visibleLines.join('\n');
 
   const sandboxedHtml = isPreviewable ? buildSandboxedHtml(value) : '';
 
@@ -68,6 +79,18 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
               className={cn('flex items-center gap-1.5 transition-colors py-1', wrap ? 'text-primary' : 'hover:text-white')}
             >
               <TextWrap className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {canFold && (
+            <button
+              type="button"
+              onClick={() => setExpanded((previous) => !previous)}
+              title={expanded ? '折叠代码' : '展开代码'}
+              aria-expanded={expanded}
+              className="flex items-center gap-1.5 py-1 transition-colors hover:text-white"
+            >
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} />
+              <span>{expanded ? '折叠' : '展开'}</span>
             </button>
           )}
           {isPreviewable && (
@@ -94,11 +117,20 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
         <SyntaxHighlighter
           language={language}
           style={vscDarkPlus}
+          showLineNumbers
+          lineNumberStyle={{ color: '#64748b', minWidth: '2.5em', paddingRight: '1em', userSelect: 'none' }}
           customStyle={{ margin: 0, padding: '1rem', background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre' }}
           PreTag="div"
         >
-          {String(value).replace(/\n$/, '')}
+          {displayValue}
         </SyntaxHighlighter>
+        {truncated && (
+          <div className="border-t border-slate-700/60 px-4 py-2 text-xs text-slate-400">
+            {hardTruncated
+              ? `已显示前 ${visibleLines.length} 行，文件共 ${lines.length} 行，超过单块 ${MAX_VISIBLE_LINES} 行上限。`
+              : `已折叠剩余 ${lines.length - visibleLines.length} 行；点击“展开”查看完整内容。`}
+          </div>
+        )}
       </div>
 
       {/* Preview Dialog */}
