@@ -32,6 +32,8 @@ export type AgentChatSendOptions = {
 export type AgentChatOptions = {
   api?: ApiFacade;
   agentId?: string;
+  /** Optional deployment/target identity used to scope local conversation state. */
+  targetId?: string;
   /** Whether opening an Agent should automatically restore its last session. */
   restoreSession?: boolean;
   /** Owner-scoped Studio identity and drafts; omit to retain Hosted UI behavior. */
@@ -55,6 +57,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const defaultApi = useMemo(() => new ApiFacadeImpl(), []);
   const api = options.api || defaultApi;
   const explicitAgentId = String(options.agentId || '').trim() || undefined;
+  const targetId = String(options.targetId || '').trim() || undefined;
 
   const bootstrapStatus = useBootstrapStore((s: BootstrapStore) => s.status);
   const bootstrapErrorMessage = useBootstrapStore((s: BootstrapStore) => s.errorMessage);
@@ -73,6 +76,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const conversationId = controller?.getOrCreate(
     explicitAgentId || agentId,
     identityChanged ? null : currentSessionId,
+    targetId,
   );
   const activeConversationIdRef = useRef(conversationId);
   activeConversationIdRef.current = conversationId;
@@ -323,11 +327,11 @@ export function useAgentChat(options: AgentChatOptions = {}) {
 
   const startNewConversation = useCallback(() => {
     controller?.navigate();
-    activeConversationIdRef.current = controller?.createDraft(explicitAgentId || agentId);
+    activeConversationIdRef.current = controller?.createDraft(explicitAgentId || agentId, targetId);
     resetConversationView();
     // null -> null is still a new draft, so it must update the composer owner.
     setDraftRevision((revision) => revision + 1);
-  }, [agentId, controller, explicitAgentId, resetConversationView]);
+  }, [agentId, controller, explicitAgentId, resetConversationView, targetId]);
 
   const loadOlderMessages = useCallback(
     (sessionId?: string) => loadOlderSessionMessages(sessionId || currentSessionIdRef.current || ''),
