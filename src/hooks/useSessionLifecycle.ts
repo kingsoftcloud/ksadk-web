@@ -667,22 +667,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         const sorted = useSessionStore.getState().sessions;
         const activeSessionId = currentSessionIdRef.current;
-        const restoredSessionId = restoreSession
-          ? resolveSessionToRestore(sorted, activeSessionId || preferredSessionId || readPersistedSessionId(targetAgentId))
-          : sorted.some(session => session.SessionId === activeSessionId) ? activeSessionId : null;
+        // Page 1 is not an existence check. An older selected session (or a
+        // newly-created one still awaiting indexing) may be absent from it.
+        const restoredSessionId = activeSessionId || (restoreSession
+          ? resolveSessionToRestore(sorted, preferredSessionId || readPersistedSessionId(targetAgentId))
+          : null);
         if (restoredSessionId && restoredSessionId !== activeSessionId) {
           void loadSession(restoredSessionId);
-        } else if (!restoredSessionId && activeSessionId) {
-          loadSessionGenerationRef.current += 1;
-          runSubscriptionAbortRef.current?.abort();
-          disconnectRun?.();
-          currentSessionIdRef.current = null;
-          useSessionStore.getState().setCurrentSessionId(null);
-          useMessageStore.getState().setMessages([]);
-          useSessionStore.getState().clearSessionMessageHistory();
-          useCheckpointStore.getState().clearSessionCheckpoints();
-          useStreamingStore.getState().setCurrentRunId('');
-          useStreamingStore.getState().clearActivity();
         }
       } catch (error) {
         if (error instanceof CancelledError) return;
@@ -693,7 +684,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       }
     },
-    [api, disconnectRun, loadSession, restoreSession],
+    [api, loadSession, restoreSession],
   );
 
   const loadMoreSessions = useCallback(async () => {
@@ -818,8 +809,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [adoptCreatedSession, agentId, api]);
 
   const waitForPendingSessionCreation = useCallback(async () => {
-    await sessionCreationPromiseRef.current;
-    return currentSessionIdRef.current;
+    const pending = sessionCreationPromiseRef.current;
+    return pending ? await pending : currentSessionIdRef.current;
   }, []);
 
   const deleteSession = useCallback(

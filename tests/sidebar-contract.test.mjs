@@ -69,23 +69,8 @@ test('run dispatcher ignores streamed tokens for inactive sessions', () => {
   assert.match(engineSource, /activeSessionId/);
 });
 
-test('composer run startup is scoped to the current session, not a global streaming lock', () => {
-  const runAgentSource = readFileSync(resolve(repoRoot, 'src/hooks/useRunAgent.ts'), 'utf8');
-  const composerSource = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedComposer.tsx'), 'utf8');
-  const messageListSource = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
-
-  assert.doesNotMatch(runAgentSource, /engine\.stage !== 'idle' \|\| useStreamingStore\.getState\(\)\.isStreaming/);
-  assert.match(runAgentSource, /isSessionStreaming\(/);
-  assert.match(composerSource, /getSessionActivity\(currentSessionId\)/);
-  assert.match(messageListSource, /getSessionActivity\(currentSessionId\)/);
-});
-
-test('new run sessions are persisted before the next render effect', () => {
-  const runAgentSource = readFileSync(resolve(repoRoot, 'src/hooks/useRunAgent.ts'), 'utf8');
-
-  assert.match(runAgentSource, /writePersistedSessionId/);
-  assert.match(runAgentSource, /onSessionCreated:[\s\S]*writePersistedSessionId\(agentId,\s*sessionId\)/);
-});
+// Run ownership and synchronous native binding are covered behaviorally in
+// src/__tests__/run-owner-isolation.test.ts and e2e/run-owners.spec.mjs.
 
 test('token context stays in the composer without a floating run capsule or sidebar clutter', () => {
   const messageListSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');

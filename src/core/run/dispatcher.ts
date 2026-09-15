@@ -109,8 +109,9 @@ function settleRunningToolsForTerminalStatus(status: string) {
   );
 }
 
-export function dispatchRunEventToStores(event: RunEvent) {
-  const sessionIsOffscreen = Boolean(
+export function dispatchRunEventToStores(event: RunEvent, projection?: { visible: boolean; draftId?: string }) {
+  if (!event.sessionId && projection?.draftId) event = { ...event, sessionId: projection.draftId };
+  const sessionIsOffscreen = projection ? !projection.visible : Boolean(
     event.sessionId && useSessionStore.getState().currentSessionId !== event.sessionId,
   );
   // Text blocks belong to the visible transcript and must not leak across a
@@ -120,7 +121,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
   // returns.
   if (
     sessionIsOffscreen
-    && !['activity', 'stage_changed', 'stream_ended', 'error', 'rate_limited', 'terminal'].includes(event.type)
+    && !['activity', 'stage_changed', 'stream_ended', 'error', 'rate_limited', 'terminal', 'approval_requested', 'approval_resolved', 'stream_event', 'conversation_snapshot'].includes(event.type)
   ) {
     return;
   }
@@ -139,6 +140,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
     case 'activity':
       useStreamingStore.getState().updateActivity({
         sessionId: event.sessionId,
+        visible: !sessionIsOffscreen,
         source: event.source,
         status: event.status,
         phase: event.phase,
@@ -293,7 +295,6 @@ export function dispatchRunEventToStores(event: RunEvent) {
       break;
 
     case 'approval_requested': {
-      ensureAssistantMessage(event.messageId);
       ingestApprovalRequestedEvent({
         approvalRequestId: event.approvalRequestId,
         protocol: event.protocol,
@@ -304,6 +305,8 @@ export function dispatchRunEventToStores(event: RunEvent) {
         approvalLevel: event.approvalLevel,
         sessionId: event.sessionId,
       });
+      if (sessionIsOffscreen) break;
+      ensureAssistantMessage(event.messageId);
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
@@ -350,6 +353,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
         revision: event.revision,
         sessionId: event.sessionId,
       });
+      if (sessionIsOffscreen) break;
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (!msg.tools) return msg;
@@ -480,6 +484,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
       useStreamingStore.getState().updateActivity({
         sessionId: event.sessionId,
+        visible: !sessionIsOffscreen,
         status: 'failed',
         phase: '运行失败',
         detail: errorMessage,
@@ -508,6 +513,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
       useStreamingStore.getState().setSessionStreaming(event.sessionId, false);
       useStreamingStore.getState().updateActivity({
         sessionId: event.sessionId,
+        visible: !sessionIsOffscreen,
         status: 'failed',
         phase: '请求被限流',
         countEvent: false,
@@ -545,14 +551,14 @@ export function dispatchRunEventToStores(event: RunEvent) {
       ingestSessionEventRecord(event.event, streamSessionId || undefined);
       // 记录最后事件 seq,供网络断线后 afterSeqId 续订重连。
       const evtSeq = (event.event as { SeqId?: number }).SeqId;
-      if (typeof evtSeq === 'number' && evtSeq > 0) {
+      if (!sessionIsOffscreen && typeof evtSeq === 'number' && evtSeq > 0) {
         useStreamingStore.getState().setLastSeqId(evtSeq);
       }
       if (streamSessionId) {
-        useStreamingStore.getState().updateActivity({ sessionId: streamSessionId });
+        useStreamingStore.getState().updateActivity({ sessionId: streamSessionId, visible: !sessionIsOffscreen });
       }
       const invocationId = String(event.event.InvocationId || '').trim();
-      if (streamSessionId && invocationId) {
+      if (!sessionIsOffscreen && streamSessionId && invocationId) {
         const runKey = `${streamSessionId}:${invocationId}`;
         const recoveredEvents = mergeSessionEventRecords(
           recoveredEventsByRun.get(runKey) || [],
@@ -584,6 +590,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
         if (status === 'completed') {
           useStreamingStore.getState().updateActivity({
             sessionId: streamSessionId,
+            visible: !sessionIsOffscreen,
             status: 'completed',
             phase: '后台长任务已完成',
             countEvent: false,
@@ -591,6 +598,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
         } else if (status === 'cancelled' || status === 'canceled' || status === 'aborted') {
           useStreamingStore.getState().updateActivity({
             sessionId: streamSessionId,
+            visible: !sessionIsOffscreen,
             status: 'stopped',
             phase: '后台长任务已取消',
             countEvent: false,
@@ -598,6 +606,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
         } else if (status === 'failed' || status === 'error') {
           useStreamingStore.getState().updateActivity({
             sessionId: streamSessionId,
+            visible: !sessionIsOffscreen,
             status: 'failed',
             phase: '后台长任务失败',
             countEvent: false,
@@ -612,6 +621,7 @@ export function dispatchRunEventToStores(event: RunEvent) {
       for (const interaction of projected.interactions) {
         sharedInteractionStore.upsert(interaction);
       }
+      if (sessionIsOffscreen) break;
       ms.patchMessages((previous) => mergeConversationRunMessages(
         previous,
         event.result,

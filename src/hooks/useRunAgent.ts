@@ -11,7 +11,7 @@ import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
-import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
+import type { PermissionMode, RuntimeExecutionMode, RunEngineConfig } from '../core/run/types.js';
 import { HttpConversationClient } from '../core/conversation/index.js';
 import type { ConversationClient } from '../core/conversation/types.js';
 
@@ -38,16 +38,27 @@ type RunAgentContext = {
   currentSessionIdRef: React.MutableRefObject<string | null>;
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
-  onRunSettled?: (sessionId: string | null) => void;
-  onSessionCreated?: (sessionId: string) => void;
+  onRunSettled?: (sessionId: string | null, agentId?: string) => void;
+  onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
+  /** Stable owner before native creation. Omit for the legacy Hosted shell. */
+  conversationIdRef?: React.MutableRefObject<string | undefined>;
   waitForPendingSessionCreation?: () => Promise<string | null>;
   /** `null` keeps an embedded host on the legacy action transport. */
   conversationClient?: ConversationClient | null;
 };
 
+type RunOwner = {
+  key: string;
+  agentId: string;
+  conversationId?: string;
+  sessionId: string | null;
+  engine: RunEngineImpl;
+  queue: Array<{ draft: QueuedDraft; launch: () => boolean }>;
+  isVisible: () => boolean;
+};
+
 export function useRunAgent(ctx: RunAgentContext) {
-  const enginesRef = useRef(new Map<string, RunEngineImpl>());
-  const drainQueueRef = useRef<() => void>(() => {});
+  const ownersRef = useRef(new Map<string, RunOwner>());
   // Same-origin canonical transport for Hosted UI. It resolves fetch lazily
   // so importing the library stays Node/SSR safe.
   const defaultConversationClient = useMemo(() => new HttpConversationClient(), []);
@@ -71,50 +82,72 @@ export function useRunAgent(ctx: RunAgentContext) {
     uiCapabilities,
   } = ctx;
 
-  const configureEngine = useCallback((engine: RunEngineImpl) => {
-    engine.updateConfig({
-      agentId,
-      apiFormats,
-      agentFramework,
-      selectedModel,
-      selectedModelMetadata,
-      thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto',
-      permissionMode,
-      runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
-      hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
-        requireResumableRun: Boolean(
-          uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume,
-        ),
-      }),
-      checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
-      conversationClient: conversationClient || undefined,
-    });
-  }, [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
+  const config = useMemo<RunEngineConfig>(() => ({
+    agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata,
+    thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto', permissionMode,
+    runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
+    hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
+      requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),
+    }),
+    checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
+    conversationClient: conversationClient || undefined,
+  }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
 
-  const getEngine = useCallback((sessionId: string | null | undefined) => {
-    const key = String(sessionId || 'new-session');
-    let engine = enginesRef.current.get(key);
-    if (!engine) {
-      engine = new RunEngineImpl(ctx.api);
-      configureEngine(engine);
-      engine.subscribe(dispatchRunEventToStores);
-      enginesRef.current.set(key, engine);
-    } else {
-      configureEngine(engine);
+  const getOwner = useCallback((sessionId: string | null | undefined = currentSessionIdRef.current): RunOwner => {
+    const conversationId = ctx.conversationIdRef?.current;
+    const key = JSON.stringify([agentId, conversationId || sessionId || 'new-session']);
+    let owner = ownersRef.current.get(key);
+    if (!owner) {
+      const isVisible = () => ctx.agentIdRef.current === agentId && (
+        ctx.conversationIdRef
+          ? ctx.conversationIdRef.current === conversationId
+          : currentSessionIdRef.current === owner!.sessionId
+      );
+      const engine = new RunEngineImpl(ctx.api, { isVisible, draftId: conversationId });
+      owner = { key, agentId, conversationId, sessionId: sessionId || null, engine, queue: [], isVisible };
+      engine.subscribe(event => dispatchRunEventToStores(event, { visible: isVisible(), draftId: conversationId }));
+      ownersRef.current.set(key, owner);
     }
-    return engine;
-  }, [ctx.api, configureEngine]);
+    return owner;
+  }, [agentId, ctx.agentIdRef, ctx.api, ctx.conversationIdRef, currentSessionIdRef]);
+
+  const getEngine = useCallback((sessionId?: string | null) => {
+    const owner = getOwner(sessionId);
+    if (owner.engine.stage === 'idle') owner.engine.updateConfig(config);
+    return owner.engine;
+  }, [config, getOwner]);
+
+  const publishQueue = useCallback((owner: RunOwner) => {
+    if (!owner.isVisible()) return;
+    const drafts = owner.queue.map(item => item.draft);
+    queuedDraftRef.current = drafts;
+    useUIStore.getState().setQueuedDrafts(drafts);
+  }, [queuedDraftRef]);
+
+  const drainQueue = useCallback((owner: RunOwner) => {
+    const next = owner.queue[0];
+    if (!next || owner.engine.stage !== 'idle') return;
+    owner.queue.shift();
+    publishQueue(owner);
+    // The closure captured the submitting owner's target and configuration.
+    // Never resolve a queued command against the current navigation selection.
+    queueMicrotask(() => {
+      if (!next.launch()) {
+        owner.queue.unshift(next);
+        publishQueue(owner);
+      }
+    });
+  }, [publishQueue]);
 
   useEffect(() => {
-    for (const engine of enginesRef.current.values()) {
-      configureEngine(engine);
+    const key = JSON.stringify([agentId, ctx.conversationIdRef?.current || ctx.currentSessionId || 'new-session']);
+    const owner = ownersRef.current.get(key);
+    if (owner) publishQueue(owner);
+    else {
+      queuedDraftRef.current = [];
+      useUIStore.getState().setQueuedDrafts([]);
     }
-  }, [configureEngine]);
-
-  const enqueueDraft = useCallback((draft: QueuedDraft) => {
-    queuedDraftRef.current.push(draft);
-    useUIStore.getState().setQueuedDrafts((prev) => [...prev, draft]);
-  }, [queuedDraftRef]);
+  }, [agentId, ctx.currentSessionId, ctx.conversationIdRef?.current, publishQueue, queuedDraftRef]);
 
   const appendOptimisticMessage = useCallback((draft: Pick<QueuedDraft, 'text' | 'attachments'>) => {
     const trimmedText = draft.text.trim();
@@ -156,123 +189,60 @@ export function useRunAgent(ctx: RunAgentContext) {
     return messageId;
   }, []);
 
-  const startDraft = useCallback(
-    (draft: QueuedDraft & { responsesInput?: unknown; previousResponseId?: string }) => {
-      const targetSessionId = currentSessionIdRef.current;
-      const engine = getEngine(targetSessionId);
-      if (engine.stage !== 'idle') {
-        return false;
-      }
+  const submitDraft = useCallback(async (
+    draftText: string, draftAttachments: File[], responsesInput?: unknown,
+    previousResponseId?: string, executionMode?: RuntimeExecutionMode,
+  ) => {
+    // Capture the owner before the first await. Navigation can happen while a
+    // legacy CreateSession or an attachment upload is still pending.
+    const owner = getOwner();
+    publishQueue(owner);
+    const draft = {
+      text: draftText, attachments: [...draftAttachments], responsesInput, previousResponseId, executionMode,
+      optimisticMessageId: appendOptimisticMessage({ text: draftText, attachments: draftAttachments }),
+      optimisticAssistantMessageId: appendOptimisticAssistant(),
+    };
+    const pendingSessionId = await waitForPendingSessionCreation?.();
+    if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
 
-      resetDispatcherState();
-      useUIStore.getState().setMobileActionsOpen(false);
-      useStreamingStore.getState().setSessionStreaming(targetSessionId, true);
-
-      if (!draft.optimisticMessageId) appendOptimisticMessage(draft);
-      if (!draft.optimisticAssistantMessageId) appendOptimisticAssistant();
-
-      const accepted = engine.start({
-        text: draft.text,
-        attachments: draft.attachments,
-        responsesInput: draft.responsesInput,
-        previousResponseId: draft.previousResponseId,
-        executionMode: draft.executionMode,
-        sessionId: targetSessionId,
-        onSessionCreated: (sessionId: string) => {
-          if (targetSessionId !== sessionId) {
-            const streaming = useStreamingStore.getState();
-            streaming.setSessionStreaming(sessionId, true);
-            streaming.setSessionStreaming(targetSessionId, false);
-          }
-          if (onSessionCreated) {
-            onSessionCreated(sessionId);
-          } else {
+    const launch = (): boolean => {
+      if (owner.engine.stage !== 'idle') return false;
+      owner.engine.updateConfig(config);
+      if (owner.isVisible()) useUIStore.getState().setMobileActionsOpen(false);
+      useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, true);
+      const accepted = owner.engine.start({
+        ...draft,
+        sessionId: owner.sessionId,
+        onSessionCreated: sessionId => {
+          const wasVisible = owner.isVisible();
+          const previousKey = owner.sessionId || owner.conversationId;
+          owner.sessionId = sessionId;
+          useStreamingStore.getState().setSessionStreaming(sessionId, true);
+          if (previousKey !== sessionId) useStreamingStore.getState().setSessionStreaming(previousKey, false);
+          // Legacy shells acquire a native ID without changing the execution owner.
+          if (!owner.conversationId) ownersRef.current.set(JSON.stringify([owner.agentId, sessionId]), owner);
+          onSessionCreated?.(sessionId, owner.conversationId, owner.agentId);
+          if (!onSessionCreated && wasVisible) {
             useSessionStore.getState().upsertSessions([{ SessionId: sessionId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
             currentSessionIdRef.current = sessionId;
             useSessionStore.getState().setCurrentSessionId(sessionId);
           }
-          writePersistedSessionId(agentId, sessionId);
-          if (targetSessionId !== sessionId) {
-            enginesRef.current.set(sessionId, engine);
-          }
+          if (wasVisible) writePersistedSessionId(owner.agentId, sessionId);
         },
         onSessionUpsert: () => {},
-        onSettled: (sessionId) => {
-          onRunSettled?.(sessionId);
-          drainQueueRef.current();
+        onSettled: sessionId => {
+          onRunSettled?.(sessionId, owner.agentId);
+          drainQueue(owner);
         },
       });
-      if (!accepted) {
-        useStreamingStore.getState().setSessionStreaming(targetSessionId, false);
-      }
+      if (!accepted) useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, false);
       return accepted;
-    },
-    [agentId, appendOptimisticAssistant, appendOptimisticMessage, currentSessionIdRef, getEngine, onRunSettled, onSessionCreated],
-  );
-
-  useEffect(() => {
-    drainQueueRef.current = () => {
-      const next = queuedDraftRef.current.shift();
-      if (!next) {
-        useUIStore.getState().setQueuedDrafts([]);
-        return;
-      }
-
-      useUIStore.getState().setQueuedDrafts((prev) => prev.slice(1));
-      queueMicrotask(() => {
-        if (!startDraft(next)) {
-          queuedDraftRef.current.unshift(next);
-          useUIStore.getState().setQueuedDrafts((prev) => [next, ...prev]);
-        }
-      });
     };
-  }, [queuedDraftRef, startDraft]);
-
-  const submitDraft = useCallback(
-    async (
-      draftText: string,
-      draftAttachments: File[],
-      responsesInput?: unknown,
-      previousResponseId?: string,
-      executionMode?: RuntimeExecutionMode,
-    ) => {
-      const draft = {
-        text: draftText,
-        attachments: draftAttachments,
-        responsesInput,
-        previousResponseId,
-        executionMode,
-        optimisticMessageId: appendOptimisticMessage({ text: draftText, attachments: draftAttachments }),
-        optimisticAssistantMessageId: appendOptimisticAssistant(),
-      };
-      await waitForPendingSessionCreation?.();
-
-      const engine = getEngine(currentSessionIdRef.current);
-      if (engine.stage !== 'idle' && useStreamingStore.getState().isSessionStreaming(currentSessionIdRef.current)) {
-        if (responsesInput === undefined) {
-          enqueueDraft({
-            text: draftText,
-            attachments: draftAttachments,
-            executionMode,
-            optimisticMessageId: draft.optimisticMessageId,
-            optimisticAssistantMessageId: draft.optimisticAssistantMessageId,
-          });
-        }
-        return;
-      }
-
-      if (!startDraft(draft) && responsesInput === undefined) {
-        enqueueDraft({
-          text: draftText,
-          attachments: draftAttachments,
-          executionMode,
-          optimisticMessageId: draft.optimisticMessageId,
-          optimisticAssistantMessageId: draft.optimisticAssistantMessageId,
-        });
-      }
-    },
-    [appendOptimisticAssistant, appendOptimisticMessage, currentSessionIdRef, enqueueDraft, getEngine, startDraft, waitForPendingSessionCreation],
-  );
+    if (!launch() && responsesInput === undefined) {
+      owner.queue.push({ draft, launch });
+      publishQueue(owner);
+    }
+  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunSettled, onSessionCreated, publishQueue, waitForPendingSessionCreation]);
 
   const stopGeneration = useCallback(() => {
     const engine = getEngine(currentSessionIdRef.current);
@@ -286,6 +256,7 @@ export function useRunAgent(ctx: RunAgentContext) {
 
   const resumeCheckpoint = useCallback(
     (params: { sessionId: string; runId: string; checkpointId: string }) => {
+      const owner = getOwner(params.sessionId);
       const engine = getEngine(params.sessionId);
       if (engine.stage !== 'idle') {
         return false;
@@ -298,8 +269,8 @@ export function useRunAgent(ctx: RunAgentContext) {
       const accepted = engine.resumeCheckpoint({
         ...params,
         onSettled: (sessionId) => {
-          onRunSettled?.(sessionId);
-          drainQueueRef.current();
+          onRunSettled?.(sessionId, owner.agentId);
+          drainQueue(owner);
         },
       });
       if (!accepted) {
@@ -307,7 +278,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       }
       return accepted;
     },
-    [getEngine, onRunSettled],
+    [drainQueue, getEngine, getOwner, onRunSettled],
   );
 
   const resetCompaction = useCallback(() => {
@@ -322,6 +293,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     if (!interruptId) return false;
     const sessionId = currentSessionIdRef.current;
     if (!sessionId) return false;
+    const owner = getOwner(sessionId);
     const engine = getEngine(sessionId);
     const status = context.status === 'cancelled' ? 'cancelled' : 'resolved';
     const payload = Object.prototype.hasOwnProperty.call(context, 'payload')
@@ -336,9 +308,12 @@ export function useRunAgent(ctx: RunAgentContext) {
       interruptId,
       status,
       payload,
-      onSettled: onRunSettled,
+      onSettled: id => {
+        onRunSettled?.(id, owner.agentId);
+        drainQueue(owner);
+      },
     });
-  }, [currentSessionIdRef, getEngine, onRunSettled]);
+  }, [currentSessionIdRef, drainQueue, getEngine, getOwner, onRunSettled]);
 
   const respondToAguiApproval = useCallback((options: {
     interruptId: string;
@@ -347,6 +322,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     if (!options.interruptId) return false;
     const sessionId = currentSessionIdRef.current;
     if (!sessionId) return false;
+    const owner = getOwner(sessionId);
     const engine = getEngine(sessionId);
     if (engine.stage !== 'idle') return false;
 
@@ -356,13 +332,16 @@ export function useRunAgent(ctx: RunAgentContext) {
       interruptId: options.interruptId,
       status: 'resolved',
       payload: { decision: options.approve ? 'approve' : 'reject' },
-      onSettled: onRunSettled,
+      onSettled: id => {
+        onRunSettled?.(id, owner.agentId);
+        drainQueue(owner);
+      },
     });
     if (!accepted) {
       useStreamingStore.getState().setSessionStreaming(sessionId, false);
     }
     return accepted;
-  }, [currentSessionIdRef, getEngine, onRunSettled]);
+  }, [currentSessionIdRef, drainQueue, getEngine, getOwner, onRunSettled]);
 
   return {
     submitDraft,

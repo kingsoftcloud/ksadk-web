@@ -26,7 +26,12 @@ export type SessionFacade = {
 export class ApiSessionFacade implements SessionFacade {
   private readonly bindings = new Map<ConversationId, ConversationBinding>();
   private readonly pendingBindings = new Map<ConversationId, Promise<ConversationBinding>>();
-  constructor(private readonly api: ApiFacade, private readonly owner: SessionOwner) {}
+  private readonly api: ApiFacade;
+  private readonly owner: SessionOwner;
+  constructor(api: ApiFacade, owner: SessionOwner) {
+    this.api = api;
+    this.owner = owner;
+  }
 
   async listSessionSummaries(options: { page?: number; pageSize?: number; signal?: AbortSignal } = {}) {
     const data = await this.api.listSessions(this.owner.agentId, options);

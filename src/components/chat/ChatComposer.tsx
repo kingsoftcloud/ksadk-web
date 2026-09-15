@@ -133,7 +133,14 @@ export function ChatComposer({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
+      // Enter confirms an IME candidate while composing (Safari can report
+      // keyCode 229 after compositionend). It must never send or stop a run.
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       event.preventDefault();
+      if (isStreaming) {
+        if (!isCompacting && canSubmit) onSubmit(input.trim(), attachments);
+        return;
+      }
       event.currentTarget.form?.requestSubmit();
     }
   };

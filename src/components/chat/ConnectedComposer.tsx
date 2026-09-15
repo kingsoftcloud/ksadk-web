@@ -73,7 +73,7 @@ export function ConnectedComposer({
   const input = useUIStore((s: UIStore) => s.input);
   const attachments = useUIStore((s: UIStore) => s.attachments);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
-  const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId || draftKey));
   const queuedDrafts = useUIStore((s: UIStore) => s.queuedDrafts);
   const contextUsage = useSessionStore(s => s.sessions.find(item => item.SessionId === currentSessionId)?.ContextUsage);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);

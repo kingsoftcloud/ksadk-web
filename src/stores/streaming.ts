@@ -63,6 +63,8 @@ export type StreamingActions = {
     detail?: string;
   }) => void;
   updateActivity: (activity: {
+    runId?: string;
+    visible?: boolean;
     sessionId?: string | null;
     source?: RunActivity['source'];
     status?: RunActivityStatus;
@@ -71,7 +73,7 @@ export type StreamingActions = {
     countEvent?: boolean;
   }) => void;
   stopActivity: (detail?: string) => void;
-  stopSessionActivity: (sessionId?: string | null, detail?: string) => void;
+  stopSessionActivity: (sessionId?: string | null, detail?: string, visible?: boolean) => void;
   clearActivity: () => void;
   clearSessionActivity: (sessionId?: string | null) => void;
   /**
@@ -157,6 +159,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
     const nextActivity = current
       ? {
           ...current,
+          runId: activity.runId || current.runId,
           source: activity.source || current.source,
           status: activity.status || current.status,
           phase: activity.phase || current.phase,
@@ -165,6 +168,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
           eventCount: current.eventCount + (activity.countEvent === false ? 0 : 1),
         }
       : {
+          runId: activity.runId,
           source: activity.source || 'run' as const,
           status: activity.status || 'running',
           phase: activity.phase || '正在运行',
@@ -180,16 +184,16 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
           ...state.sessionActivities,
           [key]: nextActivity,
         },
-        activity: nextActivity,
+        ...(activity.visible === false ? {} : { activity: nextActivity }),
       };
     }
     if (!current) {
       return {
-        activity: nextActivity,
+        ...(activity.visible === false ? {} : { activity: nextActivity }),
       };
     }
     return {
-      activity: nextActivity,
+      ...(activity.visible === false ? {} : { activity: nextActivity }),
     };
   }),
   stopActivity: (detail) => set((state) => ({
@@ -205,7 +209,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
       }
       : null,
   })),
-  stopSessionActivity: (sessionId, detail) => set((state) => {
+  stopSessionActivity: (sessionId, detail, visible = true) => set((state) => {
     const key = String(sessionId || '');
     if (!key) return {};
     const current = state.sessionActivities[key];
@@ -221,7 +225,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
     const sessionStreaming = withoutStreamingSession(state.sessionStreaming, key);
     return {
       isStreaming: hasStreamingSession(sessionStreaming),
-      activity: nextActivity,
+      ...(visible ? { activity: nextActivity, stopRequested: true } : {}),
       sessionActivities,
       sessionStreaming,
     };

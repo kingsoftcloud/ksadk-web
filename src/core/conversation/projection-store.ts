@@ -15,7 +15,8 @@ type Entry = { reducer: ConversationItemReducer; checkpoint: ProjectionCheckpoin
 /** Bounded in-memory projection cache; the authoritative runtime log remains external. */
 export class ConversationProjectionStore {
   private readonly entries = new Map<ConversationId, Entry>();
-  constructor(private readonly maxConversations = 32) {}
+  private readonly maxConversations: number;
+  constructor(maxConversations = 32) { this.maxConversations = maxConversations; }
 
   apply(conversationId: ConversationId, item: ConversationItem, sourceRevision = 'live', cursor?: number): boolean {
     const entry = this.entry(conversationId, sourceRevision);

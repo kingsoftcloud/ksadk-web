@@ -4,7 +4,7 @@ import type { Message, ModelCatalogItem } from '../components/chat/types.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
 import type { ConversationClient } from '../core/conversation/types.js';
-import type { ConversationController } from '../core/conversation/studio-controller.js';
+import type { ConversationController, ConversationId } from '../core/conversation/studio-controller.js';
 import { scanConversationHistory, type HistorySearchResult } from '../core/conversation/history-search.js';
 import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
 import { useBootstrapStore, type BootstrapStore } from '../stores/bootstrap.js';
@@ -89,8 +89,8 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const permissionMode = usePermissionStore((s) => s.permissionMode);
   const queuedDrafts = useUIStore((s) => s.queuedDrafts);
 
-  const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
-  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId));
+  const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId || conversationId));
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId || conversationId));
   const { isMobile } = useResponsiveViewport();
 
   const queuedDraftRef = useRef<Array<{
@@ -126,9 +126,9 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     restoreSession: options.restoreSession,
   });
 
-  const refreshSessionsAfterRun = useCallback((sessionId: string | null) => {
-    if (!sessionId) return;
-    void fetchSessions(agentIdRef.current, sessionId);
+  const refreshSessionsAfterRun = useCallback((sessionId: string | null, submittedAgentId = agentIdRef.current) => {
+    if (!sessionId || submittedAgentId !== agentIdRef.current) return;
+    void fetchSessions(submittedAgentId, sessionId);
   }, [agentIdRef, fetchSessions]);
 
   const selectedModelMetadata = useMemo(
@@ -159,12 +159,13 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSessionsAfterRun,
-    onSessionCreated: (sessionId) => {
-      if (controller && conversationId) controller.bindNative(conversationId, sessionId);
+    conversationIdRef: controller ? activeConversationIdRef : undefined,
+    onSessionCreated: (sessionId, submittedConversationId, submittedAgentId = agentId) => {
+      if (controller && submittedConversationId) controller.bindNative(submittedConversationId as ConversationId, sessionId);
       // A late create belongs to the submitted draft, even after navigation.
       // Persist its mapping but never let it take over the selected view.
-      if (agentIdRef.current !== agentId
-        || (controller && activeConversationIdRef.current !== conversationId)) return;
+      if (agentIdRef.current !== submittedAgentId
+        || (controller && activeConversationIdRef.current !== submittedConversationId)) return;
       adoptCreatedSession(sessionId, true);
     },
     waitForPendingSessionCreation,
@@ -186,12 +187,13 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const cancelRemote = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     const streaming = useStreamingStore.getState();
-    const invocationId = streaming.getSessionActivity(sessionId)?.runId || streaming.currentRunId || '';
+    const invocationId = streaming.getSessionActivity(sessionId)?.runId || '';
     if (!sessionId || !invocationId) return;
     await api.cancelRun(agentId, sessionId, invocationId);
-    streaming.stopSessionActivity(sessionId, '取消请求已发送。');
-    refreshSessionsAfterRun(sessionId);
-  }, [agentId, api, currentSessionIdRef, refreshSessionsAfterRun]);
+    streaming.stopSessionActivity(sessionId, '取消请求已发送。',
+      agentIdRef.current === agentId && currentSessionIdRef.current === sessionId);
+    refreshSessionsAfterRun(sessionId, agentId);
+  }, [agentId, agentIdRef, api, currentSessionIdRef, refreshSessionsAfterRun]);
 
   const { submitResponseFeedback, deleteResponseFeedback, respondToApproval } = useFeedback({
     agentId,

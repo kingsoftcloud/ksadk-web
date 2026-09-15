@@ -67,6 +67,13 @@ describe('shared session lifecycle actions', () => {
     expect(useMessageStore.getState().messages).toEqual([]);
   });
 
+  it('does not evict selected history that is absent from the refreshed first page', async () => {
+    const actions = lifecycle({ listSessions: vi.fn().mockResolvedValue({ Sessions: [{ SessionId: 'recent' }], Total: 500 }) });
+    await actions.fetchSessions('agent-a', 'recent');
+    expect(useSessionStore.getState().currentSessionId).toBe('current');
+    expect(useMessageStore.getState().messages.map(item => item.id)).toEqual(['old-message']);
+  });
+
   it('keeps a deleted selected session on the blank draft instead of entering another history', async () => {
     const listSessionMessages = vi.fn();
     const actions = lifecycle({ deleteSession: vi.fn().mockResolvedValue({}), listSessionMessages,
