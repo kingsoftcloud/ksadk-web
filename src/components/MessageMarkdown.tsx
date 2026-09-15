@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -31,6 +31,7 @@ type MarkdownTableProps = React.TableHTMLAttributes<HTMLTableElement>;
 type MarkdownCellProps = React.ThHTMLAttributes<HTMLTableCellElement>;
 type MarkdownDataCellProps = React.TdHTMLAttributes<HTMLTableCellElement>;
 type MarkdownLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement>;
+type MarkdownImageProps = React.ImgHTMLAttributes<HTMLImageElement>;
 
 /** Markdown content can come from tools or remote agents. Only navigation
  * protocols are allowed; javascript:, data: and vbscript: must never reach
@@ -43,6 +44,43 @@ function safeMarkdownHref(href: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function safeMarkdownImageSrc(src: string | undefined): string | undefined {
+  if (!src) return undefined;
+  try {
+    const protocol = new URL(src, typeof window === 'undefined' ? 'http://localhost/' : window.location.href).protocol.toLowerCase();
+    return ['http:', 'https:'].includes(protocol) ? src : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function MarkdownImage({ src, alt, ...props }: MarkdownImageProps) {
+  const safeSrc = safeMarkdownImageSrc(src);
+  const [state, setState] = useState<'loading' | 'loaded' | 'error'>(safeSrc ? 'loading' : 'error');
+  if (!safeSrc || state === 'error') {
+    return <span role="img" aria-label={alt || '图片无法加载'} className="my-2 inline-flex rounded-md border border-border bg-muted px-3 py-2 text-xs text-text-secondary">{alt || '图片无法加载'}</span>;
+  }
+  return (
+    <figure className="my-3 max-w-full">
+      <a href={safeSrc} target="_blank" rel="noopener noreferrer" title="查看原图">
+        <img
+          {...props}
+          src={safeSrc}
+          alt={alt || '图片'}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setState('loaded')}
+          onError={() => setState('error')}
+          className="max-h-[28rem] max-w-full cursor-zoom-in rounded-lg border border-border object-contain shadow-sm"
+        />
+      </a>
+      <figcaption className="mt-1 text-xs text-text-secondary">
+        {state === 'loading' ? '图片加载中…' : '点击查看原图'}
+      </figcaption>
+    </figure>
+  );
 }
 
 const markdownComponents = {
@@ -121,6 +159,9 @@ const markdownComponents = {
      const safeHref = safeMarkdownHref(href);
      if (!safeHref) return <span className="text-text-secondary">{children}</span>;
      return <a href={safeHref} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+  },
+  img({ src, alt, ...props }: MarkdownImageProps) {
+    return <MarkdownImage src={src} alt={alt} {...props} />;
   }
 };
 

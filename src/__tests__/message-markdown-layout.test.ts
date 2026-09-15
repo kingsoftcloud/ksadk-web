@@ -56,4 +56,14 @@ describe('message markdown layout', () => {
     expect(source).toContain("['http:', 'https:', 'mailto:']");
     expect(source).toContain('if (!safeHref) return <span');
   });
+
+  it('renders markdown images as safe lazy thumbnails with an original-image fallback', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/MessageMarkdown.tsx'), 'utf8');
+
+    expect(source).toContain('safeMarkdownImageSrc');
+    expect(source).toContain("loading=\"lazy\"");
+    expect(source).toContain('查看原图');
+    expect(source).toContain('图片无法加载');
+    expect(source).toContain("['http:', 'https:']");
+  });
 });
