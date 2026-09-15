@@ -28,6 +28,8 @@ export type OutboxEntry = {
   text: string;
   attachments: OutboxAttachment[];
   executionMode?: string;
+  nativeSessionId?: string;
+  invocationId?: string;
   status: OutboxStatus;
   attempt: number;
   createdAt: number;
@@ -103,7 +105,7 @@ export class OutboxStore {
       entry.status === 'pending' || entry.status === 'sending' || entry.status === 'unknown' || entry.status === 'failed');
   }
 
-  update(requestId: string, patch: Partial<Pick<OutboxEntry, 'status' | 'error'>> & { attempt?: number }): OutboxEntry | undefined {
+  update(requestId: string, patch: Partial<Pick<OutboxEntry, 'status' | 'error' | 'nativeSessionId' | 'invocationId'>> & { attempt?: number }): OutboxEntry | undefined {
     const current = this.entries.get(requestId);
     if (!current) return undefined;
     const next = { ...current, ...patch, updatedAt: Date.now() };
@@ -159,6 +161,8 @@ export class OutboxStore {
             name: String(file.name || ''), type: String(file.type || ''), size: Number(file.size || 0),
           })) : [],
           executionMode: entry.executionMode,
+          nativeSessionId: entry.nativeSessionId,
+          invocationId: entry.invocationId,
           status, attempt: Number(entry.attempt || 0),
           createdAt: Number(entry.createdAt || Date.now()), updatedAt: Number(entry.updatedAt || Date.now()),
           error: entry.error,

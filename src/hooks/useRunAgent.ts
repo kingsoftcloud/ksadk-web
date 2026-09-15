@@ -238,6 +238,7 @@ export function useRunAgent(ctx: RunAgentContext) {
           const wasVisible = owner.isVisible();
           const previousKey = owner.sessionId || owner.conversationId;
           owner.sessionId = sessionId;
+          if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, { nativeSessionId: sessionId });
           useStreamingStore.getState().setSessionStreaming(sessionId, true);
           if (previousKey !== sessionId) useStreamingStore.getState().setSessionStreaming(previousKey, false);
           // Legacy shells acquire a native ID without changing the execution owner.
@@ -259,6 +260,9 @@ export function useRunAgent(ctx: RunAgentContext) {
           if (outcome === 'completed') drainQueue(owner);
         },
       });
+      if (accepted && outboxEntry && ledger && owner.engine.activeInvocationId) {
+        ledger.update(outboxEntry.requestId, { invocationId: owner.engine.activeInvocationId });
+      }
       if (!accepted) useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, false);
       return accepted;
     };

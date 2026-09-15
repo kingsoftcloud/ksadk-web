@@ -97,6 +97,7 @@ export type RunEngineConfig = {
 };
 
 export interface RunEngine {
+  readonly activeInvocationId: string;
   updateConfig(config: RunEngineConfig): void;
   start(draft: {
     text: string;

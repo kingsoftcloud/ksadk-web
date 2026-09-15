@@ -288,13 +288,33 @@ export function useAgentChat(options: AgentChatOptions = {}) {
       || !['failed', 'unknown'].includes(entry.status)) return false;
     const attachments = controller.outbox.getRuntimeAttachments(requestId);
     if (entry.attachments.length > 0 && attachments.length !== entry.attachments.length) return false;
+    if (entry.status === 'unknown' && entry.nativeSessionId) {
+      try {
+        const state = await api.getSession(entry.nativeSessionId);
+        const status = String(state.ActiveRunStatus || '').toLowerCase();
+        if (['running', 'in_progress', 'waiting', 'paused', 'awaiting_approval'].includes(status)) {
+          controller.outbox.update(requestId, { status: 'sending', invocationId: state.ActiveInvocationId || entry.invocationId });
+          return false;
+        }
+        if (['completed', 'succeeded', 'success', 'done'].includes(status)) {
+          controller.outbox.update(requestId, { status: 'completed', invocationId: state.ActiveInvocationId || entry.invocationId });
+          await fetchSessions(agentIdRef.current, entry.nativeSessionId);
+          return false;
+        }
+        if (['failed', 'error'].includes(status)) controller.outbox.update(requestId, { status: 'failed' });
+        if (['cancelled', 'canceled', 'stopped', 'aborted'].includes(status)) controller.outbox.update(requestId, { status: 'cancelled' });
+      } catch {
+        // The state query is itself uncertain; leave the entry actionable and
+        // require the user's explicit retry decision below.
+      }
+    }
     // Reuse the same request ID so an explicit retry updates the existing
     // ledger entry instead of creating a second side effect with a new key.
     controller.outbox.requeue(requestId);
     await submitDraft(entry.text, attachments, undefined, undefined,
       entry.executionMode as RuntimeExecutionMode | undefined, requestId);
     return true;
-  }, [agentId, controller, conversationId, submitDraft]);
+  }, [agentId, agentIdRef, api, controller, conversationId, fetchSessions, submitDraft]);
 
   const selectSession = useCallback((sessionId: string | null) => {
     useSessionStore.getState().setCurrentSessionId(sessionId);
