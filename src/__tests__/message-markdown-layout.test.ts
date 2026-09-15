@@ -48,4 +48,12 @@ describe('message markdown layout', () => {
     expect(source).toContain("setPreviewMode('source')");
     expect(source).toContain('sandbox="allow-scripts allow-downloads"');
   });
+
+  it('filters executable protocols from untrusted markdown links', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/MessageMarkdown.tsx'), 'utf8');
+
+    expect(source).toContain('safeMarkdownHref');
+    expect(source).toContain("['http:', 'https:', 'mailto:']");
+    expect(source).toContain('if (!safeHref) return <span');
+  });
 });

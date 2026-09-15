@@ -32,6 +32,19 @@ type MarkdownCellProps = React.ThHTMLAttributes<HTMLTableCellElement>;
 type MarkdownDataCellProps = React.TdHTMLAttributes<HTMLTableCellElement>;
 type MarkdownLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement>;
 
+/** Markdown content can come from tools or remote agents. Only navigation
+ * protocols are allowed; javascript:, data: and vbscript: must never reach
+ * an anchor because the content is untrusted. */
+function safeMarkdownHref(href: string | undefined): string | undefined {
+  if (!href) return undefined;
+  try {
+    const protocol = new URL(href, typeof window === 'undefined' ? 'http://localhost/' : window.location.href).protocol.toLowerCase();
+    return ['http:', 'https:', 'mailto:'].includes(protocol) ? href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const markdownComponents = {
   h1({ children }: { children?: React.ReactNode }) {
     return <h1 className="mb-3.5 mt-5 text-[17px] font-semibold text-foreground">{children}</h1>;
@@ -105,7 +118,9 @@ const markdownComponents = {
     return <td className="break-words border-b border-border px-3 py-2 align-top text-text-secondary" {...props}>{children}</td>;
   },
   a({ children, href, ...props }: MarkdownLinkProps) {
-     return <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+     const safeHref = safeMarkdownHref(href);
+     if (!safeHref) return <span className="text-text-secondary">{children}</span>;
+     return <a href={safeHref} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
   }
 };
 
