@@ -54,6 +54,22 @@ describe('Studio conversation primitives', () => {
     delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 
+  it('keeps local and cloud execution targets in separate conversations', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); } } as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const first = new ConversationController('target-bindings');
+    const local = first.getOrCreate('agent-a', null, 'local:agent-a');
+    const cloud = first.getOrCreate('agent-a', null, 'cloud:deployment-1:version-2');
+    expect(cloud).not.toBe(local);
+    expect(first.binding(cloud)).toMatchObject({ agentId: 'agent-a', targetId: 'cloud:deployment-1:version-2' });
+    const second = new ConversationController('target-bindings');
+    expect(second.getOrCreate('agent-a', null, 'local:agent-a')).toBe(local);
+    expect(second.getOrCreate('agent-a', null, 'cloud:deployment-1:version-2')).toBe(cloud);
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
   it('maps a local conversation to a native session without changing its id', () => {
     const controller = new ConversationController();
     const conversation = controller.getOrCreate('agent-a', null);
