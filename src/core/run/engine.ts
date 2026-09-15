@@ -116,6 +116,8 @@ export class RunEngineImpl implements RunEngine {
   private activeCompactionId: string | null = null;
   private activeSessionId: string | null = null;
   private invocationId = '';
+  /** Monotonic owner epoch; disconnect invalidates late async finalizers. */
+  private operationEpoch = 0;
   private lastSeqId = 0;
   private pendingConfig: RunEngineConfig | null = null;
   private readonly projection: { isVisible?: () => boolean; draftId?: string };
@@ -305,6 +307,7 @@ export class RunEngineImpl implements RunEngine {
   }): boolean {
     if (this._stage !== 'idle') return false;
 
+    const operationEpoch = ++this.operationEpoch;
     this.abortController = new AbortController();
     this.activeSessionId = draft.sessionId || null;
     this.invocationId = '';
@@ -367,6 +370,7 @@ export class RunEngineImpl implements RunEngine {
               });
             },
           });
+          if (this.operationEpoch !== operationEpoch) return;
           if (result.presentation.terminalStatus === 'failed') {
             settlement = 'failed';
             this.setStage('error');
@@ -463,6 +467,7 @@ export class RunEngineImpl implements RunEngine {
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
         }
+        if (this.operationEpoch !== operationEpoch) return;
 
         if (streamResult.terminalStatus === 'cancelled') {
           settlement = 'cancelled';
@@ -539,6 +544,10 @@ export class RunEngineImpl implements RunEngine {
           settlement = 'cancelled';
         }
       } finally {
+        // A detached renderer may have started another owner before this
+        // stream's promise settled. Do not let the old finalizer clear the
+        // new owner's stage, invocation, activity, or outbox settlement.
+        if (this.operationEpoch !== operationEpoch) return;
         useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
         this.setStage('idle');
         this.activeCompactionId = null;
@@ -577,6 +586,7 @@ export class RunEngineImpl implements RunEngine {
 
   disconnect(): void {
     if (this._stage === 'idle') return;
+    this.operationEpoch += 1;
     this.abortController?.abort();
     this.aguiClient?.abort();
     useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
@@ -694,6 +704,7 @@ export class RunEngineImpl implements RunEngine {
   }): boolean {
     if (this._stage !== 'idle') return false;
 
+    const operationEpoch = ++this.operationEpoch;
     this.abortController = new AbortController();
     this.activeSessionId = params.sessionId;
     const invocationId = createInvocationId();
@@ -803,6 +814,7 @@ export class RunEngineImpl implements RunEngine {
           settlement = 'cancelled';
         }
       } finally {
+        if (this.operationEpoch !== operationEpoch) return;
         useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
         this.publishInvocation('');
         this.setStage('idle');
@@ -827,6 +839,7 @@ export class RunEngineImpl implements RunEngine {
     if (!sessionId) return false;
     const aguiClient = this.getAguiClient(sessionId);
     if (!aguiClient) return false;
+    const operationEpoch = ++this.operationEpoch;
     this.activeSessionId = sessionId;
     const invocationId = createInvocationId();
     this.publishInvocation(invocationId);
@@ -876,6 +889,7 @@ export class RunEngineImpl implements RunEngine {
         this.setStage('error');
         this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
       } finally {
+        if (this.operationEpoch !== operationEpoch) return;
         this.publishInvocation('');
         this.setStage('idle');
         this.activeSessionId = null;

@@ -1753,6 +1753,40 @@ describe('RunEngineImpl', () => {
     expect(useMessageStore.getState().messages.some((message) => message.role === 'system')).toBe(false);
   });
 
+  it('does not let a detached run finalizer clobber a replacement run', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    let runCount = 0;
+    api.runAgent = async (body, options) => {
+      calls.push(body);
+      const runNumber = ++runCount;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"type":"response.in_progress"}\n\n'));
+          if (runNumber === 1) {
+            options?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+          }
+        },
+      });
+    };
+    const engine = createRunEngine(api);
+    engine.updateConfig({
+      agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'langgraph',
+      selectedModel: '', thinkingMode: 'auto',
+    });
+
+    engine.start({ text: 'first', attachments: [], sessionId: 'session-first' });
+    await waitForCalls(calls);
+    engine.disconnect();
+    expect(engine.start({ text: 'replacement', attachments: [], sessionId: 'session-second' })).toBe(true);
+    await waitForCalls(calls, 2);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(engine.stage).toBe('streaming');
+    expect(engine.activeInvocationId).toBeTruthy();
+    expect(calls).toHaveLength(2);
+  });
+
   it('passes a stable invocation id to RunAgent and uses it for remote cancel', async () => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine({
