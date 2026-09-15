@@ -33,6 +33,7 @@ npm run build:lib
 - Agent 切换后的迟到创建与输出，不接管新 Agent 的草稿。
 - 创建失败没有后续执行请求。
 - 中文输入法确认、空白 Enter 和生成时排队。
+- 连续三个排队请求的回答按各自问题排序；规范快照重复更新不吞掉后续排队输入。
 
 报告位于 `output/playwright/run-owners-report.json`，包含源码 SHA-256。
 结果目录包含请求归属审计；失败保留截图及浏览器 trace。

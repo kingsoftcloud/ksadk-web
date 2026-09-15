@@ -114,3 +114,22 @@ test('IME confirmation and empty Enter neither submit nor stop a running convers
   expect((await audit(page)).runs[1]).toMatchObject({ text: '第二条消息', sessionId: 'native-1' });
   await click(page, 'Finish run 2');
 });
+
+test('queued turns keep each reply immediately after its submitting user message', async ({ page }) => {
+  await send(page, 'first question');
+  await send(page, 'second question');
+  await send(page, 'third question');
+  await click(page, 'Resolve creation 1');
+  await expect.poll(async () => (await audit(page)).runs.length).toBe(1);
+  for (const id of [1, 2, 3]) {
+    await click(page, `Emit run ${id}`);
+    await click(page, `Finish run ${id}`);
+  }
+  await expect.poll(async () => (await audit(page)).streaming).toEqual([]);
+  const transcript = await page.getByTestId('timeline').innerText();
+  const phrases = ['first question', 'output 1', 'second question', 'output 2', 'third question', 'output 3'];
+  for (let index = 1; index < phrases.length; index++) {
+    expect(transcript.indexOf(phrases[index - 1])).toBeGreaterThanOrEqual(0);
+    expect(transcript.indexOf(phrases[index])).toBeGreaterThan(transcript.indexOf(phrases[index - 1]));
+  }
+});

@@ -328,6 +328,23 @@ describe('RunEngineImpl', () => {
     ]);
   });
 
+  it.each([true, false])('keeps queued user echoes when canonical snapshots repeat (input item: %s)', (hasInputItem) => {
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+    useMessageStore.getState().setMessages([
+      { id: 'first-input', role: 'user', content: 'first question', timestamp: 1, eventType: 'optimistic_user_message' },
+      { id: 'second-input', role: 'user', content: 'second question', timestamp: 2, eventType: 'optimistic_user_message' },
+      { id: 'third-input', role: 'user', content: 'third question', timestamp: 3, eventType: 'optimistic_user_message' },
+    ]);
+    const result = hasInputItem ? canonicalResultWithUser('first question') : canonicalResult();
+    for (let update = 0; update < 3; update++) {
+      dispatchRunEventToStores({ type: 'conversation_snapshot', sessionId: 'session-canonical',
+        optimisticMessageId: 'first-input', result });
+      expect(useMessageStore.getState().messages.map(message => message.content)).toEqual([
+        'first question', 'canonical answer', 'second question', 'third question',
+      ]);
+    }
+  });
+
   it('reuses the pending assistant row for the first legacy stream event', () => {
     useSessionStore.getState().setCurrentSessionId('session-pending-assistant');
     useMessageStore.getState().setMessages([

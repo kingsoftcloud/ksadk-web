@@ -293,6 +293,7 @@ export class RunEngineImpl implements RunEngine {
   start(draft: {
     text: string;
     attachments: File[];
+    optimisticMessageId?: string;
     responsesInput?: unknown;
     previousResponseId?: string;
     executionMode?: RuntimeExecutionMode;
@@ -360,6 +361,7 @@ export class RunEngineImpl implements RunEngine {
                 type: 'conversation_snapshot',
                 result: snapshot,
                 sessionId,
+                optimisticMessageId: draft.optimisticMessageId,
               });
             },
           });

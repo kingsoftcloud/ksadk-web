@@ -625,6 +625,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
       ms.patchMessages((previous) => mergeConversationRunMessages(
         previous,
         event.result,
+        event.optimisticMessageId,
       ));
       bumpEventCount(event.sessionId);
       break;

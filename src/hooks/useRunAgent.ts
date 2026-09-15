@@ -20,7 +20,6 @@ type QueuedDraft = {
   attachments: File[];
   executionMode?: RuntimeExecutionMode;
   optimisticMessageId?: string;
-  optimisticAssistantMessageId?: string;
 };
 
 type RunAgentContext = {
@@ -173,19 +172,20 @@ export function useRunAgent(ctx: RunAgentContext) {
     return userMessageId;
   }, []);
 
-  const appendOptimisticAssistant = useCallback(() => {
+  const appendOptimisticAssistant = useCallback((userMessageId?: string) => {
     const messageId = `optimistic-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    useMessageStore.getState().patchMessages((prev) => [
-      ...prev,
-      {
+    useMessageStore.getState().patchMessages((prev) => {
+      const userIndex = prev.findIndex(message => message.id === userMessageId);
+      const index = userIndex < 0 ? prev.length : userIndex + 1;
+      return [...prev.slice(0, index), {
         id: messageId,
-        role: 'model',
+        role: 'model' as const,
         content: '',
         reasoning: '',
         timestamp: Date.now(),
         eventType: 'optimistic_assistant_placeholder',
-      },
-    ]);
+      }, ...prev.slice(index)];
+    });
     return messageId;
   }, []);
 
@@ -200,7 +200,6 @@ export function useRunAgent(ctx: RunAgentContext) {
     const draft = {
       text: draftText, attachments: [...draftAttachments], responsesInput, previousResponseId, executionMode,
       optimisticMessageId: appendOptimisticMessage({ text: draftText, attachments: draftAttachments }),
-      optimisticAssistantMessageId: appendOptimisticAssistant(),
     };
     const pendingSessionId = await waitForPendingSessionCreation?.();
     if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
@@ -208,7 +207,12 @@ export function useRunAgent(ctx: RunAgentContext) {
     const launch = (): boolean => {
       if (owner.engine.stage !== 'idle') return false;
       owner.engine.updateConfig(config);
-      if (owner.isVisible()) useUIStore.getState().setMobileActionsOpen(false);
+      if (owner.isVisible()) {
+        useUIStore.getState().setMobileActionsOpen(false);
+        // Queued turns already have user echoes, but their assistant row must
+        // be created only when that turn starts and next to its own input.
+        appendOptimisticAssistant(draft.optimisticMessageId);
+      }
       useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, true);
       const accepted = owner.engine.start({
         ...draft,
