@@ -33,6 +33,15 @@ export class ApiSessionFacade implements SessionFacade {
     this.owner = owner;
   }
 
+  private assertOwnedBinding(binding: ConversationBinding): void {
+    if (binding.agentId !== this.owner.agentId) {
+      throw new Error('Conversation binding belongs to another Agent');
+    }
+    if (this.owner.targetId !== undefined && binding.targetId !== this.owner.targetId) {
+      throw new Error('Conversation binding belongs to another execution target');
+    }
+  }
+
   async listSessionSummaries(options: { page?: number; pageSize?: number; signal?: AbortSignal } = {}) {
     const data = await this.api.listSessions(this.owner.agentId, options);
     const items = (data.Sessions as Array<Record<string, unknown>>).map((item) => ({
@@ -48,6 +57,7 @@ export class ApiSessionFacade implements SessionFacade {
   }
 
   async readHistoryWindow(binding: ConversationBinding, options: { offset?: number; limit?: number; signal?: AbortSignal } = {}) {
+    this.assertOwnedBinding(binding);
     if (!binding.nativeSessionId) return { items: [], total: 0 };
     const data = await this.api.listSessionMessages(binding.nativeSessionId, {
       agentId: this.owner.agentId, afterSeqId: options.offset, limit: options.limit, signal: options.signal,
@@ -57,6 +67,7 @@ export class ApiSessionFacade implements SessionFacade {
   }
 
   async watchCurrentState(binding: ConversationBinding, options: { signal?: AbortSignal } = {}) {
+    this.assertOwnedBinding(binding);
     if (!binding.nativeSessionId) return { sessionId: '', title: undefined };
     const data = await this.api.getSession(binding.nativeSessionId, options);
     return { sessionId: data.SessionId, title: data.Title, updatedAt: data.UpdatedAt, activeRunStatus: data.ActiveRunStatus, activeInvocationId: data.ActiveInvocationId };
@@ -87,6 +98,11 @@ export class ApiSessionFacade implements SessionFacade {
   }
 
   submit(binding: ConversationBinding, input: { text: string; clientRequestId: string; idempotencyKey: string }, options: { signal?: AbortSignal } = {}) {
+    try {
+      this.assertOwnedBinding(binding);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (!binding.nativeSessionId) return Promise.reject(new Error('Execution binding is required before submit'));
     const content = [{ type: 'input_text', text: input.text }];
     return this.api.runAgent({
@@ -102,12 +118,22 @@ export class ApiSessionFacade implements SessionFacade {
   }
 
   interrupt(binding: ConversationBinding, invocationId: string, options: { signal?: AbortSignal } = {}) {
+    try {
+      this.assertOwnedBinding(binding);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (!binding.nativeSessionId) return Promise.reject(new Error('Execution binding is required before interrupt'));
     if (!invocationId.trim()) return Promise.reject(new Error('Invocation identity is required before interrupt'));
     return this.api.cancelRun(this.owner.agentId, binding.nativeSessionId, invocationId, options);
   }
 
   approve(binding: ConversationBinding, input: { interactionId: string; runId: string; expectedRevision: number; approve: boolean; idempotencyKey: string }, options: { signal?: AbortSignal } = {}) {
+    try {
+      this.assertOwnedBinding(binding);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (!binding.nativeSessionId) return Promise.reject(new Error('Execution binding is required before approve'));
     return this.api.submitInteraction({ AgentId: this.owner.agentId, SessionId: binding.nativeSessionId, RunId: input.runId, InteractionId: input.interactionId, ExpectedRevision: input.expectedRevision, Action: input.approve ? 'approve' : 'reject', Response: {}, IdempotencyKey: input.idempotencyKey }, options);
   }

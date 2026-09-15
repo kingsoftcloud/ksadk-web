@@ -37,6 +37,24 @@ describe('ApiSessionFacade', () => {
     expect(api.submitInteraction).toHaveBeenCalledWith(expect.objectContaining({ InteractionId: 'i_1', RunId: 'run_1', ExpectedRevision: 7, IdempotencyKey: 'idem_7' }), {});
   });
 
+  it('rejects bindings owned by another Agent or execution target', async () => {
+    const api = fakeApi();
+    const facade = new ApiSessionFacade(api, { agentId: 'agent-a', targetId: 'target-a' });
+    const foreign = {
+      conversationId: 'conversation_foreign' as any,
+      agentId: 'agent-b',
+      targetId: 'target-a',
+      nativeSessionId: 'session-b',
+    };
+    await expect(facade.submit(foreign, {
+      text: 'must not cross owner', clientRequestId: 'req-cross-agent', idempotencyKey: 'idem-cross-agent',
+    })).rejects.toThrow('another Agent');
+    await expect(facade.interrupt({ ...foreign, agentId: 'agent-a', targetId: 'target-b' }, 'run-b'))
+      .rejects.toThrow('another execution target');
+    expect(api.runAgent).not.toHaveBeenCalled();
+    expect(api.cancelRun).not.toHaveBeenCalled();
+  });
+
   it('single-flights concurrent native session creation', async () => {
     const api = fakeApi();
     let release!: (value: { SessionId: string }) => void;
