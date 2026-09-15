@@ -50,3 +50,4 @@ export type {
   ConversationTimelineEntry,
   ConversationTextPresentation,
 } from './types.js';
+export * from './studio-controller.js';

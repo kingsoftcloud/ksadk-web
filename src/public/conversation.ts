@@ -67,3 +67,14 @@ export type {
   TrustedConversationRenderer,
   TrustedRendererCatalog,
 } from '../core/conversation/index.js';
+export {
+  createConversationId,
+  createNavigationEpoch,
+  DraftStore,
+  isCurrentNavigation,
+} from '../core/conversation/studio-controller.js';
+export type {
+  ConversationId,
+  ConversationBinding,
+  DraftSession,
+} from '../core/conversation/studio-controller.js';
