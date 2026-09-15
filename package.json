@@ -24,7 +24,8 @@
     "build:ksadk": "VITE_BASE_PATH=./ vite build --outDir dist-ksadk",
     "release:provenance": "node scripts/release-provenance.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:e2e:teams": "playwright test --config playwright.teams.config.mjs"
+    "test:e2e:teams": "playwright test --config playwright.teams.config.mjs",
+    "test:perf:studio": "npm run build:lib && node scripts/test-studio-performance.mjs"
   },
   "exports": {
     ".": {
