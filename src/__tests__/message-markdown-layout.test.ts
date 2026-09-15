@@ -77,4 +77,12 @@ describe('message markdown layout', () => {
     expect(source).toContain('aria-expanded={expanded}');
     expect(source).toContain('value.slice(0, MAX_TOOL_LOG_PREVIEW_CHARS)');
   });
+
+  it('keeps Mermaid syntax errors readable with an explicit source fallback', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/MermaidBlock.tsx'), 'utf8');
+
+    expect(source).toContain('role="alert"');
+    expect(source).toContain('Mermaid 渲染失败，已显示源码');
+    expect(source).toContain('{chart}');
+  });
 });
