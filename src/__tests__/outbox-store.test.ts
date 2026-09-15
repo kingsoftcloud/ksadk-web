@@ -50,4 +50,15 @@ describe('OutboxStore', () => {
     store.update('unknown', { status: 'completed' });
     expect(store.requeue('unknown')?.status).toBe('completed');
   });
+
+  it('keeps attachment bytes runtime-only and refuses to imply recovery after restore', () => {
+    const store = new OutboxStore('attachment-outbox');
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    const entry = store.enqueue({ requestId: 'with-file', conversationId, agentId: 'agent-a', text: 'send file',
+      attachments: [{ name: file.name, type: file.type, size: file.size }] });
+    store.setRuntimeAttachments(entry.requestId, [file]);
+    expect(store.getRuntimeAttachments(entry.requestId)).toHaveLength(1);
+    const restored = new OutboxStore('attachment-outbox');
+    expect(restored.getRuntimeAttachments(entry.requestId)).toHaveLength(0);
+  });
 });

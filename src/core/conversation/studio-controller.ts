@@ -46,6 +46,8 @@ export class OutboxStore {
   private readonly storageKey: string;
   private readonly maxEntries: number;
   private readonly listeners = new Set<() => void>();
+  /** File bytes are runtime-only; restored entries intentionally have none. */
+  private readonly runtimeAttachments = new Map<string, File[]>();
 
   constructor(storageKey = 'ksadk.conversation-outbox', maxEntries = 128) {
     this.storageKey = storageKey;
@@ -74,6 +76,15 @@ export class OutboxStore {
   }
 
   get(requestId: string): OutboxEntry | undefined { return this.entries.get(requestId); }
+
+  setRuntimeAttachments(requestId: string, files: File[]): void {
+    if (!this.entries.has(requestId)) return;
+    this.runtimeAttachments.set(requestId, [...files]);
+  }
+
+  getRuntimeAttachments(requestId: string): File[] {
+    return [...(this.runtimeAttachments.get(requestId) || [])];
+  }
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -117,8 +128,8 @@ export class OutboxStore {
     return this.update(requestId, { status: 'pending', error: undefined });
   }
 
-  remove(requestId: string): void { this.entries.delete(requestId); this.persist(); }
-  clear(): void { this.entries.clear(); this.persist(); }
+  remove(requestId: string): void { this.entries.delete(requestId); this.runtimeAttachments.delete(requestId); this.persist(); }
+  clear(): void { this.entries.clear(); this.runtimeAttachments.clear(); this.persist(); }
 
   private evict(): void {
     while (this.entries.size > this.maxEntries) {
@@ -126,6 +137,7 @@ export class OutboxStore {
       const oldest = completed || this.entries.values().next().value;
       if (!oldest) return;
       this.entries.delete(oldest.requestId);
+      this.runtimeAttachments.delete(oldest.requestId);
     }
   }
 

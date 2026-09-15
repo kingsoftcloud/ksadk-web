@@ -216,6 +216,7 @@ export function useRunAgent(ctx: RunAgentContext) {
           executionMode,
         })
       : undefined;
+    if (outboxEntry && ledger) ledger.setRuntimeAttachments(outboxEntry.requestId, draftAttachments);
     const pendingSessionId = await waitForPendingSessionCreation?.();
     if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
 

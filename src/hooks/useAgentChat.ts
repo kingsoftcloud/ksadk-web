@@ -286,10 +286,12 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     const entry = controller.outbox.get(requestId);
     if (!entry || entry.conversationId !== conversationId || entry.agentId !== agentId
       || !['failed', 'unknown'].includes(entry.status)) return false;
+    const attachments = controller.outbox.getRuntimeAttachments(requestId);
+    if (entry.attachments.length > 0 && attachments.length !== entry.attachments.length) return false;
     // Reuse the same request ID so an explicit retry updates the existing
     // ledger entry instead of creating a second side effect with a new key.
     controller.outbox.requeue(requestId);
-    await submitDraft(entry.text, [], undefined, undefined,
+    await submitDraft(entry.text, attachments, undefined, undefined,
       entry.executionMode as RuntimeExecutionMode | undefined, requestId);
     return true;
   }, [agentId, controller, conversationId, submitDraft]);
