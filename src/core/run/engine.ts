@@ -656,10 +656,21 @@ export class RunEngineImpl implements RunEngine {
         this.emit({ type: 'activity', phase: '后台长任务失败', status: 'failed', countEvent: false });
       } else if (terminalStatus === 'resume_failed') {
         this.emit({ type: 'activity', phase: '后台长任务恢复失败', status: 'failed', countEvent: false });
-      } else {
+      } else if (terminalStatus) {
         this.emit({ type: 'activity', phase: '后台长任务已完成', status: 'completed', countEvent: false });
+      } else {
+        // EOF without a durable terminal event only proves that this
+        // subscription ended. It does not prove the remote run completed.
+        // Leave a reconciliable waiting state for SessionLifecycle to query.
+        this.emit({
+          type: 'activity',
+          phase: '后台长任务状态待确认',
+          status: 'waiting',
+          detail: '事件流已结束，但运行时尚未提供终态；正在等待会话状态对账。',
+          countEvent: false,
+        });
       }
-      this.emit({ type: 'stream_ended' });
+      if (terminalStatus) this.emit({ type: 'stream_ended' });
       params.onSessionReloadNeeded?.();
     } catch (error) {
       const isAbort = error instanceof DOMException && error.name === 'AbortError';

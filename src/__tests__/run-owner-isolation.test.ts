@@ -157,6 +157,18 @@ describe('submitted conversation ownership', () => {
     } finally { errorLog.mockRestore(); }
   });
 
+  it('keeps a network submission unknown in the outbox and does not drain queued work', async () => {
+    const p = probe({ createSession: vi.fn().mockResolvedValue({ SessionId: 'native-a' }),
+      runAgent: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await p.actions.submitDraft('network uncertain', []);
+      await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledWith('native-a', 'agent-a', 'unknown'));
+      expect(p.controller.outbox.list(p.conversationIdRef.current as ConversationId).at(-1)?.status).toBe('unknown');
+      expect(p.controller.outbox.list(p.conversationIdRef.current as ConversationId)).toHaveLength(1);
+    } finally { errorLog.mockRestore(); }
+  });
+
   it('freezes active Agent/model configuration and cancels using each engine’s own invocation', async () => {
     const created = deferred<{ SessionId: string }>();
     const a = outputStream(); const b = outputStream();

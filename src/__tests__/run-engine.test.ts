@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunEngineImpl } from '../core/run/engine.js';
 import type { ApiFacade } from '../core/api/types.js';
+import type { RunEvent } from '../core/run/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useMessageStore } from '../stores/message.js';
 import { useSessionStore } from '../stores/session.js';
@@ -1514,6 +1515,19 @@ describe('RunEngineImpl', () => {
     expect(calls.at(-1)).toEqual({
       cancel: { agentId: 'agent-live', sessionId: 'session-live', invocationId },
     });
+  });
+
+  it('does not call an empty resume subscription completed without a terminal event', async () => {
+    const api = createApiFacade([]);
+    api.subscribeRunEvents = async () => new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
+    const engine = createRunEngine(api);
+    const events: RunEvent[] = [];
+    engine.subscribe(event => { events.push(event); dispatchRunEventToStores(event); });
+    engine.updateConfig({ agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'langgraph', selectedModel: '', thinkingMode: 'auto' });
+    await engine.resumeRun({ sessionId: 'session-unknown', invocationId: 'run-unknown', afterSeqId: 12 });
+    expect(events.some(event => event.type === 'activity' && event.phase === '后台长任务状态待确认')).toBe(true);
+    expect(events.some(event => event.type === 'stream_ended')).toBe(false);
+    expect(useStreamingStore.getState().getSessionActivity('session-unknown')?.status).toBe('waiting');
   });
 
   it('does not replace an existing session when the runtime returns an empty stream', async () => {
