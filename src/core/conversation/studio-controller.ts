@@ -80,6 +80,12 @@ export class OutboxStore {
       .sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /** Entries that need an explicit reconciliation or retry decision. */
+  listUnresolved(conversationId?: ConversationId): OutboxEntry[] {
+    return this.list(conversationId).filter(entry =>
+      entry.status === 'pending' || entry.status === 'sending' || entry.status === 'unknown' || entry.status === 'failed');
+  }
+
   update(requestId: string, patch: Partial<Pick<OutboxEntry, 'status' | 'error'>> & { attempt?: number }): OutboxEntry | undefined {
     const current = this.entries.get(requestId);
     if (!current) return undefined;
@@ -92,6 +98,17 @@ export class OutboxStore {
   markSending(requestId: string): OutboxEntry | undefined {
     const current = this.entries.get(requestId);
     return current ? this.update(requestId, { status: 'sending', attempt: current.attempt + 1, error: undefined }) : undefined;
+  }
+
+  /**
+   * Requeue a failed/unknown intent after the host has explicitly decided to
+   * retry it. Completed, cancelled, and currently sending entries are never
+   * silently reopened.
+   */
+  requeue(requestId: string): OutboxEntry | undefined {
+    const current = this.entries.get(requestId);
+    if (!current || !['failed', 'unknown'].includes(current.status)) return current;
+    return this.update(requestId, { status: 'pending', error: undefined });
   }
 
   remove(requestId: string): void { this.entries.delete(requestId); this.persist(); }

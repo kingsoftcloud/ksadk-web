@@ -39,4 +39,15 @@ describe('OutboxStore', () => {
     expect(store.get('pending')).toBeDefined();
     expect(store.get('new')).toBeDefined();
   });
+
+  it('requires an explicit requeue for failed or unknown work', () => {
+    const store = new OutboxStore('retry-outbox');
+    store.enqueue({ requestId: 'unknown', conversationId, agentId: 'agent-a', text: 'retry me', attachments: [] });
+    store.update('unknown', { status: 'unknown', error: 'connection lost' });
+    expect(store.listUnresolved(conversationId).map(entry => entry.requestId)).toEqual(['unknown']);
+    expect(store.requeue('unknown')).toMatchObject({ status: 'pending', error: undefined });
+    expect(store.requeue('unknown')?.status).toBe('pending');
+    store.update('unknown', { status: 'completed' });
+    expect(store.requeue('unknown')?.status).toBe('completed');
+  });
 });
