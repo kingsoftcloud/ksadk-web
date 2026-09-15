@@ -134,7 +134,7 @@ function normalizeRuntimeSessionEvents(events) {
   const textByInvocation = new Map();
   for (const event of Array.isArray(events) ? events : []) {
     const eventType = String(event?.EventType || '');
-    if (eventType === 'text.delta' || eventType === 'text.completed') {
+    if (eventType === 'text.delta' || eventType === 'text.completed' || eventType === 'message.delta') {
       const invocationId = String(event?.InvocationId || '').trim();
       if (!invocationId) {
         continue;
@@ -142,7 +142,7 @@ function normalizeRuntimeSessionEvents(events) {
       const previous = textByInvocation.get(invocationId);
       textByInvocation.set(invocationId, {
         event,
-        text: mergeRuntimeDelta(previous?.text, runtimePayload(event).text),
+      text: mergeRuntimeDelta(previous?.text, runtimePayload(event).text || event?.Content?.text),
       });
       continue;
     }
@@ -157,6 +157,14 @@ function normalizeRuntimeSessionEvents(events) {
         ...(event.Metadata || {}),
         stream_snapshot: true,
       },
+    });
+  }
+  for (const event of Array.isArray(events) ? events : []) {
+    if (String(event?.EventType || '') !== 'message.completed') continue;
+    normalized.push({
+      ...event,
+      EventType: 'assistant_message',
+      Content: { role: 'model', parts: [{ text: String(runtimePayload(event).text || event?.Content?.text || '') }] },
     });
   }
   return normalized.sort((left, right) => eventOrderValue(left) - eventOrderValue(right));
