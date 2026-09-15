@@ -52,8 +52,9 @@ export function GroupTimeline({ messages, children, emptyState }: { messages: Gr
 
 export function TeamProgressCard({ run, tasks, pendingCount, onOpen }: { run: TeamRun; tasks: TeamTask[]; pendingCount: number; onOpen: () => void }) {
   const accepted = tasks.filter(task => task.status === 'succeeded').length;
-  return <button type="button" className="team-progress-card" onClick={onOpen} aria-label={`查看协作：${run.goal}`}>
-    <span className="team-progress-heading"><span className="team-eyebrow">本轮协作</span><TeamStatusLabel status={run.status} /></span>
+  const active = isTeamRunActive(run.status);
+  return <button type="button" className="team-progress-card" data-active={active || undefined} onClick={onOpen} aria-label={`查看协作：${run.goal}`}>
+    <span className="team-progress-heading"><span className="team-eyebrow">本轮协作</span><span className="team-progress-status"><TeamStatusLabel status={run.status} />{active && <span className="team-progress-live" role="status">实时处理中<span aria-hidden="true"><i /><i /><i /></span></span>}</span></span>
     <strong>{run.goal}</strong><span className="team-progress-caption">{tasks.length ? `${accepted} / ${tasks.length} 项任务已验收` : '正在整理目标与分工'}{pendingCount > 0 ? ` · ${pendingCount} 项需要处理` : ''}<span>查看协作 <span aria-hidden="true">→</span></span></span>
     {run.reason && <span className="team-progress-reason">{run.reason}</span>}
   </button>;

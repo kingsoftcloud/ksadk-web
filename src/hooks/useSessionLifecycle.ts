@@ -113,6 +113,7 @@ type SessionLifecycleContext = {
   api: ApiFacade;
   resetCompaction: () => void;
   disconnectRun?: () => void;
+  restoreSession?: boolean;
 };
 
 export function useSessionLifecycle(ctx: SessionLifecycleContext) {
@@ -123,6 +124,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     resetCompaction,
     uiCapabilities,
     disconnectRun,
+    restoreSession = true,
   } = ctx;
   const currentSessionIdRef = useRef<string | null>(ctx.currentSessionId);
   const agentIdRef = useRef(ctx.agentId);
@@ -619,6 +621,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           page: 1,
           pageSize: SESSION_LIST_PAGE_SIZE,
         });
+        if (useBootstrapStore.getState().agentId !== targetAgentId) return;
         const listedSessions = (data.Sessions || []) as Session[];
         for (const listedSession of listedSessions) {
           pendingCreatedSessionAgentsRef.current.delete(listedSession.SessionId);
@@ -649,10 +652,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         const sorted = useSessionStore.getState().sessions;
         const activeSessionId = currentSessionIdRef.current;
-        const restoredSessionId = resolveSessionToRestore(
-          sorted,
-          activeSessionId || preferredSessionId || readPersistedSessionId(targetAgentId),
-        );
+        const restoredSessionId = restoreSession
+          ? resolveSessionToRestore(sorted, activeSessionId || preferredSessionId || readPersistedSessionId(targetAgentId))
+          : sorted.some(session => session.SessionId === activeSessionId) ? activeSessionId : null;
         if (restoredSessionId && restoredSessionId !== activeSessionId) {
           void loadSession(restoredSessionId);
         } else if (!restoredSessionId && activeSessionId) {
@@ -671,10 +673,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (error instanceof CancelledError) return;
         console.error('Failed to fetch sessions:', error);
       } finally {
-        useSessionStore.getState().setLoadingSessions(false);
+        if (useBootstrapStore.getState().agentId === targetAgentId) {
+          useSessionStore.getState().setLoadingSessions(false);
+        }
       }
     },
-    [api, disconnectRun, loadSession],
+    [api, disconnectRun, loadSession, restoreSession],
   );
 
   const loadMoreSessions = useCallback(async () => {
@@ -743,7 +747,23 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     }
   }, [isMobile]);
 
+  const startNewConversation = useCallback(() => {
+    loadSessionGenerationRef.current += 1;
+    runSubscriptionAbortRef.current?.abort();
+    disconnectRun?.();
+    currentSessionIdRef.current = null;
+    useSessionStore.getState().setCurrentSessionId(null);
+    useMessageStore.getState().setMessages([]);
+    useStreamingStore.getState().setCurrentRunId('');
+    useStreamingStore.getState().clearActivity();
+    if (isMobile) useUIStore.getState().setMobileSidebarOpen(false);
+  }, [disconnectRun, isMobile]);
+
   const createNewSession = useCallback(async () => {
+    if (sessionCreationPromiseRef.current) {
+      await sessionCreationPromiseRef.current;
+      return;
+    }
     // Invalidate an older session hydrate immediately. A fast user can type
     // and send while CreateSession is in flight; submitDraft waits on this
     // exact promise instead of starting a second session or using the prior one.
@@ -755,7 +775,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     const creation = api.createSession(agentId)
       .then((session) => {
         const newId = session.SessionId || null;
-        if (newId) {
+        if (newId && useBootstrapStore.getState().agentId === agentId) {
           const preserveMessages = useMessageStore.getState().messages.some((message) => (
             message.eventType === 'optimistic_user_message'
             || message.eventType === 'optimistic_assistant_placeholder'
@@ -789,13 +809,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     async (sessionId: string) => {
       try {
         const result = await api.deleteSession(sessionId);
+        if (useBootstrapStore.getState().agentId !== agentId) return result.Deleted !== false;
         if (result.Deleted === false) {
           useUIStore.getState().pushToast(
             '会话暂未删除，云端运行时仍在同步，请稍后重试。',
             'error',
           );
           void fetchSessions(agentId, currentSessionIdRef.current ?? undefined);
-          return;
+          return false;
         }
         useSessionStore.getState().removeSession(sessionId);
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
@@ -816,10 +837,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           useStreamingStore.getState().clearActivity();
           void fetchSessions(agentId);
         }
+        return true;
       } catch (error) {
-        if (error instanceof CancelledError) return;
+        if (error instanceof CancelledError) return false;
         console.error('Failed to delete session', error);
         useUIStore.getState().pushToast('删除会话失败，请稍后重试。', 'error');
+        return false;
       }
     },
     [agentId, api, disconnectRun, fetchSessions],
@@ -928,6 +951,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     loadSession,
     loadOlderSessionMessages,
     createNewSession,
+    startNewConversation,
     adoptCreatedSession,
     waitForPendingSessionCreation,
     deleteSession,

@@ -179,6 +179,11 @@ export function useRunAgent(ctx: RunAgentContext) {
         executionMode: draft.executionMode,
         sessionId: targetSessionId,
         onSessionCreated: (sessionId: string) => {
+          if (targetSessionId !== sessionId) {
+            const streaming = useStreamingStore.getState();
+            streaming.setSessionStreaming(sessionId, true);
+            streaming.setSessionStreaming(targetSessionId, false);
+          }
           if (onSessionCreated) {
             onSessionCreated(sessionId);
           } else {

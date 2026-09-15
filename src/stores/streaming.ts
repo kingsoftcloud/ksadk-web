@@ -118,8 +118,8 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   setLastSeqId: (seqId) => set({ lastSeqId: seqId }),
   setActiveInvocationId: (invocationId) => set({ activeInvocationId: invocationId }),
   setSessionStreaming: (sessionId, streaming) => set((state) => {
+    // The empty key owns the draft while CreateSession has not returned yet.
     const key = String(sessionId || '');
-    if (!key) return { isStreaming: streaming };
     const remaining = withoutStreamingSession(state.sessionStreaming, key);
     const sessionStreaming = streaming ? { ...remaining, [key]: true as const } : remaining;
     return {
@@ -129,7 +129,7 @@ export const useStreamingStore = create<StreamingStore>()((set, get) => ({
   }),
   isSessionStreaming: (sessionId) => {
     const key = String(sessionId || '');
-    return Boolean(key && get().sessionStreaming[key]);
+    return Boolean(get().sessionStreaming[key]);
   },
   getSessionActivity: (sessionId) => {
     const key = String(sessionId || '');

@@ -9,6 +9,7 @@ describe('Teams presentation boundaries', () => {
   it('defaults to chat and progress, with no graph or sidepanel', () => {
     const markup = renderToStaticMarkup(<TeamWorkspace snapshot={teamSnapshot()} onSend={async () => {}} />);
     expect(markup).toContain('team-progress-card');
+    expect(markup).toContain('team-progress-live');
     expect(markup).not.toContain('team-sidepanel');
     expect(markup).not.toContain('team-graph-node');
     expect(markup).toContain('描述目标');

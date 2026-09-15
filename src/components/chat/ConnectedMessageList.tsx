@@ -55,7 +55,7 @@ export function ConnectedMessageList({
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
-  const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId));
   const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
   const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
   const currentMessageHistory = useSessionStore((s: SessionStore) =>
@@ -88,6 +88,14 @@ export function ConnectedMessageList({
       }) as ComposerContextIndicator,
     [selectedModelMetadata, contextUsage],
   );
+  const lastUserIndex = messages.reduce((index, message, currentIndex) => message.role === 'user' ? currentIndex : index, -1);
+  const hasModelOutput = (message: Message) => Boolean(message.role === 'model' && (
+    message.content || message.reasoning || message.blocks?.some(block => (
+      block.type === 'text' || block.type === 'thinking' ? block.content : true
+    )) || message.attachments?.length || message.a2ui || message.aguiActivity
+    || message.aguiActivities?.length || Object.keys(message.tools || {}).length
+  ));
+  const showWaitingIndicator = isStreaming && !messages.slice(lastUserIndex + 1).some(hasModelOutput);
 
   const scrollToBottom = useCallback(() => {
     const node = scrollRef.current;
@@ -361,6 +369,7 @@ export function ConnectedMessageList({
         activity={activity}
         contextIndicator={contextIndicator}
         messages={messages}
+        showWaitingIndicator={showWaitingIndicator}
         isLoadingInitialHistory={isLoadingInitialHistory}
         onDeleteFeedback={onDeleteFeedback}
         onOpenAttachmentPreview={openAttachmentPreview}

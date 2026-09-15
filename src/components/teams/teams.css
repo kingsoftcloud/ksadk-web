@@ -103,6 +103,13 @@
 .ksadk-teams .team-progress-card{display:block;width:100%;padding:17px 19px;text-align:left;border:1px solid var(--team-border);background:var(--team-bg);border-radius:var(--team-radius);margin:6px 0 12px;transition:border-color .16s ease,background .16s ease}
 .ksadk-teams .team-progress-card:hover{border-color:var(--team-border);background:var(--team-soft)}
 .ksadk-teams .team-progress-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.ksadk-teams .team-progress-status{display:inline-flex;align-items:center;gap:8px}
+.ksadk-teams .team-progress-live{display:inline-flex;align-items:center;gap:5px;color:var(--team-accent);font-size:11px;font-weight:500;white-space:nowrap}
+.ksadk-teams .team-progress-live>span{display:inline-flex;gap:2px;align-items:center}
+.ksadk-teams .team-progress-live i{width:4px;height:4px;border-radius:50%;background:currentColor;animation:team-progress-pulse 1.2s ease-in-out infinite}
+.ksadk-teams .team-progress-live i:nth-child(2){animation-delay:.16s}.ksadk-teams .team-progress-live i:nth-child(3){animation-delay:.32s}
+@keyframes team-progress-pulse{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
+@media (prefers-reduced-motion:reduce){.ksadk-teams .team-progress-live i{animation:none;opacity:.7}}
 .ksadk-teams .team-progress-card>strong{display:block;font-size:14px;font-weight:550;margin-bottom:10px;overflow-wrap:anywhere}
 .ksadk-teams .team-progress-caption{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--team-muted)}
 .ksadk-teams .team-progress-caption>span{color:var(--team-accent);white-space:nowrap}

@@ -30,6 +30,8 @@ export type AgentChatSendOptions = {
 export type AgentChatOptions = {
   api?: ApiFacade;
   agentId?: string;
+  /** Whether opening an Agent should automatically restore its last session. */
+  restoreSession?: boolean;
   /**
    * Omit for Hosted UI canonical negotiation. Pass `null` when the embedding
    * host intentionally exposes only `/agentengine/api/v1` actions.
@@ -59,6 +61,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const uiCapabilities = useBootstrapStore((s: BootstrapStore) => s.capabilities) as UiCapabilities;
 
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const messageHistory = useSessionStore((s: SessionStore) => currentSessionId ? s.messageHistory[currentSessionId] : undefined);
   const sessions = useSessionStore((s: SessionStore) => s.sessions);
   const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
   const hasMoreSessions = useSessionStore((s: SessionStore) => s.hasMoreSessions);
@@ -89,6 +92,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     followAcceptedInteraction,
     loadOlderSessionMessages,
     createNewSession,
+    startNewConversation,
     adoptCreatedSession,
     waitForPendingSessionCreation,
     deleteSession,
@@ -103,6 +107,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     api,
     resetCompaction: () => {},
     disconnectRun: () => disconnectRunRef.current?.(),
+    restoreSession: options.restoreSession,
   });
 
   const refreshSessionsAfterRun = useCallback((sessionId: string | null) => {
@@ -283,11 +288,13 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     uiCapabilities,
     sessions,
     currentSessionId,
+    messageHistory,
     isLoadingSessions,
     hasMoreSessions,
     isMobile,
     selectSession,
     createNewSession,
+    startNewConversation,
     deleteSession,
     loadMoreSessions,
     loadOlderMessages,

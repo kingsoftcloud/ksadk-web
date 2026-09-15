@@ -54,6 +54,8 @@ export type ChatMessageListProps = {
   activity: RunActivity | null;
   contextIndicator: ComposerContextIndicator;
   messages: Message[];
+  /** Show the explicit waiting state until the current run has emitted output. */
+  showWaitingIndicator?: boolean;
   isLoadingInitialHistory?: boolean;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
   onRespondToApproval: (options: {
@@ -639,6 +641,7 @@ function ChatMessage({
   isMobile,
   isStreaming,
   isLastMessage,
+  suppressWaitingIndicator = false,
   showAgentHeader,
   message,
   onDeleteFeedback,
@@ -653,6 +656,7 @@ function ChatMessage({
   isMobile: boolean;
   isStreaming: boolean;
   isLastMessage: boolean;
+  suppressWaitingIndicator?: boolean;
   showAgentHeader: boolean;
   message: Message;
   interactionRecords?: readonly Interaction[];
@@ -921,8 +925,8 @@ function ChatMessage({
       <div className="w-full break-words">
         {message.content ? (
           <MessageMarkdown content={message.content} />
-        ) : (isStreaming && isLastMessage && !message.reasoning && !message.tools)
-          || message.eventType === 'optimistic_assistant_placeholder' ? (
+        ) : !suppressWaitingIndicator && ((isStreaming && isLastMessage && !message.reasoning && !message.tools)
+          || message.eventType === 'optimistic_assistant_placeholder') ? (
           <span className="relative mt-1 inline-flex h-4 w-4 items-center justify-center" role="status" aria-label="正在生成">
             <span className="waiting-generation-breathe h-2.5 w-2.5 rounded-full" />
           </span>
@@ -959,6 +963,7 @@ export function ChatMessageList({
   activity,
   contextIndicator,
   messages,
+  showWaitingIndicator = false,
   isLoadingInitialHistory = false,
   onDeleteFeedback,
   onOpenAttachmentPreview,
@@ -1077,11 +1082,12 @@ export function ChatMessageList({
       <div className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && !showWaitingIndicator ? (
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
-          <div style={{ height: virtualWindow.totalHeight }} className="relative">
-            {visibleItems.map((entry) => (
+          <>
+            {messages.length > 0 && <div style={{ height: virtualWindow.totalHeight }} className="relative">
+              {visibleItems.map((entry) => (
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}
                 messageId={entry.item.id || String(entry.index)}
@@ -1095,6 +1101,7 @@ export function ChatMessageList({
                     agentName={agentName}
                     isMobile={isMobile}
                     isStreaming={isStreaming}
+                    suppressWaitingIndicator={showWaitingIndicator}
                     isLastMessage={entry.index === messages.length - 1}
                     showAgentHeader={!continuesAssistantTurn(messages[entry.index - 1], entry.item)}
                     message={entry.item}
@@ -1108,8 +1115,12 @@ export function ChatMessageList({
                   />
                 )}
               </MeasuredMessageRow>
-            ))}
-          </div>
+              ))}
+            </div>}
+            {showWaitingIndicator && <div className="mx-auto w-full max-w-[60rem] px-2 sm:px-4" role="status" data-testid="waiting-first-token">
+              <span className="waiting-thinking-text">正在思考…</span>
+            </div>}
+          </>
         )}
       </div>
       <StatusBanner />
