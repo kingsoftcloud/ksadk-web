@@ -41,6 +41,7 @@ const SESSION_MESSAGES_PAGE_SIZE = 50;
 // a smaller newest-event window and page older runtime detail on upward scroll.
 const SESSION_EVENTS_PAGE_SIZE = 200;
 const SESSION_TRANSCRIPT_CACHE_SIZE = 8;
+const SESSION_METADATA_CACHE_SIZE = 128;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 
 type SessionEventHistoryCache = {
@@ -48,6 +49,23 @@ type SessionEventHistoryCache = {
   loadedCount: number;
   total: number;
 };
+
+/** Keep per-session read caches bounded while retaining the currently visible session. */
+function rememberSessionCache<T>(
+  cache: Map<string, T>,
+  sessionId: string,
+  value: T,
+  protectedSessionId: string | null,
+  maxEntries = SESSION_METADATA_CACHE_SIZE,
+): void {
+  cache.delete(sessionId);
+  cache.set(sessionId, value);
+  while (cache.size > maxEntries) {
+    const candidate = [...cache.keys()].find(key => key !== protectedSessionId);
+    if (!candidate) break;
+    cache.delete(candidate);
+  }
+}
 
 function waitForRestoreRetry(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -413,14 +431,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       historyHydrationGenerationRef.current = generation;
       historyReadFailureRef.current = null;
       const cacheTranscript = (targetSessionId: string, transcript: Message[]) => {
-        const cache = sessionTranscriptCacheRef.current;
-        cache.delete(targetSessionId);
-        cache.set(targetSessionId, transcript);
-        while (cache.size > SESSION_TRANSCRIPT_CACHE_SIZE) {
-          const oldestSessionId = cache.keys().next().value;
-          if (!oldestSessionId) break;
-          cache.delete(oldestSessionId);
-        }
+        rememberSessionCache(
+          sessionTranscriptCacheRef.current,
+          targetSessionId,
+          transcript,
+          currentSessionIdRef.current,
+          SESSION_TRANSCRIPT_CACHE_SIZE,
+        );
       };
       const cachedHistory = sessionTranscriptCacheRef.current.get(sessionId);
       // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
@@ -473,7 +490,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           return;
         }
         const fallbackHistory = mapBackendMessages(messagesData.Messages) as Message[];
-        fallbackHistoryBySessionRef.current.set(sessionId, fallbackHistory);
+        rememberSessionCache(
+          fallbackHistoryBySessionRef.current,
+          sessionId,
+          fallbackHistory,
+          currentSessionIdRef.current,
+        );
         let history = fallbackHistory;
         let latestEventSeqId = 0;
         let canonicalRunIds: string[] = [];
@@ -508,7 +530,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             loadedCount: eventPage.Events?.length || 0,
             total: Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0),
           };
-          eventHistoryBySessionRef.current.set(sessionId, eventHistory);
+          rememberSessionCache(
+            eventHistoryBySessionRef.current,
+            sessionId,
+            eventHistory,
+            currentSessionIdRef.current,
+          );
           useSessionStore.getState().setSessionMessageHistory(sessionId, {
             nextCursor: messagesData.NextCursor,
             hasMore: Boolean(messagesData.HasMore || eventHistory.loadedCount < eventHistory.total),
@@ -533,7 +560,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           console.warn('[SessionLifecycle] canonical history replay failed:', error);
         }
         if (!isStillCurrentSession()) return;
-        canonicalRunIdsBySessionRef.current.set(sessionId, new Set(canonicalRunIds));
+        rememberSessionCache(
+          canonicalRunIdsBySessionRef.current,
+          sessionId,
+          new Set(canonicalRunIds),
+          currentSessionIdRef.current,
+        );
         useMessageStore.getState().setMessages(history);
         cacheTranscript(sessionId, history);
         historyHydrationGenerationRef.current = null;
@@ -908,7 +940,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         ...(fallbackHistoryBySessionRef.current.get(sessionId) || [])
           .filter((message) => !olderIds.has(message.id)),
       ];
-      fallbackHistoryBySessionRef.current.set(sessionId, fallbackHistory);
+      rememberSessionCache(
+        fallbackHistoryBySessionRef.current,
+        sessionId,
+        fallbackHistory,
+        currentSessionIdRef.current,
+      );
 
       let mergedEvents = cachedEvents?.events || [];
       let loadedEventCount = cachedEvents?.loadedCount || 0;
@@ -920,11 +957,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         loadedEventCount = olderEvents.length > 0
           ? Math.min(totalEventCount, loadedEventCount + olderEvents.length)
           : totalEventCount;
-        eventHistoryBySessionRef.current.set(sessionId, {
-          events: mergedEvents,
-          loadedCount: loadedEventCount,
-          total: totalEventCount,
-        });
+        rememberSessionCache(
+          eventHistoryBySessionRef.current,
+          sessionId,
+          {
+            events: mergedEvents,
+            loadedCount: loadedEventCount,
+            total: totalEventCount,
+          },
+          currentSessionIdRef.current,
+        );
         for (const record of olderEvents) {
           ingestSessionEventRecord(record, sessionId);
         }
@@ -932,10 +974,20 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId);
       const mergedHistory = rebuilt.messages;
-      canonicalRunIdsBySessionRef.current.set(sessionId, new Set(rebuilt.canonicalRunIds));
+      rememberSessionCache(
+        canonicalRunIdsBySessionRef.current,
+        sessionId,
+        new Set(rebuilt.canonicalRunIds),
+        currentSessionIdRef.current,
+      );
       useMessageStore.getState().setMessages(mergedHistory);
-      sessionTranscriptCacheRef.current.delete(sessionId);
-      sessionTranscriptCacheRef.current.set(sessionId, mergedHistory);
+      rememberSessionCache(
+        sessionTranscriptCacheRef.current,
+        sessionId,
+        mergedHistory,
+        currentSessionIdRef.current,
+        SESSION_TRANSCRIPT_CACHE_SIZE,
+      );
       useSessionStore.getState().setSessionMessageHistory(sessionId, {
         nextCursor: messagePage ? messagePage.NextCursor : historyState.nextCursor,
         hasMore: Boolean(
