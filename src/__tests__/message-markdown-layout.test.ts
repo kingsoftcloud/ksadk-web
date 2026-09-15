@@ -38,4 +38,14 @@ describe('message markdown layout', () => {
     expect(source).toContain('aria-expanded={expanded}');
     expect(source).toContain('超过单块');
   });
+
+  it('keeps sandbox preview source and download affordances for html/svg blocks', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/CodeBlock.tsx'), 'utf8');
+
+    expect(source).toContain('handleDownload');
+    expect(source).toContain('anchor.download = `code-block.${extension}`');
+    expect(source).toContain("useState<'preview' | 'source'>('preview')");
+    expect(source).toContain("setPreviewMode('source')");
+    expect(source).toContain('sandbox="allow-scripts allow-downloads"');
+  });
 });

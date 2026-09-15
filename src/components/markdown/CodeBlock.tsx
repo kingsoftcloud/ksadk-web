@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Eye, X, TextWrap, ChevronDown } from 'lucide-react';
+import { Copy, Check, Eye, X, TextWrap, ChevronDown, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { buildSandboxedHtml, useIframeMessageHandler } from '../../utils/sandbox.js';
@@ -22,6 +22,7 @@ const wrapKey = (value: string) => `len:${value.length}|head:${value.slice(0, 64
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'preview' | 'source'>('preview');
   const [expanded, setExpanded] = useState(false);
   const key = wrapKey(value);
   const [wrap, setWrap] = useState<boolean>(() => wrapStateByKey.get(key) ?? false);
@@ -52,6 +53,17 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   const handleCopy = async () => {
     const ok = await copyTextToClipboard(value);
     setCopyState(ok ? 'copied' : 'failed');
+  };
+
+  const handleDownload = () => {
+    const extension = language.toLowerCase() === 'svg' ? 'svg' : 'html';
+    const blob = new Blob([value], { type: extension === 'svg' ? 'image/svg+xml' : 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `code-block.${extension}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   const isPreviewable = PREVIEWABLE_LANGS.has(language.toLowerCase());
@@ -96,11 +108,22 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
           {isPreviewable && (
             <button
               type="button"
-              onClick={() => setPreviewOpen(true)}
+              onClick={() => { setPreviewMode('preview'); setPreviewOpen(true); }}
               className="flex items-center gap-1.5 hover:text-white transition-colors py-1"
             >
               <Eye className="w-3.5 h-3.5" />
               <span>Preview</span>
+            </button>
+          )}
+          {isPreviewable && (
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 hover:text-white transition-colors py-1"
+              title="下载源文件"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download</span>
             </button>
           )}
           <button
@@ -145,9 +168,13 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
           <div className="relative z-50 flex w-full max-w-4xl flex-col rounded-lg border border-slate-700 bg-white shadow-lg duration-200 animate-in zoom-in-95 dark:bg-slate-900 sm:mx-4">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                HTML Preview
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{language.toUpperCase()} Preview</span>
+                <div className="flex rounded-md bg-slate-100 p-0.5 text-xs dark:bg-slate-800">
+                  <button type="button" onClick={() => setPreviewMode('preview')} className={cn('rounded px-2 py-1', previewMode === 'preview' && 'bg-white shadow-sm dark:bg-slate-700')}>预览</button>
+                  <button type="button" onClick={() => setPreviewMode('source')} className={cn('rounded px-2 py-1', previewMode === 'source' && 'bg-white shadow-sm dark:bg-slate-700')}>源码</button>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setPreviewOpen(false)}
@@ -159,13 +186,17 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
             </div>
             {/* Iframe */}
             <div className="h-[70vh] min-h-[20rem]">
-              <iframe
-                ref={iframeRef}
-                srcDoc={sandboxedHtml}
-                sandbox="allow-scripts allow-downloads"
-                title="HTML Preview"
-                className="h-full w-full border-0 bg-white"
-              />
+              {previewMode === 'source' ? (
+                <pre className="custom-scrollbar h-full overflow-auto bg-[#1e1e1e] p-4 text-xs leading-5 text-slate-200"><code>{value}</code></pre>
+              ) : (
+                <iframe
+                  ref={iframeRef}
+                  srcDoc={sandboxedHtml}
+                  sandbox="allow-scripts allow-downloads"
+                  title="HTML Preview"
+                  className="h-full w-full border-0 bg-white"
+                />
+              )}
             </div>
           </div>
         </div>
