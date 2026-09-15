@@ -368,7 +368,12 @@ function WebSearchSourcesChip({ sources }: { sources: { url: string; title: stri
   );
 }
 
+const MAX_TOOL_LOG_PREVIEW_CHARS = 12_000;
+
 function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | 'output' | 'error'; value: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const truncated = value.length > MAX_TOOL_LOG_PREVIEW_CHARS;
+  const displayValue = truncated && !expanded ? value.slice(0, MAX_TOOL_LOG_PREVIEW_CHARS) : value;
   return (
     <div>
       <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
@@ -382,8 +387,18 @@ function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | '
               : 'bg-slate-50 text-slate-700 dark:bg-slate-900/40 dark:text-slate-200',
         )}
       >
-        {value}
+        {displayValue}
       </pre>
+      {truncated ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((previous) => !previous)}
+          className="mt-1 text-xs text-primary hover:underline"
+          aria-expanded={expanded}
+        >
+          {expanded ? '收起完整日志' : `查看完整日志（已显示前 ${MAX_TOOL_LOG_PREVIEW_CHARS.toLocaleString()} 字符）`}
+        </button>
+      ) : null}
     </div>
   );
 }

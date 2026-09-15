@@ -68,4 +68,13 @@ describe('message markdown layout', () => {
     expect(source).toContain('下载</a>');
     expect(source).toContain("['http:', 'https:']");
   });
+
+  it('bounds tool log previews and exposes an explicit full-log control', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ProcessingBlocksView.tsx'), 'utf8');
+
+    expect(source).toContain('MAX_TOOL_LOG_PREVIEW_CHARS = 12_000');
+    expect(source).toContain('查看完整日志');
+    expect(source).toContain('aria-expanded={expanded}');
+    expect(source).toContain('value.slice(0, MAX_TOOL_LOG_PREVIEW_CHARS)');
+  });
 });
