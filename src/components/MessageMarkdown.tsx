@@ -59,6 +59,7 @@ function safeMarkdownImageSrc(src: string | undefined): string | undefined {
 function MarkdownImage({ src, alt, ...props }: MarkdownImageProps) {
   const safeSrc = safeMarkdownImageSrc(src);
   const [state, setState] = useState<'loading' | 'loaded' | 'error'>(safeSrc ? 'loading' : 'error');
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
   if (!safeSrc || state === 'error') {
     return <span role="img" aria-label={alt || '图片无法加载'} className="my-2 inline-flex rounded-md border border-border bg-muted px-3 py-2 text-xs text-text-secondary">{alt || '图片无法加载'}</span>;
   }
@@ -71,13 +72,18 @@ function MarkdownImage({ src, alt, ...props }: MarkdownImageProps) {
           alt={alt || '图片'}
           loading="lazy"
           decoding="async"
-          onLoad={() => setState('loaded')}
+          onLoad={(event) => {
+            setState('loaded');
+            setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
+          }}
           onError={() => setState('error')}
           className="max-h-[28rem] max-w-full cursor-zoom-in rounded-lg border border-border object-contain shadow-sm"
         />
       </a>
-      <figcaption className="mt-1 text-xs text-text-secondary">
-        {state === 'loading' ? '图片加载中…' : '点击查看原图'}
+      <figcaption className="mt-1 flex items-center gap-2 text-xs text-text-secondary">
+        <span>{state === 'loading' ? '图片加载中…' : '点击查看原图'}</span>
+        {dimensions ? <span aria-label="图片尺寸">· {dimensions.width} × {dimensions.height}</span> : null}
+        <a href={safeSrc} download target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">下载</a>
       </figcaption>
     </figure>
   );

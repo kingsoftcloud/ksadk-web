@@ -64,6 +64,8 @@ describe('message markdown layout', () => {
     expect(source).toContain("loading=\"lazy\"");
     expect(source).toContain('查看原图');
     expect(source).toContain('图片无法加载');
+    expect(source).toContain('图片尺寸');
+    expect(source).toContain('下载</a>');
     expect(source).toContain("['http:', 'https:']");
   });
 });
