@@ -58,8 +58,19 @@ type RunOwner = {
   isVisible: () => boolean;
 };
 
+const MAX_IDLE_RUN_OWNERS = 64;
+
 export function useRunAgent(ctx: RunAgentContext) {
   const ownersRef = useRef(new Map<string, RunOwner>());
+  const pruneIdleOwners = useCallback((protectedKey?: string) => {
+    const owners = ownersRef.current;
+    if (owners.size <= MAX_IDLE_RUN_OWNERS) return;
+    for (const [key, owner] of owners) {
+      if (owners.size <= MAX_IDLE_RUN_OWNERS) break;
+      if (key === protectedKey || owner.engine.stage !== 'idle' || owner.queue.length > 0 || owner.isVisible()) continue;
+      owners.delete(key);
+    }
+  }, []);
   // Same-origin canonical transport for Hosted UI. It resolves fetch lazily
   // so importing the library stays Node/SSR safe.
   const defaultConversationClient = useMemo(() => new HttpConversationClient(), []);
@@ -100,6 +111,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     const key = JSON.stringify([agentId, conversationId || sessionId || 'new-session']);
     let owner = ownersRef.current.get(key);
     if (!owner) {
+      pruneIdleOwners(key);
       const isVisible = () => ctx.agentIdRef.current === agentId && (
         ctx.conversationIdRef
           ? ctx.conversationIdRef.current === conversationId
@@ -111,7 +123,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       ownersRef.current.set(key, owner);
     }
     return owner;
-  }, [agentId, ctx.agentIdRef, ctx.api, ctx.conversationIdRef, currentSessionIdRef]);
+  }, [agentId, ctx.agentIdRef, ctx.api, ctx.conversationIdRef, currentSessionIdRef, pruneIdleOwners]);
 
   const getEngine = useCallback((sessionId?: string | null) => {
     const owner = getOwner(sessionId);
