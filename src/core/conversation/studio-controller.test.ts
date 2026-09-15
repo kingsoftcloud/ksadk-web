@@ -40,6 +40,28 @@ describe('Studio conversation primitives', () => {
     delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 
+  it('bounds persisted drafts to the most recently edited entries', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); } } as Storage;
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+    const store = new DraftStore('bounded-drafts', 2);
+    const first = createConversationId(() => 0.1);
+    const second = createConversationId(() => 0.2);
+    const third = createConversationId(() => 0.3);
+    store.set(first, 'first');
+    store.set(second, 'second');
+    store.set(third, 'third');
+    expect(store.size()).toBe(2);
+    expect(store.get(first).text).toBe('');
+    expect(store.get(second).text).toBe('second');
+    expect(store.get(third).text).toBe('third');
+    expect(JSON.parse(values.get('bounded-drafts') || '{}')).toEqual(expect.objectContaining({
+      [second]: expect.anything(), [third]: expect.anything(),
+    }));
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
   it('restores the stable identity that owns a draft after reload', () => {
     const values = new Map<string, string>();
     const storage = { getItem: (key: string) => values.get(key) ?? null,

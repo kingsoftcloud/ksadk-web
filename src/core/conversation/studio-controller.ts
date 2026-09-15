@@ -203,8 +203,10 @@ export function createNavigationEpoch(): { readonly current: number; next: () =>
 export class DraftStore {
   private readonly drafts = new Map<ConversationId, DraftSession>();
   private readonly storageKey: string;
-  constructor(storageKey = 'ksadk.conversation-drafts') {
+  private readonly maxEntries: number;
+  constructor(storageKey = 'ksadk.conversation-drafts', maxEntries = 128) {
     this.storageKey = storageKey;
+    this.maxEntries = Math.max(1, maxEntries);
     this.restore();
   }
   get(conversationId: ConversationId): DraftSession {
@@ -221,6 +223,7 @@ export class DraftStore {
     if (previous.text === text && previous.attachments === files) return previous;
     const next = { conversationId, text, attachments: files, revision: previous.revision + 1, updatedAt: Date.now() };
     this.drafts.set(conversationId, next);
+    this.evict(conversationId);
     this.persist();
     return next;
   }
@@ -244,9 +247,24 @@ export class DraftStore {
           attachments: [],
         });
       }
+      if (this.evict()) this.persist();
     } catch {
       // Storage is best effort and may be unavailable in private/SSR contexts.
     }
+  }
+
+  /** Keep recent editable state bounded while leaving native session facts intact. */
+  private evict(protectedId?: ConversationId): boolean {
+    let changed = false;
+    while (this.drafts.size > this.maxEntries) {
+      const oldest = [...this.drafts.values()]
+        .filter(draft => draft.conversationId !== protectedId)
+        .sort((a, b) => a.updatedAt - b.updatedAt)[0];
+      if (!oldest) break;
+      this.drafts.delete(oldest.conversationId);
+      changed = true;
+    }
+    return changed;
   }
 
   private persist(): void {
