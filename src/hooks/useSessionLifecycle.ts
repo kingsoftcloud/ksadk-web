@@ -765,14 +765,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const startNewConversation = useCallback(() => {
     loadSessionGenerationRef.current += 1;
     runSubscriptionAbortRef.current?.abort();
-    disconnectRun?.();
+    // Navigation creates a local draft; it must not disconnect an execution
+    // that belongs to the previous conversation. The broker/engine keeps that
+    // run alive offscreen and its terminal state is reconciled on return.
     currentSessionIdRef.current = null;
     useSessionStore.getState().setCurrentSessionId(null);
     useMessageStore.getState().setMessages([]);
     useStreamingStore.getState().setCurrentRunId('');
     useStreamingStore.getState().clearActivity();
     if (isMobile) useUIStore.getState().setMobileSidebarOpen(false);
-  }, [disconnectRun, isMobile]);
+  }, [isMobile]);
 
   const createNewSession = useCallback(async () => {
     if (sessionCreationPromiseRef.current) {
