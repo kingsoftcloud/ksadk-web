@@ -40,6 +40,12 @@ export class ApiSessionFacade implements SessionFacade {
     if (this.owner.targetId !== undefined && binding.targetId !== this.owner.targetId) {
       throw new Error('Conversation binding belongs to another execution target');
     }
+    if (this.owner.tenantId !== undefined && binding.tenantId !== this.owner.tenantId) {
+      throw new Error('Conversation binding belongs to another tenant');
+    }
+    if (this.owner.workspaceId !== undefined && binding.workspaceId !== this.owner.workspaceId) {
+      throw new Error('Conversation binding belongs to another workspace');
+    }
   }
 
   async listSessionSummaries(options: { page?: number; pageSize?: number; signal?: AbortSignal } = {}) {
@@ -85,6 +91,8 @@ export class ApiSessionFacade implements SessionFacade {
           conversationId,
           agentId: this.owner.agentId,
           targetId: this.owner.targetId,
+          tenantId: this.owner.tenantId,
+          workspaceId: this.owner.workspaceId,
           nativeSessionId: session.SessionId,
         };
         this.bindings.set(conversationId, binding);

@@ -6,6 +6,9 @@ export type ConversationBinding = {
   nativeSessionId?: string;
   agentId: string;
   targetId?: string;
+  /** Optional identity dimensions used by host adapters for owner checks. */
+  tenantId?: string;
+  workspaceId?: string;
 };
 
 export type DraftSession = {

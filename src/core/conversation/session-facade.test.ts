@@ -55,6 +55,19 @@ describe('ApiSessionFacade', () => {
     expect(api.cancelRun).not.toHaveBeenCalled();
   });
 
+  it('carries tenant and workspace identity into new bindings', async () => {
+    const api = fakeApi();
+    const facade = new ApiSessionFacade(api, {
+      agentId: 'agent-a', targetId: 'target-a', tenantId: 'tenant-a', workspaceId: 'workspace-a',
+    });
+    const controller = new ConversationController();
+    const id = controller.getOrCreate('agent-a', null, 'target-a');
+    await expect(facade.ensureExecutionBinding(id)).resolves.toMatchObject({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+    });
+  });
+
   it('single-flights concurrent native session creation', async () => {
     const api = fakeApi();
     let release!: (value: { SessionId: string }) => void;
