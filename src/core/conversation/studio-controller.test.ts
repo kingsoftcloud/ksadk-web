@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DraftStore, createConversationId, createNavigationEpoch, isCurrentNavigation } from './studio-controller.js';
+import { ConversationController, DraftStore, createConversationId, createNavigationEpoch, isCurrentNavigation } from './studio-controller.js';
 
 describe('Studio conversation primitives', () => {
   it('creates client-owned ids and isolated drafts', () => {
     const a = createConversationId(() => 0.1);
     const b = createConversationId(() => 0.2);
-    expect(a).toMatch(/^conversation_[a-z0-9]+_[a-z0-9]+$/);
+    expect(a).toMatch(/^conversation_[a-z0-9]+_[a-z0-9]+_[a-z0-9]+$/);
     const store = new DraftStore();
     expect(store.set(a, '中文草稿').revision).toBe(1);
     expect(store.set(a, 'updated').revision).toBe(2);
@@ -20,5 +20,14 @@ describe('Studio conversation primitives', () => {
     const second = epoch.next();
     expect(isCurrentNavigation(epoch.current, first)).toBe(false);
     expect(isCurrentNavigation(epoch.current, second)).toBe(true);
+  });
+
+  it('maps a local conversation to a native session without changing its id', () => {
+    const controller = new ConversationController();
+    const conversation = controller.getOrCreate('agent-a', null);
+    const rebound = controller.bindNative(conversation, 'ses_native');
+    expect(rebound.conversationId).toBe(conversation);
+    expect(controller.binding(conversation)?.nativeSessionId).toBe('ses_native');
+    expect(controller.getOrCreate('agent-a', 'ses_native')).not.toBe(conversation);
   });
 });

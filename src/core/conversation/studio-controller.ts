@@ -16,9 +16,11 @@ export type DraftSession = {
 };
 
 export function createConversationId(random: () => number = Math.random): ConversationId {
-  const suffix = `${Date.now().toString(36)}_${Math.floor(random() * 0x100000000).toString(36)}`;
+  const suffix = `${Date.now().toString(36)}_${(++conversationSequence).toString(36)}_${Math.floor(random() * 0x100000000).toString(36)}`;
   return `conversation_${suffix}`;
 }
+
+let conversationSequence = 0;
 
 export function createNavigationEpoch(): { readonly current: number; next: () => number } {
   let current = 0;
@@ -39,6 +41,37 @@ export class DraftStore {
   delete(conversationId: ConversationId): void { this.drafts.delete(conversationId); }
   clear(): void { this.drafts.clear(); }
   size(): number { return this.drafts.size; }
+}
+
+/** Coordinates view identity without owning a runtime or cancelling runs. */
+export class ConversationController {
+  readonly drafts = new DraftStore();
+  private readonly ids = new Map<string, ConversationId>();
+  private readonly bindings = new Map<ConversationId, ConversationBinding>();
+  private readonly epoch = createNavigationEpoch();
+
+  navigate(): number { return this.epoch.next(); }
+  get navigationEpoch(): number { return this.epoch.current; }
+
+  getOrCreate(agentId: string, sessionId: string | null, targetId?: string): ConversationId {
+    const key = `${agentId}:${targetId || ''}:${sessionId || 'draft'}`;
+    const existing = this.ids.get(key);
+    if (existing) return existing;
+    const id = createConversationId();
+    this.ids.set(key, id);
+    this.bindings.set(id, { conversationId: id, agentId, targetId, nativeSessionId: sessionId || undefined });
+    return id;
+  }
+
+  bindNative(conversationId: ConversationId, nativeSessionId: string): ConversationBinding {
+    const current = this.bindings.get(conversationId);
+    if (!current) throw new Error(`Unknown conversation: ${conversationId}`);
+    const next = { ...current, nativeSessionId };
+    this.bindings.set(conversationId, next);
+    return next;
+  }
+
+  binding(conversationId: ConversationId): ConversationBinding | undefined { return this.bindings.get(conversationId); }
 }
 
 export function isCurrentNavigation(epoch: number, expected: number): boolean { return epoch === expected; }

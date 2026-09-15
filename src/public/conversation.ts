@@ -70,6 +70,7 @@ export type {
 export {
   createConversationId,
   createNavigationEpoch,
+  ConversationController,
   DraftStore,
   isCurrentNavigation,
 } from '../core/conversation/studio-controller.js';
