@@ -352,6 +352,16 @@ function MessageAttachments({
   isMobile: boolean;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
 }) {
+  const formatSize = (value: number | null | undefined) => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  };
+  const provenance = (attachment: MessageAttachment) => {
+    const bits = [attachment.type, formatSize(attachment.sizeBytes), attachment.runId && `run ${attachment.runId.slice(0, 12)}`].filter(Boolean);
+    return bits.join(' · ');
+  };
   return (
     <div className="mb-3 flex flex-wrap gap-3">
       {attachments.map((attachment, attachmentIndex) =>
@@ -408,6 +418,11 @@ function MessageAttachments({
             ) : (
               <span className="truncate text-sm text-slate-700 dark:text-slate-300" title={attachment.name}>
                 {attachment.name}
+              </span>
+            )}
+            {(attachment.artifactId || attachment.itemId || attachment.runId || attachment.sizeBytes != null) && (
+              <span className="text-[11px] text-slate-500 dark:text-slate-400" title={`来源 item ${attachment.itemId || '未知'} · run ${attachment.runId || '未知'}`}>
+                {provenance(attachment)}
               </span>
             )}
           </div>

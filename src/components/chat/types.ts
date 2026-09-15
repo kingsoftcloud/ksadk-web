@@ -3,6 +3,12 @@ export type MessageAttachment = {
   url: string;
   type: string;
   fileUri?: string;
+  /** Optional provenance carried by generated conversation artifacts. */
+  artifactId?: string;
+  itemId?: string;
+  runId?: string;
+  sizeBytes?: number | null;
+  status?: 'pending' | 'ready' | 'failed';
 };
 
 export type PreviewImageSize = {

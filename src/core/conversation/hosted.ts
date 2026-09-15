@@ -338,6 +338,11 @@ export function projectConversationStreamForHostedUi(
               name: artifact.name,
               type: artifact.mimeType,
               url: artifact.uri,
+              artifactId: artifact.artifactId,
+              itemId: artifact.itemId,
+              runId: artifact.runId,
+              sizeBytes: artifact.sizeBytes,
+              status: 'ready',
             }],
           }
         : fallbackMessage(
