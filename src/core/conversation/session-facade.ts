@@ -67,7 +67,17 @@ export class ApiSessionFacade implements SessionFacade {
 
   submit(binding: ConversationBinding, input: { text: string; clientRequestId: string; idempotencyKey: string }, options: { signal?: AbortSignal } = {}) {
     if (!binding.nativeSessionId) return Promise.reject(new Error('Execution binding is required before submit'));
-    return this.api.runAgent({ AgentId: this.owner.agentId, SessionId: binding.nativeSessionId, Input: input.text, ClientRequestId: input.clientRequestId, IdempotencyKey: input.idempotencyKey, Stream: true }, options);
+    const content = [{ type: 'input_text', text: input.text }];
+    return this.api.runAgent({
+      AgentId: this.owner.agentId,
+      SessionId: binding.nativeSessionId,
+      Messages: [{ role: 'user', content }],
+      ResponsesInput: [{ role: 'user', content }],
+      InvocationId: input.clientRequestId,
+      IdempotencyKey: input.idempotencyKey,
+      Metadata: { agentengine: { client_request_id: input.clientRequestId } },
+      Stream: true,
+    }, options);
   }
 
   interrupt(binding: ConversationBinding, invocationId: string, options: { signal?: AbortSignal } = {}) {

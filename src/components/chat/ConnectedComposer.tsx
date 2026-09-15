@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useModelStore } from '../../stores/model.js';
@@ -20,11 +20,11 @@ import type { RuntimeExecutionMode } from '../../core/run/types.js';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 import { DraftStore, type ConversationId } from '../../core/conversation/studio-controller.js';
 
-const studioDrafts = new DraftStore();
-
 export type ConnectedComposerProps = {
   /** Stable Studio conversation identity. Keeps drafts independent from the runtime session id. */
   draftKey?: ConversationId;
+  /** Scope storage to the Studio owner. Dispose it when identity changes. */
+  draftStore?: DraftStore;
   onCompactContext?: () => Promise<void>;
   composerMaxHeight: number;
   submitDraft: (
@@ -51,6 +51,7 @@ export type ConnectedComposerProps = {
 
 export function ConnectedComposer({
   draftKey,
+  draftStore,
   onCompactContext,
   composerMaxHeight,
   submitDraft,
@@ -80,24 +81,21 @@ export function ConnectedComposer({
   const setThinkingMode = useModelStore((s: ModelStore) => s.setThinkingMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const previousDraftKey = useRef<ConversationId | undefined>(draftKey);
-  const hydratingDraft = useRef(false);
+  const localDrafts = useRef(new DraftStore());
+  const drafts = draftStore || localDrafts.current;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!draftKey) return;
-    if (previousDraftKey.current && previousDraftKey.current !== draftKey) {
-      studioDrafts.set(previousDraftKey.current, useUIStore.getState().input);
-    }
-    previousDraftKey.current = draftKey;
-    hydratingDraft.current = true;
-    useUIStore.getState().setInput(studioDrafts.get(draftKey).text);
-    useUIStore.getState().setAttachments([]);
-    queueMicrotask(() => { hydratingDraft.current = false; });
-  }, [draftKey]);
-
-  useEffect(() => {
-    if (draftKey && !hydratingDraft.current) studioDrafts.set(draftKey, input);
-  }, [draftKey, input]);
+    const draft = drafts.get(draftKey);
+    useUIStore.setState({ input: draft.text, attachments: draft.attachments });
+    // Save synchronously so typing then switching in the same frame cannot
+    // race a passive hydration effect or overwrite the next conversation.
+    return useUIStore.subscribe((state, previous) => {
+      if (state.input !== previous.input || state.attachments !== previous.attachments) {
+        drafts.set(draftKey, state.input, state.attachments);
+      }
+    });
+  }, [draftKey, drafts]);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -174,7 +172,6 @@ export function ConnectedComposer({
       ) : null}
       <ChatComposer
       onCompactContext={currentSessionId ? onCompactContext : undefined}
-      key={currentSessionId || "new-session"}
       attachments={attachments}
       composerContextIndicator={composerContextIndicator}
       composerMaxHeight={composerMaxHeight}

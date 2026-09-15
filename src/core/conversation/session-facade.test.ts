@@ -24,7 +24,7 @@ describe('ApiSessionFacade', () => {
     const binding = await facade.ensureExecutionBinding(id);
     expect(api.createSession).toHaveBeenCalledTimes(1);
     await facade.submit(binding, { text: 'hello', clientRequestId: 'req_1', idempotencyKey: 'idem_1' });
-    expect(api.runAgent).toHaveBeenCalledWith(expect.objectContaining({ SessionId: 'ses_new', ClientRequestId: 'req_1', IdempotencyKey: 'idem_1' }), {});
+    expect(api.runAgent).toHaveBeenCalledWith(expect.objectContaining({ SessionId: 'ses_new', InvocationId: 'req_1', IdempotencyKey: 'idem_1' }), {});
   });
 
   it('requires a binding for commands and preserves approval identity', async () => {

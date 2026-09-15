@@ -28,6 +28,6 @@ describe('Studio conversation primitives', () => {
     const rebound = controller.bindNative(conversation, 'ses_native');
     expect(rebound.conversationId).toBe(conversation);
     expect(controller.binding(conversation)?.nativeSessionId).toBe('ses_native');
-    expect(controller.getOrCreate('agent-a', 'ses_native')).not.toBe(conversation);
+    expect(controller.getOrCreate('agent-a', 'ses_native')).toBe(conversation);
   });
 });

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Message, ModelCatalogItem } from '../components/chat/types.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
 import type { ConversationClient } from '../core/conversation/types.js';
+import type { ConversationController } from '../core/conversation/studio-controller.js';
 import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
 import { useBootstrapStore, type BootstrapStore } from '../stores/bootstrap.js';
 import { useMessageStore } from '../stores/message.js';
@@ -32,6 +33,8 @@ export type AgentChatOptions = {
   agentId?: string;
   /** Whether opening an Agent should automatically restore its last session. */
   restoreSession?: boolean;
+  /** Owner-scoped Studio identity and drafts; omit to retain Hosted UI behavior. */
+  conversationController?: ConversationController;
   /**
    * Omit for Hosted UI canonical negotiation. Pass `null` when the embedding
    * host intentionally exposes only `/agentengine/api/v1` actions.
@@ -61,6 +64,14 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const uiCapabilities = useBootstrapStore((s: BootstrapStore) => s.capabilities) as UiCapabilities;
 
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const [, setDraftRevision] = useState(0);
+  const controller = options.conversationController;
+  const conversationId = controller?.getOrCreate(
+    explicitAgentId || agentId,
+    explicitAgentId && explicitAgentId !== agentId ? null : currentSessionId,
+  );
+  const activeConversationIdRef = useRef(conversationId);
+  activeConversationIdRef.current = conversationId;
   const messageHistory = useSessionStore((s: SessionStore) => currentSessionId ? s.messageHistory[currentSessionId] : undefined);
   const sessions = useSessionStore((s: SessionStore) => s.sessions);
   const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
@@ -92,7 +103,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     followAcceptedInteraction,
     loadOlderSessionMessages,
     createNewSession,
-    startNewConversation,
+    startNewConversation: resetConversationView,
     adoptCreatedSession,
     waitForPendingSessionCreation,
     deleteSession,
@@ -143,7 +154,14 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSessionsAfterRun,
-    onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
+    onSessionCreated: (sessionId) => {
+      if (controller && conversationId) controller.bindNative(conversationId, sessionId);
+      // A late create belongs to the submitted draft, even after navigation.
+      // Persist its mapping but never let it take over the selected view.
+      if (agentIdRef.current !== agentId
+        || (controller && activeConversationIdRef.current !== conversationId)) return;
+      adoptCreatedSession(sessionId, true);
+    },
     waitForPendingSessionCreation,
     conversationClient: options.conversationClient,
   });
@@ -260,6 +278,14 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     if (sessionId) void loadSession(sessionId);
   }, [loadSession]);
 
+  const startNewConversation = useCallback(() => {
+    controller?.navigate();
+    activeConversationIdRef.current = controller?.createDraft(explicitAgentId || agentId);
+    resetConversationView();
+    // null -> null is still a new draft, so it must update the composer owner.
+    setDraftRevision((revision) => revision + 1);
+  }, [agentId, controller, explicitAgentId, resetConversationView]);
+
   const loadOlderMessages = useCallback(
     (sessionId?: string) => loadOlderSessionMessages(sessionId || currentSessionIdRef.current || ''),
     [currentSessionIdRef, loadOlderSessionMessages],
@@ -288,6 +314,8 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     uiCapabilities,
     sessions,
     currentSessionId,
+    conversationId,
+    conversationDrafts: controller?.drafts,
     messageHistory,
     isLoadingSessions,
     hasMoreSessions,
