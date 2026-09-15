@@ -66,9 +66,12 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const [, setDraftRevision] = useState(0);
   const controller = options.conversationController;
+  const identityAgentRef = useRef(explicitAgentId || agentId);
+  const identityChanged = identityAgentRef.current !== (explicitAgentId || agentId);
+  useEffect(() => { identityAgentRef.current = explicitAgentId || agentId; }, [agentId, explicitAgentId]);
   const conversationId = controller?.getOrCreate(
     explicitAgentId || agentId,
-    explicitAgentId && explicitAgentId !== agentId ? null : currentSessionId,
+    identityChanged ? null : currentSessionId,
   );
   const activeConversationIdRef = useRef(conversationId);
   activeConversationIdRef.current = conversationId;
