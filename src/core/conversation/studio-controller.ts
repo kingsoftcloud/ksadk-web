@@ -283,7 +283,7 @@ export class DraftStore {
       };
       this.drafts.set(conversationId, remote);
       this.conflicts.delete(conversationId);
-      this.notify();
+      this.persist();
       return remote;
     }
     const local = this.drafts.get(conversationId);
