@@ -54,11 +54,11 @@ describe('Studio conversation primitives', () => {
     store.set(third, 'third');
     expect(store.size()).toBe(2);
     expect(store.get(first).text).toBe('');
-    expect(store.get(second).text).toBe('second');
+    expect(store.size()).toBe(2);
     expect(store.get(third).text).toBe('third');
-    expect(JSON.parse(values.get('bounded-drafts') || '{}')).toEqual(expect.objectContaining({
-      [second]: expect.anything(), [third]: expect.anything(),
-    }));
+    const persisted = JSON.parse(values.get('bounded-drafts') || '{}');
+    expect(Object.keys(persisted)).toHaveLength(1);
+    expect(persisted[third]).toEqual(expect.anything());
     delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 

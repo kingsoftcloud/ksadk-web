@@ -214,6 +214,9 @@ export class DraftStore {
     if (!draft) {
       draft = { conversationId, text: '', revision: 0, updatedAt: Date.now(), attachments: [] };
       this.drafts.set(conversationId, draft);
+      // Browsing an old/evicted conversation must not grow an unbounded set of
+      // empty editor records. Keep the currently viewed draft as the survivor.
+      if (this.evict(conversationId)) this.persist();
     }
     return draft;
   }
