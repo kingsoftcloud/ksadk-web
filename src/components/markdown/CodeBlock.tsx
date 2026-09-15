@@ -75,6 +75,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   const truncated = visibleLines.length < lines.length;
   const hardTruncated = lines.length > MAX_VISIBLE_LINES;
   const displayValue = visibleLines.join('\n');
+  const isDiff = language.toLowerCase() === 'diff';
 
   const sandboxedHtml = isPreviewable ? buildSandboxedHtml(value) : '';
 
@@ -141,6 +142,17 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
           language={language}
           style={vscDarkPlus}
           showLineNumbers
+          wrapLines={isDiff}
+          lineProps={isDiff ? (lineNumber) => {
+            const line = visibleLines[lineNumber - 1] || '';
+            if (line.startsWith('+') && !line.startsWith('+++')) {
+              return { style: { backgroundColor: 'rgba(34, 197, 94, 0.12)', display: 'block' } };
+            }
+            if (line.startsWith('-') && !line.startsWith('---')) {
+              return { style: { backgroundColor: 'rgba(244, 63, 94, 0.12)', display: 'block' } };
+            }
+            return { style: { display: 'block' } };
+          } : undefined}
           lineNumberStyle={{ color: '#64748b', minWidth: '2.5em', paddingRight: '1em', userSelect: 'none' }}
           customStyle={{ margin: 0, padding: '1rem', background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre' }}
           PreTag="div"
