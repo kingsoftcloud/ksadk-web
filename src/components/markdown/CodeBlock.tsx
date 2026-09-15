@@ -15,9 +15,43 @@ const PREVIEWABLE_LANGS = new Set(['html', 'svg']);
 const WRAPPABLE_LANGS = new Set(['markdown', 'md']);
 const FOLD_THRESHOLD_LINES = 80;
 const MAX_VISIBLE_LINES = 500;
+const MAX_CSV_ROWS = 100;
 // wrap 状态按内容 key 记忆(wework 做法),同一段代码切换会话也保留。
 const wrapStateByKey = new Map<string, boolean>();
 const wrapKey = (value: string) => `len:${value.length}|head:${value.slice(0, 64)}`;
+
+function parseDelimitedLine(line: string, delimiter: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') { cell += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (char === delimiter && !quoted) {
+      cells.push(cell); cell = '';
+    } else cell += char;
+  }
+  cells.push(cell);
+  return cells;
+}
+
+function CsvTable({ value, delimiter }: { value: string; delimiter: string }) {
+  const rows = value.replace(/\r$/, '').split('\n').filter((line) => line.length > 0).map((line) => parseDelimitedLine(line, delimiter));
+  const visibleRows = rows.slice(0, MAX_CSV_ROWS + 1);
+  const header = visibleRows[0] || [];
+  const body = visibleRows.slice(1, MAX_CSV_ROWS + 1);
+  return (
+    <div className="custom-scrollbar max-w-full overflow-auto bg-[#1e1e1e] p-3">
+      <table className="min-w-max border-collapse text-xs text-slate-200">
+        <thead><tr>{header.map((cell, index) => <th key={`h-${index}`} className="border-b border-slate-600 px-3 py-2 text-left font-semibold">{cell}</th>)}</tr></thead>
+        <tbody>{body.map((row, rowIndex) => <tr key={`r-${rowIndex}`} className="even:bg-white/[0.03]">{row.map((cell, index) => <td key={`c-${rowIndex}-${index}`} className="border-b border-slate-700/60 px-3 py-1.5 align-top">{cell}</td>)}</tr>)}</tbody>
+      </table>
+      {rows.length > MAX_CSV_ROWS + 1 ? <div className="mt-2 text-xs text-slate-400">已显示前 {MAX_CSV_ROWS} 行数据，原文件共 {rows.length - 1} 行。</div> : null}
+    </div>
+  );
+}
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -56,8 +90,10 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   };
 
   const handleDownload = () => {
-    const extension = language.toLowerCase() === 'svg' ? 'svg' : 'html';
-    const blob = new Blob([value], { type: extension === 'svg' ? 'image/svg+xml' : 'text/html' });
+    const normalizedLanguage = language.toLowerCase();
+    const extension = normalizedLanguage === 'svg' ? 'svg' : normalizedLanguage === 'csv' ? 'csv' : normalizedLanguage === 'tsv' ? 'tsv' : 'html';
+    const mimeType = extension === 'svg' ? 'image/svg+xml' : extension === 'html' ? 'text/html' : 'text/plain';
+    const blob = new Blob([value], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -67,12 +103,13 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   };
 
   const isPreviewable = PREVIEWABLE_LANGS.has(language.toLowerCase());
+  const isCsv = ['csv', 'tsv'].includes(language.toLowerCase());
   const lines = String(value).replace(/\n$/, '').split('\n');
   const canFold = lines.length > FOLD_THRESHOLD_LINES;
   const visibleLines = expanded
     ? lines.slice(0, MAX_VISIBLE_LINES)
     : lines.slice(0, Math.min(FOLD_THRESHOLD_LINES, MAX_VISIBLE_LINES));
-  const truncated = visibleLines.length < lines.length;
+  const truncated = !isCsv && visibleLines.length < lines.length;
   const hardTruncated = lines.length > MAX_VISIBLE_LINES;
   const displayValue = visibleLines.join('\n');
   const isDiff = language.toLowerCase() === 'diff';
@@ -116,7 +153,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
               <span>Preview</span>
             </button>
           )}
-          {isPreviewable && (
+          {(isPreviewable || isCsv) && (
             <button
               type="button"
               onClick={handleDownload}
@@ -138,7 +175,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
         </div>
       </div>
       <div className={cn('text-[13.5px]', wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto')}>
-        <SyntaxHighlighter
+        {isCsv ? <CsvTable value={value} delimiter={language.toLowerCase() === 'tsv' ? '\t' : ','} /> : <SyntaxHighlighter
           language={language}
           style={vscDarkPlus}
           showLineNumbers
@@ -158,7 +195,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
           PreTag="div"
         >
           {displayValue}
-        </SyntaxHighlighter>
+        </SyntaxHighlighter>}
         {truncated && (
           <div className="border-t border-slate-700/60 px-4 py-2 text-xs text-slate-400">
             {hardTruncated

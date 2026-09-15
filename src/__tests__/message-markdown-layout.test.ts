@@ -102,4 +102,14 @@ describe('message markdown layout', () => {
     expect(source).toContain('extra.summary');
     expect(source).toContain('font-mono text-[11px]');
   });
+
+  it('renders csv and tsv blocks as bounded, horizontally scrollable tables', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/CodeBlock.tsx'), 'utf8');
+
+    expect(source).toContain('MAX_CSV_ROWS = 100');
+    expect(source).toContain('function CsvTable');
+    expect(source).toContain('overflow-auto bg-[#1e1e1e]');
+    expect(source).toContain("['csv', 'tsv']");
+    expect(source).toContain('已显示前 {MAX_CSV_ROWS} 行数据');
+  });
 });
