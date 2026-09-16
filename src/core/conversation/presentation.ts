@@ -92,6 +92,7 @@ function projectArtifact(item: ConversationItem): ConversationArtifact {
   const sizeBytes = typeof rawSize === 'number' && Number.isFinite(rawSize) && rawSize >= 0
     ? rawSize
     : null;
+  const uri = safeArtifactUri(item.payload.uri);
   return {
     artifactId,
     itemId: item.itemId,
@@ -105,7 +106,8 @@ function projectArtifact(item: ConversationItem): ConversationArtifact {
       ? item.payload.mimeType
       : 'application/octet-stream',
     sizeBytes,
-    uri: safeArtifactUri(item.payload.uri),
+    status: item.lifecycle === 'failed' ? 'failed' : item.lifecycle === 'completed' ? (uri ? 'ready' : 'failed') : 'pending',
+    uri,
   };
 }
 

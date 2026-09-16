@@ -329,7 +329,23 @@ export function projectConversationStreamForHostedUi(
     }
     const artifact = artifactById.get(item.itemId);
     if (artifact) {
-      messages.push(artifact.uri
+      messages.push(artifact.status === 'pending'
+        ? {
+            ...messageBase(item),
+            role: 'model',
+            content: artifact.name,
+            attachments: [{
+              name: artifact.name,
+              type: artifact.mimeType,
+              url: '',
+              artifactId: artifact.artifactId,
+              itemId: artifact.itemId,
+              runId: artifact.runId,
+              sizeBytes: artifact.sizeBytes,
+              status: 'pending',
+            }],
+          }
+        : artifact.status === 'ready' && artifact.uri
         ? {
             ...messageBase(item),
             role: 'model',
@@ -342,13 +358,15 @@ export function projectConversationStreamForHostedUi(
               itemId: artifact.itemId,
               runId: artifact.runId,
               sizeBytes: artifact.sizeBytes,
-              status: 'ready',
+              status: artifact.status,
             }],
           }
         : fallbackMessage(
-            item,
+              item,
             'Artifact unavailable',
-            'The artifact URI is not a safe HTTP(S) link.',
+            artifact.status === 'failed'
+              ? 'The artifact failed to generate or its URI is not a safe HTTP(S) link.'
+              : 'The artifact URI is not a safe HTTP(S) link.',
           ));
       continue;
     }

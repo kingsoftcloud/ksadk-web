@@ -359,7 +359,8 @@ function MessageAttachments({
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   };
   const provenance = (attachment: MessageAttachment) => {
-    const bits = [attachment.type, formatSize(attachment.sizeBytes), attachment.runId && `run ${attachment.runId.slice(0, 12)}`].filter(Boolean);
+    const state = attachment.status === 'pending' ? '生成中' : attachment.status === 'failed' ? '生成失败' : '';
+    const bits = [attachment.type, formatSize(attachment.sizeBytes), state, attachment.runId && `run ${attachment.runId.slice(0, 12)}`].filter(Boolean);
     return bits.join(' · ');
   };
   const hasProvenance = (attachment: MessageAttachment) => Boolean(

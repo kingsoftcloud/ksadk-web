@@ -145,6 +145,7 @@ export type ConversationArtifact = {
   name: string;
   mimeType: string;
   sizeBytes?: number | null;
+  status: 'pending' | 'ready' | 'failed';
   /** Only an absolute HTTP(S) URI without embedded credentials is clickable. */
   uri: string | null;
 };
