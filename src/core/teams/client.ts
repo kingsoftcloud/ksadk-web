@@ -1,6 +1,6 @@
 import { decodeGroupEvent, decodeGroupSnapshot, decodeExecutionSnapshot, TeamsError, validateGroupCreate } from './contracts.js';
 import { GroupReducer } from './reducer.js';
-import type { MemberStreamRef, ConnectionStatus, ExecutionSnapshot, GroupCreateInput, GroupList, GroupMessageInput, GroupReceipt, GroupSnapshot, TaskAction, TeamControlAction, TeamInteractionInput } from './types.js';
+import type { LeaderStandbyConfiguration, MemberStreamRef, ConnectionStatus, ExecutionSnapshot, GroupCreateInput, GroupList, GroupMessageInput, GroupReceipt, GroupSnapshot, TaskAction, TeamControlAction, TeamInteractionInput } from './types.js';
 
 export type TeamsFetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type TeamsClientOptions = { fetch?: TeamsFetch; baseUrl?: string; maxReconnects?: number; retryDelayMs?: (attempt: number) => number };
@@ -110,20 +110,27 @@ export class HttpTeamsClient {
     validateGroupCreate(input);
     return decodeGroupSnapshot(await this.post('', input, signal));
   }
-  async update(groupId: string, input: { expectedRevision: number; name?: string; leaderMemberId?: string; removeMemberId?: string; addMember?: { memberId: string; name: string; bindingRef: string }; rebindMember?: { memberId: string; name: string; bindingRef: string }; taskAcceptance?: 'human' | 'result'; peerWake?: boolean; archived?: boolean; idempotencyKey: string }, signal?: AbortSignal): Promise<GroupSnapshot> {
+  async update(groupId: string, input: { expectedRevision: number; name?: string; leaderMemberId?: string; removeMemberId?: string; addMember?: { memberId: string; name: string; bindingRef: string }; rebindMember?: { memberId: string; name: string; bindingRef: string }; taskAcceptance?: 'leader' | 'human' | 'result'; peerWake?: boolean; archived?: boolean; idempotencyKey: string }, signal?: AbortSignal): Promise<GroupSnapshot> {
     const snapshot = decodeGroupSnapshot(await this.json(this.path(groupId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal }));
     if (snapshot.group.groupId !== groupId) throw new TeamsError('scope_mismatch', '群更新返回了另一个群。');
     return snapshot;
   }
   send(groupId: string, input: GroupMessageInput, signal?: AbortSignal): Promise<GroupReceipt> {
     if (!input.parts.some(part => part.kind !== 'text' || part.text.trim())) throw new TeamsError('empty_message', '请输入消息。');
+    if (input.workspace && input.intent !== 'start_goal') throw new TeamsError('invalid_workspace_scope', '工作目录只能在新建任务时指定。');
     if (input.intent === 'directed' && !input.mentions.length) throw new TeamsError('missing_recipient', '请选择接收成员。');
     return this.post(this.path(groupId, '/messages'), input, signal);
   }
   start(groupId: string, input: { goalMessageId: string; idempotencyKey: string }, signal?: AbortSignal): Promise<GroupReceipt> { return this.post(this.path(groupId, '/team-runs'), input, signal); }
   taskAction(groupId: string, taskId: string, input: { action: TaskAction; expectedRevision: number; idempotencyKey: string; memberId?: string; reason?: string }, signal?: AbortSignal): Promise<GroupReceipt> { return this.post(this.path(groupId, `/tasks/${encodeURIComponent(taskId)}/actions`), input, signal); }
   control(groupId: string, teamRunId: string, input: { action: TeamControlAction; expectedRevision: number; idempotencyKey: string }, signal?: AbortSignal): Promise<GroupReceipt> { return this.post(this.path(groupId, `/team-runs/${encodeURIComponent(teamRunId)}/control`), input, signal); }
-  acceptRun(groupId: string, teamRunId: string, input: { accepted: boolean; expectedRevision: number; idempotencyKey: string }, signal?: AbortSignal): Promise<GroupReceipt> { return this.post(this.path(groupId, `/team-runs/${encodeURIComponent(teamRunId)}/acceptance`), input, signal); }
+  acceptRun(groupId: string, teamRunId: string, input: { accepted?: boolean; action?: 'accept' | 'request_changes' | 'reject'; reason?: string; expectedRevision: number; idempotencyKey: string }, signal?: AbortSignal): Promise<GroupReceipt> { return this.post(this.path(groupId, `/team-runs/${encodeURIComponent(teamRunId)}/acceptance`), input, signal); }
+  async configureLeaderStandby(groupId: string, teamRunId: string, input: { bindingRef: string; idempotencyKey: string }, signal?: AbortSignal): Promise<LeaderStandbyConfiguration> {
+    if (!input.bindingRef.trim()) throw new TeamsError('missing_binding', '请选择云端备用节点。');
+    const result = await this.post<LeaderStandbyConfiguration>(this.path(groupId, `/team-runs/${encodeURIComponent(teamRunId)}/leader-standby`), input, signal);
+    if (result.groupId !== groupId || result.teamRunId !== teamRunId || result.standbyBindingRef !== input.bindingRef || !['armed', 'blocked', 'active'].includes(result.state)) throw new TeamsError('scope_mismatch', '备用节点确认不属于当前任务或所选节点。');
+    return result;
+  }
   interaction(groupId: string, input: TeamInteractionInput, signal?: AbortSignal): Promise<GroupReceipt> {
     if (input.ref.groupId !== groupId) throw new TeamsError('scope_mismatch', '审批不属于当前群。');
     return this.post(this.path(groupId, '/interactions'), input, signal);
@@ -134,6 +141,15 @@ export class HttpTeamsClient {
   }
   async execution(groupId: string, teamRunId?: string, signal?: AbortSignal): Promise<ExecutionSnapshot> { const result = decodeExecutionSnapshot(await this.json(this.path(groupId, `/execution${teamRunId ? `?teamRunId=${encodeURIComponent(teamRunId)}` : ''}`), { signal })); if (result.groupId !== groupId || (teamRunId && result.teamRunId !== teamRunId)) throw new TeamsError('scope_mismatch', '执行视图不属于当前协作轮次。'); return result; }
   markRead(groupId: string, watermark: number, signal?: AbortSignal): Promise<void> { return this.post(this.path(groupId, '/read'), { watermark }, signal); }
+
+  async reconciliation(groupId: string, teamRunId: string): Promise<import('./types.js').TeamReconciliationRecord[]> {
+    const result = await this.json<{ groupId: string; items: import('./types.js').TeamReconciliationRecord[] }>(this.path(groupId, '/reconciliation'));
+    if (result.groupId !== groupId || !Array.isArray(result.items)) throw new TeamsError('scope_mismatch', '原单核查结果不属于当前团队。');
+    return result.items.filter(record => record.teamRunId === teamRunId);
+  }
+  reconcile(groupId: string, commandId: string, input: { receiptDigest: string; action: 'confirm_ended' | 'use_result'; reason: string; idempotencyKey: string }): Promise<{ status: string }> {
+    return this.post(this.path(groupId, `/reconciliation/${encodeURIComponent(commandId)}`), input);
+  }
 
   /** Snapshot + watermark subscription. Aborting closes observation only. */
   async watch(groupId: string, options: GroupWatchOptions): Promise<void> {

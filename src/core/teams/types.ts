@@ -19,8 +19,13 @@ export type TeamCapabilities = {
 export type ExecutionBinding = {
   bindingRef: string;
   providerRef: string;
-  kind: 'local_build' | 'a2a';
+  kind: 'local_build' | 'a2a' | 'cloud';
   agentId: string;
+  name?: string;
+  modelName?: string;
+  description?: string;
+  createdAt?: string;
+  availability?: { state: 'ready' | 'unchecked' | 'unavailable'; code?: string; reason?: string; action?: string };
   buildId?: string;
   version?: string;
   location?: string;
@@ -37,7 +42,7 @@ export type Group = {
   authorityRef: string;
   tenantId: string;
   ownerSubject: string;
-  policy?: { taskAcceptance: 'human' | 'result'; peerWake: boolean };
+  policy?: { taskAcceptance: 'leader' | 'human' | 'result'; peerWake: boolean };
   leaderMemberId: string;
   revision: number;
   status: 'active' | 'archived';
@@ -48,6 +53,7 @@ export type GroupSummary = Group & {
   memberCount: number;
   pendingCount: number;
   unreadCount: number;
+  activeTeamRunIds?: string[];
   activeTeamRunId?: string | null;
   activeStatus?: TeamStatus | null;
   lastMessage?: string;
@@ -57,6 +63,7 @@ export type AgentMember = {
   groupId: string;
   name: string;
   role: 'leader' | 'member';
+  responsibility?: string;
   bindingRef: string;
   binding: ExecutionBinding;
   sessionId: string;
@@ -66,6 +73,7 @@ export type AgentMember = {
   activeRunId?: string | null;
   reason?: string;
 };
+export type RunMember = AgentMember & { runMemberId: string; teamRunId: string; groupRevision: number };
 export type MemberStreamRef = {
   authorityRef: string;
   groupId: string;
@@ -115,10 +123,28 @@ export type TeamBudget = {
   tokensUsed?: number;
   maxDurationSeconds?: number;
 };
+export type LeaderStandbyConfiguration = {
+  groupId: string; teamRunId: string; state: 'armed' | 'blocked' | 'active';
+  primaryNodeId: string; primarySessionId: string; primaryBindingRef: string;
+  standbyNodeId: string; standbyBindingRef: string; buildDigest: string;
+  epoch: number; reason?: string | null; automaticFailback: false;
+  sessionId?: string; checkpointId?: string;
+};
+export type TeamReconciliationRecord = {
+  commandId: string; teamRunId: string; nodeId: string; state: string;
+  nativeRunId?: string | null; taskId?: string | null;
+  receiptDigest?: string | null; reconciled: boolean;
+  quarantinedReceipt?: { run_id?: string | null; run_status?: string | null; output?: string } | null;
+};
 export type TeamRun = {
   teamRunId: string;
   groupId: string;
   groupRevision: number;
+  policy?: Group['policy'];
+  result?: string;
+  resultHistory?: Array<{ result: string; reason: string; revision: number; requestedAt: string }>;
+  leaderStandby?: LeaderStandbyConfiguration | null;
+  workspace?: TeamWorkspaceInput | null;
   revision: number;
   goalMessageId: string;
   goal: string;
@@ -185,6 +211,7 @@ export type GroupSnapshot = {
   group: Group;
   watermark: number;
   members: AgentMember[];
+  runMembers?: RunMember[];
   messages: GroupMessage[];
   teamRuns: TeamRun[];
   tasks: TeamTask[];
@@ -210,16 +237,20 @@ export type GroupEvent = {
 export type GroupList = { items: GroupSummary[]; nextCursor?: string | null };
 export type GroupCreateInput = {
   name: string;
-  members: Array<{ memberId: string; name: string; bindingRef: string }>;
+  members: Array<{ memberId: string; name: string; bindingRef: string; responsibility?: string }>;
   leaderMemberId: string;
+  leaderStandbyBindingRef?: string;
   idempotencyKey: string;
 };
+export type TeamWorkspaceInput = { sourcePath: string; baseRef?: string; inputs?: string[]; mode?: 'auto' | 'directory' };
 export type GroupMessageInput = {
   parts: GroupMessagePart[];
   mentions: string[];
   intent: MessageIntent;
   idempotencyKey: string;
   replyTo?: string;
+  teamRunId?: string;
+  workspace?: TeamWorkspaceInput;
 };
 export type GroupReceipt = {
   status: 'accepted' | 'duplicate' | 'rejected' | 'uncertain';

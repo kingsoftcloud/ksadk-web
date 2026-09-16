@@ -670,7 +670,7 @@ function ChatMessage({
   if (message.role === 'user') {
     return (
       <div className="mb-3 flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-[14px] leading-relaxed text-foreground">
+        <div data-slot="user-message" className="max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-[14px] leading-relaxed text-foreground">
           {message.attachments?.length ? (
             <MessageAttachments
               attachments={message.attachments}
@@ -697,7 +697,7 @@ function ChatMessage({
   const reasoningStreaming = isStreaming && isLastMessage && !message.content;
 
   return (
-    <div className="group mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
+    <div data-slot="assistant-message" className="group mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
       {showAgentHeader ? (
         <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
           <Bot className="w-3.5 h-3.5" />
@@ -922,7 +922,7 @@ function ChatMessage({
             ))
         : null}
 
-      <div className="w-full break-words">
+      <div data-slot="assistant-content" className="w-full break-words">
         {message.content ? (
           <MessageMarkdown content={message.content} />
         ) : !suppressWaitingIndicator && ((isStreaming && isLastMessage && !message.reasoning && !message.tools)
@@ -1079,7 +1079,7 @@ export function ChatMessageList({
       )}
       data-slot="message-list"
     >
-      <div className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
+      <div data-slot="message-list-content" className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
         ) : messages.length === 0 && !showWaitingIndicator ? (
