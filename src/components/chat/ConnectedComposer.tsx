@@ -20,6 +20,8 @@ import type { RuntimeExecutionMode } from '../../core/run/types.js';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 
 export type ConnectedComposerProps = {
+  /** Optional host controls inside the composer's single surface. */
+  headerSlot?: React.ReactNode;
   onCompactContext?: () => Promise<void>;
   composerMaxHeight: number;
   submitDraft: (
@@ -45,6 +47,7 @@ export type ConnectedComposerProps = {
 };
 
 export function ConnectedComposer({
+  headerSlot,
   onCompactContext,
   composerMaxHeight,
   submitDraft,
@@ -149,6 +152,7 @@ export function ConnectedComposer({
         />
       ) : null}
       <ChatComposer
+      headerSlot={headerSlot}
       onCompactContext={currentSessionId ? onCompactContext : undefined}
       key={currentSessionId || "new-session"}
       attachments={attachments}
