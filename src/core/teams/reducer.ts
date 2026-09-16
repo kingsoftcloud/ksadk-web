@@ -1,4 +1,4 @@
-import { artifactSchema, decodeGroupEvent, decodeGroupSnapshot, deliverySchema, groupSchema, interactionSchema, memberSchema, messageSchema, taskSchema, teamRunSchema, TeamsError } from './contracts.js';
+import { artifactSchema, decodeGroupEvent, decodeGroupSnapshot, deliverySchema, groupSchema, interactionSchema, memberSchema, runMemberSchema, messageSchema, taskSchema, teamRunSchema, TeamsError } from './contracts.js';
 import type { GroupEvent, GroupSnapshot, InteractionRef, MemberStreamRef } from './types.js';
 
 export function memberStreamKey(ref: MemberStreamRef): string {
@@ -51,6 +51,7 @@ export class GroupReducer {
         if (row.revision > previous.group.revision) next.group = row;
         break;
       }
+      case 'run_member.updated': next.runMembers = upsert(previous.runMembers || [], decode(runMemberSchema, event.payload.runMember) as NonNullable<GroupSnapshot['runMembers']>[number], row => row.runMemberId); break;
       case 'member.updated': next.members = upsert(previous.members, decode(memberSchema, event.payload.member) as GroupSnapshot['members'][number], row => row.memberId); break;
       case 'message.created':
       case 'message.updated': next.messages = upsert(previous.messages, decode(messageSchema, event.payload.message) as GroupSnapshot['messages'][number], row => row.messageId); break;

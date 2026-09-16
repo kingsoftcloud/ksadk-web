@@ -25,6 +25,8 @@ export type ConnectedComposerProps = {
   draftKey?: ConversationId;
   /** Scope storage to the Studio owner. Dispose it when identity changes. */
   draftStore?: DraftStore;
+  /** Optional host controls inside the composer's single surface. */
+  headerSlot?: React.ReactNode;
   onCompactContext?: () => Promise<void>;
   composerMaxHeight: number;
   submitDraft: (
@@ -52,6 +54,7 @@ export type ConnectedComposerProps = {
 export function ConnectedComposer({
   draftKey,
   draftStore,
+  headerSlot,
   onCompactContext,
   composerMaxHeight,
   submitDraft,
@@ -187,6 +190,7 @@ export function ConnectedComposer({
         />
       ) : null}
       <ChatComposer
+      headerSlot={headerSlot}
       onCompactContext={currentSessionId ? onCompactContext : undefined}
       attachments={attachments}
       composerContextIndicator={composerContextIndicator}
