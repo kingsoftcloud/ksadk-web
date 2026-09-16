@@ -302,6 +302,7 @@ export class RunEngineImpl implements RunEngine {
     executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
+    onInvocationCreated?: (invocationId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
@@ -328,6 +329,7 @@ export class RunEngineImpl implements RunEngine {
 
         const invocationId = createInvocationId();
         this.publishInvocation(invocationId);
+        draft.onInvocationCreated?.(invocationId);
         this.recordCursor(0);
 
         const conversationBootstrap = !isResponsesResume
@@ -361,6 +363,7 @@ export class RunEngineImpl implements RunEngine {
             onUpdate: (snapshot) => {
               if (snapshot.runId) {
                 this.publishInvocation(snapshot.runId);
+                draft.onInvocationCreated?.(snapshot.runId);
               }
               this.emit({
                 type: 'conversation_snapshot',
@@ -504,7 +507,7 @@ export class RunEngineImpl implements RunEngine {
         const isAbort = (error instanceof DOMException && error.name === 'AbortError')
           || (error instanceof ConversationClientError && error.code === 'conversation_aborted');
         if (!isAbort) {
-          const isNetwork = error instanceof TypeError && error.message.includes('fetch');
+          const isNetwork = error instanceof TypeError;
           settlement = isNetwork ? 'unknown' : 'failed';
           console.error('[RunEngine] start() error:', error);
           if (isNetwork) {
@@ -1275,6 +1278,7 @@ export class RunEngineImpl implements RunEngine {
     let buffer = '';
     let messageCreated = false;
     let receivedByteCount = 0;
+    let terminalStatus: string | undefined;
 
     try {
       while (true) {
@@ -1305,7 +1309,6 @@ export class RunEngineImpl implements RunEngine {
 
           const events = parseSseChunk(chunk);
           let shouldStop = false;
-          let terminalStatus: string | undefined;
 
           for (const event of events) {
             if (event.eventName === '__done__') {
@@ -1321,6 +1324,7 @@ export class RunEngineImpl implements RunEngine {
             const actions = protocol.parse(event, protocolState);
             for (const action of actions) {
               this.dispatchAction(action, messageId);
+              if (action.type === 'terminal') terminalStatus = action.status;
             }
 
             if (shouldStopReadingRunStream(actions as Array<{ type: string; status?: string }>)) {
@@ -1339,16 +1343,15 @@ export class RunEngineImpl implements RunEngine {
         }
       }
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        throw error;
-      }
+      throw error;
     }
 
     if (receivedByteCount === 0) {
       throw new Error('运行时返回了空响应流，请稍后重试；若问题持续，请检查运行时状态。');
     }
 
-    return {};
+    if (terminalStatus) return { terminalStatus };
+    throw new TypeError('运行时连接已结束，但尚未收到执行终态；请查询原任务状态。');
   }
 
   private isCompactionChunk(chunk: string): boolean {

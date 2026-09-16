@@ -25,7 +25,8 @@
     "release:provenance": "node scripts/release-provenance.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "test:e2e:teams": "playwright test --config playwright.teams.config.mjs",
-    "test:perf:studio": "npm run build:lib && node scripts/test-studio-performance.mjs"
+    "test:perf:studio": "npm run build:lib && node scripts/test-studio-performance.mjs",
+    "verify:e2e:outbox": "node scripts/verify-outbox-recovery.mjs"
   },
   "exports": {
     ".": {

@@ -62,6 +62,9 @@ const MAX_IDLE_RUN_OWNERS = 64;
 
 export function useRunAgent(ctx: RunAgentContext) {
   const ownersRef = useRef(new Map<string, RunOwner>());
+  // Transient ownership distinguishes a live queue from restored pending intent.
+  const outboxRequestsRef = useRef(new Set<string>());
+  const isOutboxRequestActive = useCallback((requestId: string) => outboxRequestsRef.current.has(requestId), []);
   const pruneIdleOwners = useCallback((protectedKey?: string) => {
     const owners = ownersRef.current;
     if (owners.size <= MAX_IDLE_RUN_OWNERS) return;
@@ -209,6 +212,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     previousResponseId?: string, executionMode?: RuntimeExecutionMode,
     outboxRequestId?: string,
   ) => {
+    if (outboxRequestId && outboxRequestsRef.current.has(outboxRequestId)) return;
     // Capture the owner before the first await. Navigation can happen while a
     // legacy CreateSession or an attachment upload is still pending.
     const owner = getOwner();
@@ -228,8 +232,19 @@ export function useRunAgent(ctx: RunAgentContext) {
           executionMode,
         })
       : undefined;
-    if (outboxEntry && ledger) ledger.setRuntimeAttachments(outboxEntry.requestId, draftAttachments);
-    const pendingSessionId = await waitForPendingSessionCreation?.();
+    if (outboxEntry && ledger) {
+      outboxRequestsRef.current.add(outboxEntry.requestId);
+      ledger.setRuntimeAttachments(outboxEntry.requestId, draftAttachments);
+    }
+    let pendingSessionId: string | null | undefined;
+    try { pendingSessionId = await waitForPendingSessionCreation?.(); }
+    catch (error) {
+      if (outboxEntry && ledger) {
+        outboxRequestsRef.current.delete(outboxEntry.requestId);
+        ledger.update(outboxEntry.requestId, { status: 'unknown', error: '创建会话的结果待确认。' });
+      }
+      throw error;
+    }
     if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
 
     const launch = (): boolean => {
@@ -246,6 +261,9 @@ export function useRunAgent(ctx: RunAgentContext) {
       const accepted = owner.engine.start({
         ...draft,
         sessionId: owner.sessionId,
+        onInvocationCreated: invocationId => {
+          if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, { invocationId });
+        },
         onSessionCreated: sessionId => {
           const wasVisible = owner.isVisible();
           const previousKey = owner.sessionId || owner.conversationId;
@@ -265,6 +283,7 @@ export function useRunAgent(ctx: RunAgentContext) {
         },
         onSessionUpsert: () => {},
         onSettled: (sessionId, outcome = 'unknown') => {
+          if (outboxEntry) outboxRequestsRef.current.delete(outboxEntry.requestId);
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, {
             status: outcome === 'completed' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
           });
@@ -272,9 +291,6 @@ export function useRunAgent(ctx: RunAgentContext) {
           if (outcome === 'completed') drainQueue(owner);
         },
       });
-      if (accepted && outboxEntry && ledger && owner.engine.activeInvocationId) {
-        ledger.update(outboxEntry.requestId, { invocationId: owner.engine.activeInvocationId });
-      }
       if (!accepted) useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, false);
       return accepted;
     };
@@ -385,6 +401,7 @@ export function useRunAgent(ctx: RunAgentContext) {
 
   return {
     submitDraft,
+    isOutboxRequestActive,
     stopGeneration,
     disconnectRun,
     resumeCheckpoint,

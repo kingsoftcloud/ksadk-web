@@ -546,8 +546,8 @@ export async function peekKernelReceipt(
       }
     }
   } catch (error) {
-    // Fall through: whatever was buffered is replayed on the returned stream.
-    void error;
+    reader.releaseLock();
+    throw error;
   }
 
   const prefix = new TextEncoder().encode(buffer);
@@ -569,9 +569,9 @@ export async function peekKernelReceipt(
             }
             return pump();
           })
-          .catch(() => {
+          .catch((error) => {
             try {
-              controller.close();
+              controller.error(error);
             } catch {
               // already closed (abort/cancel): nothing to do
             }
@@ -579,7 +579,7 @@ export async function peekKernelReceipt(
       void pump();
     },
     cancel() {
-      void reader.cancel();
+      void reader.cancel().catch(() => {});
     },
   });
 

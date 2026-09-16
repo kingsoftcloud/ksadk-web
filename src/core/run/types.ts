@@ -108,6 +108,7 @@ export interface RunEngine {
     executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
+    onInvocationCreated?: (invocationId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;

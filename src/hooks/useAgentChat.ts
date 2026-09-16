@@ -142,6 +142,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
 
   const {
     submitDraft,
+    isOutboxRequestActive,
     stopGeneration,
     disconnectRun,
     resumeCheckpoint,
@@ -285,40 +286,64 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     );
   }, [submitDraft]);
 
+  const outboxActionsInFlight = useRef(new Set<string>());
   const retryOutbox = useCallback(async (requestId: string): Promise<boolean> => {
     if (!controller || !conversationId) return false;
     const entry = controller.outbox.get(requestId);
     if (!entry || entry.conversationId !== conversationId || entry.agentId !== agentId
-      || !['pending', 'failed', 'unknown'].includes(entry.status)) return false;
-    const attachments = controller.outbox.getRuntimeAttachments(requestId);
-    if (entry.attachments.length > 0 && attachments.length !== entry.attachments.length) return false;
-    if (entry.status === 'unknown' && entry.nativeSessionId) {
-      try {
-        const state = await api.getSession(entry.nativeSessionId);
-        const status = String(state.ActiveRunStatus || '').toLowerCase();
-        if (['running', 'in_progress', 'waiting', 'paused', 'awaiting_approval'].includes(status)) {
-          controller.outbox.update(requestId, { status: 'sending', invocationId: state.ActiveInvocationId || entry.invocationId });
+      || agentIdRef.current !== agentId || activeConversationIdRef.current !== conversationId
+      || !['pending', 'failed', 'unknown'].includes(entry.status)
+      || outboxActionsInFlight.current.has(requestId) || isOutboxRequestActive(requestId)) return false;
+    outboxActionsInFlight.current.add(requestId);
+    try {
+      if (entry.status === 'unknown') {
+        const unresolved = (error: string) => {
+          // A running stream may settle the entry while this query is pending.
+          if (controller.outbox.get(requestId) === entry) controller.outbox.update(requestId, { error });
           return false;
+        };
+        if (!entry.nativeSessionId || !entry.invocationId) {
+          return unresolved('尚未取得原任务的完整标识，请先查看会话记录确认结果。');
         }
-        if (['completed', 'succeeded', 'success', 'done'].includes(status)) {
-          controller.outbox.update(requestId, { status: 'completed', invocationId: state.ActiveInvocationId || entry.invocationId });
-          await fetchSessions(agentIdRef.current, entry.nativeSessionId);
-          return false;
+        let state: Awaited<ReturnType<ApiFacade['getSession']>>;
+        try { state = await api.getSession(entry.nativeSessionId); }
+        catch { return unresolved('暂时无法查询原任务状态，请稍后重新查询。'); }
+        if (controller.outbox.get(requestId) !== entry) return false;
+        // Session-level status may already refer to a later run. It is not a
+        // receipt for this request unless the original execution identity matches.
+        if (state.SessionId !== entry.nativeSessionId
+          || (state.AgentId && state.AgentId !== entry.agentId)
+          || state.ActiveInvocationId !== entry.invocationId) {
+          return unresolved('当前会话状态未对应原任务，请查看原任务记录确认结果。');
         }
-        if (['failed', 'error'].includes(status)) controller.outbox.update(requestId, { status: 'failed' });
-        if (['cancelled', 'canceled', 'stopped', 'aborted'].includes(status)) controller.outbox.update(requestId, { status: 'cancelled' });
-      } catch {
-        // The state query is itself uncertain; leave the entry actionable and
-        // require the user's explicit retry decision below.
+        const status = String(state.ActiveRunStatus || '').trim().toLowerCase();
+        const terminal = ['completed', 'succeeded', 'success', 'done'].includes(status) ? 'completed'
+          : ['failed', 'error'].includes(status) ? 'failed'
+          : ['cancelled', 'canceled', 'stopped', 'aborted'].includes(status) ? 'cancelled'
+          : undefined;
+        if (terminal) {
+          controller.outbox.update(requestId, { status: terminal,
+            error: terminal === 'failed' ? '原任务已失败，请检查已产生的结果后决定是否重试。' : undefined });
+        } else {
+          unresolved(['running', 'in_progress', 'resuming', 'waiting', 'paused', 'awaiting_approval'].includes(status)
+            ? '原任务仍在执行或等待处理，请在会话中查看进度。'
+            : '原任务尚未返回可确认的结果，请稍后重新查询。');
+        }
+        // Querying an uncertain outcome never also executes a retry. A failed
+        // run needs a separate user action after its result has been displayed.
+        return false;
       }
+      const attachments = controller.outbox.getRuntimeAttachments(requestId);
+      if (entry.attachments.length > 0 && attachments.length !== entry.attachments.length) return false;
+      // This is a correlation ID, not an assertion of server-side idempotency.
+      controller.outbox.requeue(requestId);
+      await submitDraft(entry.text, attachments, undefined, undefined,
+        entry.executionMode as RuntimeExecutionMode | undefined, requestId);
+      return true;
+    } finally {
+      outboxActionsInFlight.current.delete(requestId);
     }
-    // Reuse the same request ID so an explicit retry updates the existing
-    // ledger entry instead of creating a second side effect with a new key.
-    controller.outbox.requeue(requestId);
-    await submitDraft(entry.text, attachments, undefined, undefined,
-      entry.executionMode as RuntimeExecutionMode | undefined, requestId);
-    return true;
-  }, [agentId, agentIdRef, api, controller, conversationId, fetchSessions, submitDraft]);
+  }, [agentId, agentIdRef, api, controller, conversationId, isOutboxRequestActive, submitDraft]);
 
   const selectSession = useCallback((sessionId: string | null) => {
     useSessionStore.getState().setCurrentSessionId(sessionId);
@@ -390,6 +415,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     queuedDrafts,
     send,
     retryOutbox,
+    isOutboxRequestActive,
     stop,
     cancelRemote,
     resumeCheckpoint,

@@ -188,6 +188,33 @@ function canonicalResultWithUser(text: string): ConversationStreamResult {
 }
 
 describe('RunEngineImpl', () => {
+  it.each(['disconnect', 'eof'] as const)('keeps partial output %s uncertain and publishes its invocation identity', async (ending) => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    api.runAgent = async body => {
+      calls.push(body);
+      return new ReadableStream<Uint8Array>({ start(controller) {
+        streamController = controller;
+        controller.enqueue(new TextEncoder().encode('event: response.output_text.delta\ndata: {"delta":"partial"}\n\n'));
+      } });
+    };
+    const engine = createRunEngine(api);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework: 'codex', apiFormats: ['responses'], selectedModel: 'test', thinkingMode: 'auto' });
+    const invocation = vi.fn();
+    const settled = vi.fn();
+    const events: RunEvent[] = [];
+    engine.subscribe(event => events.push(event));
+    engine.start({ text: 'one action', attachments: [], onInvocationCreated: invocation, onSettled: settled });
+    await vi.waitFor(() => expect(events.some(event => event.type === 'text_delta')).toBe(true));
+    if (ending === 'disconnect') streamController.error(new TypeError('Connection lost'));
+    else streamController.close();
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledWith('session-1', 'unknown'));
+    expect(invocation).toHaveBeenCalledWith(calls[0].InvocationId);
+    expect(events.some(event => event.type === 'stream_ended')).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
   afterEach(async () => {
     await Promise.all([...activeEngines].map(waitForEngineIdle));
     activeEngines.clear();

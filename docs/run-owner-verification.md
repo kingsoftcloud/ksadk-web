@@ -37,6 +37,12 @@ npm run build:lib
 
 已提交草稿还会写入 owner-scoped `OutboxStore`：账本保存请求 ID、会话/Agent、正文、执行模式和附件元数据，状态可为 `pending`、`sending`、`unknown`、`failed`、`cancelled` 或 `completed`。文件字节不进入 localStorage；未知结果不会被存储层自动重放。
 
+未知投递的操作只查询原任务。SessionId、AgentId（接口提供时）及 InvocationId 必须与账本匹配，才能采用服务端终态；查询失败或身份不匹配继续保留未知状态。确认失败后需要单独点击重试，附件字节不可恢复时禁用发送。请求 ID 用于关联账本，不代表服务端提供幂等保证。当前队列持有的请求不进入恢复入口，同一请求的并发查询或重试会合并。
+
+流读取错误必须透传；已输出部分文本、但断线或 EOF 前没有执行终态，不能标成完成。InvocationId 在异步会话创建后生成时写入账本。
+
+运行 `npm run verify:e2e:outbox` 验证生产构建中的断线、查询失败、其他任务终态、确认失败和显式重试。报告、截图及 trace 在 `output/playwright/outbox-recovery/`。该验证使用确定性传输，不替代真实模型及云端验收。
+
 报告位于 `output/playwright/run-owners-report.json`，包含源码 SHA-256。
 结果目录包含请求归属审计；失败保留截图及浏览器 trace。
 单元测试另覆盖各运行续订游标隔离、后台审批保留、后台停止不覆盖前台状态。

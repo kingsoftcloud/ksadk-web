@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useAgentChat } from '../src/hooks/useAgentChat.js';
 import { ConnectedComposer } from '../src/components/chat/ConnectedComposer.js';
@@ -15,10 +15,12 @@ const listeners = new Set<() => void>();
 const changed = () => { revision++; listeners.forEach(fn => fn()); };
 const subscribe = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 const creations: Array<{ id: number; agentId: string; done: boolean; resolve: () => void; reject: () => void }> = [];
-const runs: Array<{ id: number; agentId: string; sessionId: string; invocationId: string; text: string; body: unknown; closed: boolean; emit: () => void; finish: () => void }> = [];
+const runs: Array<{ id: number; agentId: string; sessionId: string; invocationId: string; text: string; body: unknown; closed: boolean; emit: () => void; finish: () => void; drop: () => void }> = [];
 const cancellations: Array<{ agentId: string; sessionId: string; invocationId: string }> = [];
 const sessions: Array<{ SessionId: string; AgentId: string; Title: string }> = [];
 const controller = new ConversationController('fixture:run-ownership');
+let sessionQueryMode = 'offline';
+let sessionQueries = 0;
 
 const api = {
   async getAgentUiBootstrap(agentId: string) {
@@ -30,7 +32,14 @@ const api = {
   async listSessions(agentId: string) { const items = sessions.filter(item => item.AgentId === agentId); return { Sessions: items, Total: items.length }; },
   async listSessionMessages() { return { Messages: [], LatestSeqId: 0, HasMore: false }; },
   async listSessionEvents() { return { Events: [], LatestSeqId: 0, HasMore: false }; },
-  async getSession(sessionId: string) { return { SessionId: sessionId }; },
+  async getSession(sessionId: string) {
+    sessionQueries++; changed();
+    if (sessionQueryMode === 'offline') throw new TypeError('Fixture state query offline');
+    const run = runs.find(item => item.sessionId === sessionId);
+    return { SessionId: sessionId, AgentId: run?.agentId,
+      ActiveInvocationId: sessionQueryMode === 'other-run' ? 'unrelated-run' : run?.invocationId,
+      ActiveRunStatus: sessionQueryMode === 'other-run' ? 'completed' : sessionQueryMode };
+  },
   createSession(agentId: string) {
     return new Promise((resolve, reject) => {
       const id = creations.length + 1;
@@ -54,6 +63,10 @@ const api = {
     const run = { id, agentId: String(body.AgentId), sessionId: String(body.SessionId),
       invocationId: String(body.InvocationId), text: content.map(part => part.text || '').join(''), body, closed: false,
       emit: () => { if (!run.closed) event({ type: 'response.output_text.delta', delta: `output ${id} ` }); },
+      drop: () => {
+        if (run.closed) return;
+        run.closed = true; streamController.error(new TypeError('Fixture connection lost')); changed();
+      },
       finish: () => {
         if (run.closed) return;
         event({ type: 'response.completed', response: { status: 'completed' } });
@@ -75,6 +88,7 @@ const api = {
 
 function App() {
   useSyncExternalStore(subscribe, () => revision);
+  useEffect(() => controller.outbox.subscribe(changed), []);
   const [agentId, setAgentId] = useState('agent-a');
   const chat = useAgentChat({ api, agentId, conversationController: controller, restoreSession: false, conversationClient: null });
   const streaming = useStreamingStore(s => s.sessionStreaming);
@@ -99,12 +113,20 @@ function App() {
       </div>)}
       {runs.filter(item => !item.closed).map(item => <div key={item.id}>
         <button onClick={item.emit}>Emit run {item.id}</button>{' / '}
-        <button onClick={item.finish}>Finish run {item.id}</button>
+        <button onClick={item.finish}>Finish run {item.id}</button>{' / '}
+        <button onClick={item.drop}>Disconnect run {item.id}</button>
       </div>)}
+      {['offline', 'other-run', 'completed', 'failed'].map(mode => <button key={mode}
+        onClick={() => { sessionQueryMode = mode; changed(); }}>Query mode {mode}</button>)}
+      {controller.outbox.listUnresolved(chat.conversationId).filter(entry => !chat.isOutboxRequestActive(entry.requestId)).map(entry => (
+        <button key={entry.requestId} onClick={() => { void chat.retryOutbox(entry.requestId); }}>
+          {entry.status === 'unknown' ? 'Query uncertain delivery' : 'Retry failed delivery'}
+        </button>
+      ))}
     </aside>
-    <pre data-testid="audit">{JSON.stringify({ creations: creations.map(({ id, agentId, done }) => ({ id, agentId, done })),
+    <pre data-testid="audit" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify({ creations: creations.map(({ id, agentId, done }) => ({ id, agentId, done })),
       runs: runs.map(({ id, agentId, sessionId, invocationId, text, body, closed }) => ({ id, agentId, sessionId, invocationId, text, body, closed })),
-      cancellations, streaming: Object.keys(streaming) })}</pre>
+      cancellations, streaming: Object.keys(streaming), outbox: controller.outbox.list(), sessionQueries })}</pre>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<App />);
