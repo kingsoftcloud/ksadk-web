@@ -362,29 +362,38 @@ function MessageAttachments({
     const bits = [attachment.type, formatSize(attachment.sizeBytes), attachment.runId && `run ${attachment.runId.slice(0, 12)}`].filter(Boolean);
     return bits.join(' · ');
   };
+  const hasProvenance = (attachment: MessageAttachment) => Boolean(
+    attachment.artifactId || attachment.itemId || attachment.runId || attachment.sizeBytes != null,
+  );
   return (
     <div className="mb-3 flex flex-wrap gap-3">
       {attachments.map((attachment, attachmentIndex) =>
         attachment.type.startsWith('image/') ? (
           attachment.url ? (
-            <button
-              key={`${attachment.name}-${attachmentIndex}`}
-              type="button"
-              onClick={() => onOpenAttachmentPreview(attachment)}
-              className={cn(
-                'group relative overflow-hidden rounded-xl border border-slate-200 shadow-sm dark:border-slate-700',
-                isMobile ? 'w-full max-w-full' : 'max-w-[200px]',
-              )}
-            >
-              <img
-                src={attachment.url}
-                alt={attachment.name}
+            <div key={`${attachment.name}-${attachmentIndex}`} className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => onOpenAttachmentPreview(attachment)}
                 className={cn(
-                  'object-cover transition group-hover:scale-[1.02]',
-                  isMobile ? 'max-h-[16rem] w-full max-w-full' : 'max-h-[200px] max-w-[200px]',
+                  'group relative overflow-hidden rounded-xl border border-slate-200 shadow-sm dark:border-slate-700',
+                  isMobile ? 'w-full max-w-full' : 'max-w-[200px]',
                 )}
-              />
-            </button>
+              >
+                <img
+                  src={attachment.url}
+                  alt={attachment.name}
+                  className={cn(
+                    'object-cover transition group-hover:scale-[1.02]',
+                    isMobile ? 'max-h-[16rem] w-full max-w-full' : 'max-h-[200px] max-w-[200px]',
+                  )}
+                />
+              </button>
+              {hasProvenance(attachment) && (
+                <span className="max-w-[200px] truncate text-[11px] text-slate-500 dark:text-slate-400" title={`来源 item ${attachment.itemId || '未知'} · run ${attachment.runId || '未知'}`}>
+                  {provenance(attachment)}
+                </span>
+              )}
+            </div>
           ) : (
             <div
               key={`${attachment.name}-${attachmentIndex}`}
@@ -420,7 +429,7 @@ function MessageAttachments({
                 {attachment.name}
               </span>
             )}
-            {(attachment.artifactId || attachment.itemId || attachment.runId || attachment.sizeBytes != null) && (
+            {hasProvenance(attachment) && (
               <span className="text-[11px] text-slate-500 dark:text-slate-400" title={`来源 item ${attachment.itemId || '未知'} · run ${attachment.runId || '未知'}`}>
                 {provenance(attachment)}
               </span>
