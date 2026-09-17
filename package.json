@@ -10,7 +10,7 @@
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "build:all": "npm run build:ksadk && npm run build:hosted && npm run build:demo && npm run build:lib",
     "prepack": "npm run build:lib && npm run build:ksadk",
-    "lint": "eslint .",
+    "lint": "NODE_OPTIONS=--max-old-space-size=6144 eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
     "test:node": "node --test tests/*.test.mjs",
