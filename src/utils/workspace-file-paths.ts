@@ -72,3 +72,29 @@ export function rehypeWorkspaceFilePaths() {
 }
 
 export const WORKSPACE_FILE_PATH_RE = FILE_PATH_RE;
+
+
+export type WorkspaceFilePathSegment =
+  | { type: "text"; value: string }
+  | { type: "file"; value: string };
+
+/** Split plain text (tool logs, command output) into text and file-path
+ * segments so hosts can render paths as preview links outside markdown. */
+export function splitWorkspaceFilePaths(value: string): WorkspaceFilePathSegment[] {
+  const segments: WorkspaceFilePathSegment[] = [];
+  let lastIndex = 0;
+  FILE_PATH_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = FILE_PATH_RE.exec(value))) {
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", value: value.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: "file", value: match[0] });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex === 0) return [{ type: "text", value }];
+  if (lastIndex < value.length) {
+    segments.push({ type: "text", value: value.slice(lastIndex) });
+  }
+  return segments;
+}

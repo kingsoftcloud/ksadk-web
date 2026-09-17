@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
-import { rehypeWorkspaceFilePaths, WORKSPACE_FILE_PATH_RE as FILE_PATH_RE } from "../utils/workspace-file-paths.js";
+import { rehypeWorkspaceFilePaths, splitWorkspaceFilePaths, WORKSPACE_FILE_PATH_RE as FILE_PATH_RE } from "../utils/workspace-file-paths.js";
 
 interface HastNode {
   type: string;
@@ -64,5 +64,19 @@ describe("rehypeWorkspaceFilePaths", () => {
     FILE_PATH_RE.lastIndex = 0;
     expect(FILE_PATH_RE.test("./builds/output.md")).toBe(true);
     FILE_PATH_RE.lastIndex = 0;
+  });
+});
+
+describe("splitWorkspaceFilePaths", () => {
+  it("splits tool log text into text and file segments", () => {
+    const segments = splitWorkspaceFilePaths("文件路径: /Users/xiayu/studio-test/AI芯片最新消息_2026年9月.md 已创建");
+    expect(segments.filter(s => s.type === "file")).toHaveLength(1);
+    expect(segments[0].type).toBe("text");
+    expect(segments.at(-1)).toEqual({ type: "text", value: " 已创建" });
+  });
+
+  it("returns a single text segment when no path appears", () => {
+    const segments = splitWorkspaceFilePaths("命令执行完成");
+    expect(segments).toEqual([{ type: "text", value: "命令执行完成" }]);
   });
 });

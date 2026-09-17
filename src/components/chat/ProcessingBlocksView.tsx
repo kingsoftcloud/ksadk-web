@@ -10,6 +10,8 @@ import { ChevronDown, FileDiff, Globe2, LoaderCircle, Sparkles, Wrench } from 'l
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { MessageMarkdown } from '../MessageMarkdown';
+import { splitWorkspaceFilePaths } from '../../utils/workspace-file-paths.js';
+import { openWorkspaceFilePreview } from '../../utils/workspace-file-preview-bus.js';
 import { parseUnifiedDiff, summarizeDiffSection, isUnifiedDiff } from '../../utils/parse-unified-diff';
 import type { Message } from './types';
 import type { ProcessingBlock, ThinkingBlock, ToolBlock, TextBlock } from '../../core/run/blocks';
@@ -402,7 +404,21 @@ function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | '
               : 'bg-slate-50 text-slate-700 dark:bg-slate-900/40 dark:text-slate-200',
         )}
       >
-        {displayValue}
+        {splitWorkspaceFilePaths(displayValue).map((segment, index) =>
+          segment.type === 'text' ? (
+            <span key={index}>{segment.value}</span>
+          ) : (
+            <a
+              key={index}
+              href="#"
+              style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: 'rgba(0,0,0,0.35)' }}
+              title={`预览 ${segment.value}`}
+              onClick={(event) => { event.preventDefault(); openWorkspaceFilePreview(segment.value); }}
+            >
+              {segment.value}
+            </a>
+          ),
+        )}
       </pre>
       {truncated ? (
         <button
