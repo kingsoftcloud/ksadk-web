@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Download, LoaderCircle, X } from "lucide-react";
 import { MessageMarkdown } from "../MessageMarkdown.js";
 import { onWorkspaceFilePreviewRequest } from "../../utils/workspace-file-preview-bus.js";
 
@@ -78,15 +77,38 @@ function FilePreviewContent({
   }, [path, fetchFile]);
 
   const payload = state.payload;
+
+  // Self-contained inline styles: this modal renders inside embedded Core
+  // pages whose Tailwind build does not include the preview's utility
+  // classes, so it must not depend on host-provided CSS at all.
+  const bodyStyle: React.CSSProperties = {
+    minHeight: 0,
+    flex: "1 1 auto",
+    overflow: "auto",
+    padding: "16px 20px",
+    fontSize: 14,
+    lineHeight: 1.65,
+    color: "#1f2937",
+  };
+
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-4">
+    <div style={bodyStyle}>
       {state.busy && (
-        <p className="flex items-center gap-2 text-[13px] text-text-secondary" role="status">
-          <LoaderCircle className="animate-spin" size={15} /> 正在加载文件…
+        <p role="status" style={{ display: "flex", alignItems: "center", gap: 8, color: "#6b7280", fontSize: 13 }}>
+          <span
+            aria-hidden
+            style={{
+              width: 15, height: 15, borderRadius: "50%",
+              border: "2px solid #d1d5db", borderTopColor: "#0091ea",
+              display: "inline-block", animation: "ksadk-fp-spin 0.8s linear infinite",
+            }}
+          />
+          正在加载文件…
+          <style>{`@keyframes ksadk-fp-spin { to { transform: rotate(360deg); } }`}</style>
         </p>
       )}
       {!state.busy && state.error && (
-        <p className="form-error" role="alert">
+        <p role="alert" style={{ margin: 0, color: "#b91c1c", fontSize: 13 }}>
           {state.error}
         </p>
       )}
@@ -97,11 +119,17 @@ function FilePreviewContent({
         <img
           src={`data:${payload.contentType};base64,${payload.dataBase64}`}
           alt={payload.name}
-          className="mx-auto max-w-full rounded-lg"
+          style={{ display: "block", maxWidth: "100%", margin: "0 auto", borderRadius: 8 }}
         />
       )}
       {!state.busy && !state.error && payload?.mediaCategory === "text" && (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-surface-hover p-3 text-[13px] leading-[1.6] text-text">
+        <pre
+          style={{
+            overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word",
+            background: "#f6f8fa", padding: 12, borderRadius: 8, margin: 0,
+            fontSize: 13, lineHeight: 1.6, color: "#1f2937",
+          }}
+        >
           {payload.content}
         </pre>
       )}
@@ -114,6 +142,12 @@ export interface FilePreviewModalProps {
   onClose: () => void;
   fetchFile?: WorkspaceFileFetcher;
 }
+
+const iconButtonStyle: React.CSSProperties = {
+  width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center",
+  borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", padding: 0,
+  color: "#374151", flex: "0 0 auto",
+};
 
 export function FilePreviewModal({ path, onClose, fetchFile = defaultFetchFile }: FilePreviewModalProps) {
   useEffect(() => {
@@ -129,31 +163,51 @@ export function FilePreviewModal({ path, onClose, fetchFile = defaultFetchFile }
   const title = path.split("/").pop() || path;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       role="dialog"
       aria-modal="true"
       aria-label={`文件预览 ${title}`}
       onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 2147483000,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(15, 23, 42, 0.5)", padding: 24,
+        fontFamily: '-apple-system, system-ui, "SF Pro SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+      }}
     >
       <div
-        className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
         onClick={(event) => event.stopPropagation()}
+        style={{
+          display: "flex", flexDirection: "column",
+          width: "100%", maxWidth: 760, maxHeight: "100%",
+          overflow: "hidden", background: "#ffffff", color: "#1f2937",
+          border: "1px solid #e5e7eb", borderRadius: 12,
+          boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
+        }}
       >
-        <header className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[14px] font-medium text-text">{title}</h2>
-            <p className="truncate text-[12px] text-text-secondary">{path}</p>
+        <header
+          style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "12px 16px", borderBottom: "1px solid #e5e7eb", flex: "0 0 auto",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+            <h2 style={{ margin: 0, fontSize: 14, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {title}
+            </h2>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {path}
+            </p>
           </div>
           <button
             type="button"
-            className="icon-button secondary"
             aria-label="下载文件"
+            style={iconButtonStyle}
             onClick={() => void downloadWorkspaceFile(path, title)}
           >
-            <Download size={16} />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
-          <button type="button" className="icon-button secondary" aria-label="关闭预览" onClick={onClose}>
-            <X size={16} />
+          <button type="button" aria-label="关闭预览" style={iconButtonStyle} onClick={onClose}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </header>
         <FilePreviewContent path={path} fetchFile={fetchFile} />
