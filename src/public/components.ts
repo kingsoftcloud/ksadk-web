@@ -37,3 +37,5 @@ export { CodeBlock } from '../components/markdown/CodeBlock.js';
 export { MathMessageMarkdown } from '../components/markdown/MathMessageMarkdown.js';
 export { MermaidBlock } from '../components/markdown/MermaidBlock.js';
 export type * from '../components/chat/types.js';
+export { FilePreviewHost, FilePreviewModal, openWorkspaceFilePreview } from '../components/workspace/FilePreviewModal.js';
+export type { FilePreviewModalProps, WorkspaceFileFetcher, WorkspaceFilePayload } from '../components/workspace/FilePreviewModal.js';

@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { preprocessMarkdown } from '../utils/markdown.js';
+import { rehypeWorkspaceFilePaths } from '../utils/workspace-file-paths.js';
+import { openWorkspaceFilePreview } from './workspace/FilePreviewModal.js';
 
 const LazyCodeBlock = React.lazy(() =>
   import('./markdown/CodeBlock.js').then((m) => ({ default: m.CodeBlock }))
@@ -162,6 +164,20 @@ const markdownComponents = {
     return <td className="break-words border-b border-border px-3 py-2 align-top text-text-secondary" {...props}>{children}</td>;
   },
   a({ children, href, ...props }: MarkdownLinkProps) {
+     const filePath = (props as Record<string, unknown>)['data-workspace-file'];
+     if (typeof filePath === 'string' && filePath) {
+       return (
+         <a
+           href="#"
+           className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+           title={`预览 ${filePath}`}
+           onClick={(event) => { event.preventDefault(); openWorkspaceFilePreview(filePath); }}
+           {...props}
+         >
+           {children}
+         </a>
+       );
+     }
      const safeHref = safeMarkdownHref(href);
      if (!safeHref) return <span className="text-text-secondary">{children}</span>;
      return <a href={safeHref} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
@@ -178,6 +194,7 @@ const PlainMarkdown: React.FC<{ content: string }> = React.memo(({ content }) =>
     <div className="max-w-none break-words text-[14px] leading-[1.65] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
+        rehypePlugins={[rehypeWorkspaceFilePaths]}
         components={markdownComponents}
       >
         {processedContent}

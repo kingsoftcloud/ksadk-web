@@ -20,6 +20,7 @@ export default defineConfig({
         "chat-composer": path.resolve(__dirname, "src/public/chat-composer.ts"),
         "chat-timeline": path.resolve(__dirname, "src/public/chat-timeline.ts"),
         components: path.resolve(__dirname, "src/public/components.ts"),
+        "file-preview": path.resolve(__dirname, "src/public/file-preview.ts"),
         conversation: path.resolve(__dirname, "src/public/conversation.ts"),
         hooks: path.resolve(__dirname, "src/public/hooks.ts"),
         runtime: path.resolve(__dirname, "src/public/runtime.ts"),

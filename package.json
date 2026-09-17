@@ -78,7 +78,11 @@
       "types": "./dist-lib/public/team-execution.d.ts",
       "import": "./dist-lib/team-execution.js"
     },
-    "./teams/styles": "./dist-lib/teams.css"
+    "./teams/styles": "./dist-lib/teams.css",
+    "./file-preview": {
+      "types": "./dist-lib/public/file-preview.d.ts",
+      "import": "./dist-lib/file-preview.js"
+    }
   },
   "files": [
     "dist-lib",
