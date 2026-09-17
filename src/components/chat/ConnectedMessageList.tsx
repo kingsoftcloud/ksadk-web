@@ -79,7 +79,9 @@ export function ConnectedMessageList({
   const needsInitialScrollRef = useRef(true);
   const previousLastMessageIdRef = useRef('');
   const revealRef = useRef(revealMessage);
-  revealRef.current = revealMessage;
+  useEffect(() => {
+    revealRef.current = revealMessage;
+  });
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],

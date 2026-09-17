@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { GroupComposer, GroupTimeline, MemberInspector, TaskBoard, TaskDetail, TeamWorkspace } from '../public/team-components.js';
-import { groupTeamCandidates } from '../components/teams/CreateGroupDialog.js';
+import { groupTeamCandidates } from '../core/teams/grouping.js';
 import { InteractionMessage } from '../components/teams/InteractionMessage.js';
 import { ExecutionTree } from '../public/team-execution.js';
 import { memberRef, teamSnapshot } from '../../e2e/fixtures/teams-data.js';

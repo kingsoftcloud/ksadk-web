@@ -84,8 +84,8 @@ export function ConnectedComposer({
   const setThinkingMode = useModelStore((s: ModelStore) => s.setThinkingMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const localDrafts = useRef(new DraftStore());
-  const drafts = draftStore || localDrafts.current;
+  const [localDrafts] = useState(() => new DraftStore());
+  const drafts = draftStore || localDrafts;
 
   useLayoutEffect(() => {
     if (!draftKey) return;

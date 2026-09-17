@@ -1,17 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { validateGroupCreate } from '../../core/teams/contracts.js';
+import { available, candidateKey, groupTeamCandidates } from '../../core/teams/grouping.js';
 import type { ExecutionBinding, GroupCreateInput } from '../../core/teams/types.js';
 
 export type TeamMemberCandidate = { memberId: string; name: string; description?: string; responsibility?: string; binding: ExecutionBinding };
 export type CreateGroupDialogProps = { open: boolean; candidates: TeamMemberCandidate[]; serverAuthority?: boolean; loading?: boolean; error?: string; onRefresh?: () => void; onClose: () => void; onCreate: (input: GroupCreateInput) => Promise<unknown> };
-const candidateKey = (candidate: TeamMemberCandidate) => `${candidate.binding.kind}:${candidate.binding.agentId}`;
-const available = (candidate: TeamMemberCandidate) => candidate.binding.capabilities.enqueue && candidate.binding.availability?.state !== 'unavailable';
-export function groupTeamCandidates(candidates: TeamMemberCandidate[]): TeamMemberCandidate[][] {
-  const groups = new Map<string, TeamMemberCandidate[]>();
-  for (const candidate of candidates) groups.set(candidateKey(candidate), [...(groups.get(candidateKey(candidate)) || []), candidate]);
-  return [...groups.values()].map(versions => versions.sort((a, b) => Number(available(b)) - Number(available(a)) || (b.binding.createdAt || '').localeCompare(a.binding.createdAt || '')));
-}
-
 /** Selection belongs to the draft, not to a refreshed directory row. */
 export function CreateGroupDialog({ open, candidates, serverAuthority, loading, error: directoryError, onRefresh, onClose, onCreate }: CreateGroupDialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);

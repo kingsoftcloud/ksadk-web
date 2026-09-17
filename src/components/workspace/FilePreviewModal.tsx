@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, LoaderCircle, X } from "lucide-react";
 import { MessageMarkdown } from "../MessageMarkdown.js";
+import { onWorkspaceFilePreviewRequest } from "../../utils/workspace-file-preview-bus.js";
 
 export interface WorkspaceFilePayload {
   path: string;
@@ -12,22 +13,6 @@ export interface WorkspaceFilePayload {
   dataBase64?: string;
 }
 
-const WORKSPACE_FILE_PREVIEW_EVENT = "ksadk-workspace-file-preview";
-
-/** Request the host app to show the workspace file preview modal. */
-export function openWorkspaceFilePreview(path: string): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(WORKSPACE_FILE_PREVIEW_EVENT, { detail: { path } }));
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** Fetch a workspace file for preview. Same-origin by default; hosted embeds
- * can pass a custom fetcher that targets the control-plane endpoint. */
 export type WorkspaceFileFetcher = (path: string) => Promise<Response>;
 
 const defaultFetchFile: WorkspaceFileFetcher = (path) =>
@@ -47,6 +32,83 @@ async function downloadWorkspaceFile(path: string, name: string): Promise<void> 
   URL.revokeObjectURL(url);
 }
 
+interface LoadedState {
+  payload: WorkspaceFilePayload | null;
+  error: string;
+  busy: boolean;
+}
+
+function FilePreviewContent({
+  path,
+  fetchFile,
+}: {
+  path: string;
+  fetchFile: WorkspaceFileFetcher;
+}) {
+  // Keyed by path, so each target starts clean; setStates only run after the
+  // fetch settles (never synchronously inside the effect).
+  const [state, setState] = useState<LoadedState>({ payload: null, error: "", busy: true });
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    fetchFile(path)
+      .then(async (response) => {
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(body?.error?.message || body?.detail || `预览失败（${response.status}）`);
+        }
+        return body as WorkspaceFilePayload;
+      })
+      .then((payload) => {
+        if (active) setState({ payload, error: "", busy: false });
+      })
+      .catch((cause) => {
+        if (active && !controller.signal.aborted) {
+          setState({
+            payload: null,
+            error: cause instanceof Error ? cause.message : "预览失败。",
+            busy: false,
+          });
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [path, fetchFile]);
+
+  const payload = state.payload;
+  return (
+    <div className="min-h-0 flex-1 overflow-auto p-4">
+      {state.busy && (
+        <p className="flex items-center gap-2 text-[13px] text-text-secondary" role="status">
+          <LoaderCircle className="animate-spin" size={15} /> 正在加载文件…
+        </p>
+      )}
+      {!state.busy && state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+      {!state.busy && !state.error && payload?.mediaCategory === "markdown" && (
+        <MessageMarkdown content={payload.content || ""} />
+      )}
+      {!state.busy && !state.error && payload?.mediaCategory === "image" && (
+        <img
+          src={`data:${payload.contentType};base64,${payload.dataBase64}`}
+          alt={payload.name}
+          className="mx-auto max-w-full rounded-lg"
+        />
+      )}
+      {!state.busy && !state.error && payload?.mediaCategory === "text" && (
+        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-surface-hover p-3 text-[13px] leading-[1.6] text-text">
+          {payload.content}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export interface FilePreviewModalProps {
   path: string | null;
   onClose: () => void;
@@ -54,58 +116,23 @@ export interface FilePreviewModalProps {
 }
 
 export function FilePreviewModal({ path, onClose, fetchFile = defaultFetchFile }: FilePreviewModalProps) {
-  const [payload, setPayload] = useState<WorkspaceFilePayload | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!path) {
-      setPayload(null);
-      setError("");
-      return;
-    }
-    const controller = new AbortController();
-    setBusy(true);
-    setError("");
-    setPayload(null);
-    fetchFile(path)
-      .then(async (response) => {
-        const body = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(body?.error?.message || body?.detail || `预览失败（${response.status}）`);
-        }
-        setPayload(body as WorkspaceFilePayload);
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : "预览失败。");
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setBusy(false);
-      });
-    return () => controller.abort();
-  }, [path, fetchFile]);
-
-  const handleKeydown = useCallback(
-    (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    },
-    [onClose],
-  );
   useEffect(() => {
     if (!path) return;
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [path, handleKeydown]);
+  }, [path, onClose]);
 
   if (!path) return null;
+  const title = path.split("/").pop() || path;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       role="dialog"
       aria-modal="true"
-      aria-label={`文件预览 ${payload?.name || path}`}
+      aria-label={`文件预览 ${title}`}
       onClick={onClose}
     >
       <div
@@ -114,54 +141,22 @@ export function FilePreviewModal({ path, onClose, fetchFile = defaultFetchFile }
       >
         <header className="flex items-center gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[14px] font-medium text-text">{payload?.name || path.split("/").pop() || path}</h2>
-            {payload && (
-              <p className="truncate text-[12px] text-text-secondary" title={payload.path}>
-                {payload.path} · {formatSize(payload.sizeBytes)}
-              </p>
-            )}
+            <h2 className="truncate text-[14px] font-medium text-text">{title}</h2>
+            <p className="truncate text-[12px] text-text-secondary">{path}</p>
           </div>
-          {payload && (
-            <button
-              type="button"
-              className="icon-button secondary"
-              aria-label="下载文件"
-              onClick={() => void downloadWorkspaceFile(payload.path, payload.name)}
-            >
-              <Download size={16} />
-            </button>
-          )}
+          <button
+            type="button"
+            className="icon-button secondary"
+            aria-label="下载文件"
+            onClick={() => void downloadWorkspaceFile(path, title)}
+          >
+            <Download size={16} />
+          </button>
           <button type="button" className="icon-button secondary" aria-label="关闭预览" onClick={onClose}>
             <X size={16} />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto p-4">
-          {busy && (
-            <p className="flex items-center gap-2 text-[13px] text-text-secondary" role="status">
-              <LoaderCircle className="animate-spin" size={15} /> 正在加载文件…
-            </p>
-          )}
-          {!busy && error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          {!busy && !error && payload?.mediaCategory === "markdown" && (
-            <MessageMarkdown content={payload.content || ""} />
-          )}
-          {!busy && !error && payload?.mediaCategory === "image" && (
-            <img
-              src={`data:${payload.contentType};base64,${payload.dataBase64}`}
-              alt={payload.name}
-              className="mx-auto max-w-full rounded-lg"
-            />
-          )}
-          {!busy && !error && payload?.mediaCategory === "text" && (
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-surface-hover p-3 text-[13px] leading-[1.6] text-text">
-              {payload.content}
-            </pre>
-          )}
-        </div>
+        <FilePreviewContent path={path} fetchFile={fetchFile} />
       </div>
     </div>
   );
@@ -170,13 +165,6 @@ export function FilePreviewModal({ path, onClose, fetchFile = defaultFetchFile }
 /** Mount once per app; listens for openWorkspaceFilePreview requests. */
 export function FilePreviewHost({ fetchFile }: { fetchFile?: WorkspaceFileFetcher }) {
   const [path, setPath] = useState<string | null>(null);
-  useEffect(() => {
-    const handle = (event: Event) => {
-      const detail = (event as CustomEvent<{ path?: string }>).detail;
-      if (detail?.path) setPath(detail.path);
-    };
-    window.addEventListener(WORKSPACE_FILE_PREVIEW_EVENT, handle);
-    return () => window.removeEventListener(WORKSPACE_FILE_PREVIEW_EVENT, handle);
-  }, []);
+  useEffect(() => onWorkspaceFilePreviewRequest(setPath), []);
   return <FilePreviewModal path={path} onClose={() => setPath(null)} fetchFile={fetchFile} />;
 }

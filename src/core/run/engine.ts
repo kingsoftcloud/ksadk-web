@@ -550,12 +550,13 @@ export class RunEngineImpl implements RunEngine {
         // A detached renderer may have started another owner before this
         // stream's promise settled. Do not let the old finalizer clear the
         // new owner's stage, invocation, activity, or outbox settlement.
-        if (this.operationEpoch !== operationEpoch) return;
-        useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
-        this.setStage('idle');
-        this.activeCompactionId = null;
-        this.activeSessionId = null;
-        draft.onSettled?.(sessionId, settlement);
+        if (this.operationEpoch === operationEpoch) {
+          useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
+          this.setStage('idle');
+          this.activeCompactionId = null;
+          this.activeSessionId = null;
+          draft.onSettled?.(sessionId, settlement);
+        }
       }
     })();
     return true;
@@ -817,12 +818,13 @@ export class RunEngineImpl implements RunEngine {
           settlement = 'cancelled';
         }
       } finally {
-        if (this.operationEpoch !== operationEpoch) return;
-        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
-        this.publishInvocation('');
-        this.setStage('idle');
-        this.activeSessionId = null;
-        params.onSettled?.(params.sessionId, settlement);
+        if (this.operationEpoch === operationEpoch) {
+          useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
+          this.publishInvocation('');
+          this.setStage('idle');
+          this.activeSessionId = null;
+          params.onSettled?.(params.sessionId, settlement);
+        }
       }
     })();
 
@@ -892,11 +894,12 @@ export class RunEngineImpl implements RunEngine {
         this.setStage('error');
         this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
       } finally {
-        if (this.operationEpoch !== operationEpoch) return;
-        this.publishInvocation('');
-        this.setStage('idle');
-        this.activeSessionId = null;
-        params.onSettled?.(sessionId, settlement);
+        if (this.operationEpoch === operationEpoch) {
+          this.publishInvocation('');
+          this.setStage('idle');
+          this.activeSessionId = null;
+          params.onSettled?.(sessionId, settlement);
+        }
       }
     })();
     return true;
@@ -1280,7 +1283,7 @@ export class RunEngineImpl implements RunEngine {
     let receivedByteCount = 0;
     let terminalStatus: string | undefined;
 
-    try {
+    {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -1342,8 +1345,6 @@ export class RunEngineImpl implements RunEngine {
           }
         }
       }
-    } catch (error) {
-      throw error;
     }
 
     if (receivedByteCount === 0) {

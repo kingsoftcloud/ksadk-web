@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { preprocessMarkdown } from '../utils/markdown.js';
 import { rehypeWorkspaceFilePaths } from '../utils/workspace-file-paths.js';
-import { openWorkspaceFilePreview } from './workspace/FilePreviewModal.js';
+import { openWorkspaceFilePreview } from '../utils/workspace-file-preview-bus.js';
 
 const LazyCodeBlock = React.lazy(() =>
   import('./markdown/CodeBlock.js').then((m) => ({ default: m.CodeBlock }))
