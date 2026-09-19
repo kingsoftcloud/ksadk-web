@@ -86,10 +86,17 @@ export function ConnectedComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [localDrafts] = useState(() => new DraftStore());
   const drafts = draftStore || localDrafts;
+  const hydratedDraftKeyRef = useRef<ConversationId | undefined>(undefined);
 
   useLayoutEffect(() => {
     if (!draftKey) return;
+    const keyChanged = hydratedDraftKeyRef.current !== draftKey;
+    hydratedDraftKeyRef.current = draftKey;
     const draft = drafts.get(draftKey);
+    const currentInput = useUIStore.getState().input;
+    // 同一会话的快照重建（drafts 身份变化）不得覆盖用户已输入的内容：
+    // 只有真正切换会话（key 变化）或本地草稿为空时才水合。
+    if (!keyChanged && currentInput.trim()) return;
     useUIStore.setState({ input: draft.text, attachments: draft.attachments });
     // Save synchronously so typing then switching in the same frame cannot
     // race a passive hydration effect or overwrite the next conversation.
