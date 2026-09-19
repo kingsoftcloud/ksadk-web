@@ -329,7 +329,6 @@ describe('chat message list contracts', () => {
     expect(runAgentSource.indexOf('optimisticMessageId: appendOptimisticMessage')).toBeLessThan(
       runAgentSource.indexOf('await waitForPendingSessionCreation?.();'),
     );
-    expect(runAgentSource).toContain('if (!draft.optimisticMessageId) appendOptimisticMessage(draft);');
   });
 
   it('keeps an initial transcript load distinct from an actually empty session', () => {

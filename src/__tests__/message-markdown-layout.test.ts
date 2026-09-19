@@ -28,4 +28,88 @@ describe('message markdown layout', () => {
       expect(source).toContain('align-top');
     });
   }
+
+  it('keeps long code and diff blocks inspectable with line numbers, folding, and a hard cap', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/CodeBlock.tsx'), 'utf8');
+
+    expect(source).toContain('showLineNumbers');
+    expect(source).toContain('FOLD_THRESHOLD_LINES = 80');
+    expect(source).toContain('MAX_VISIBLE_LINES = 500');
+    expect(source).toContain('aria-expanded={expanded}');
+    expect(source).toContain('超过单块');
+  });
+
+  it('keeps sandbox preview source and download affordances for html/svg blocks', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/CodeBlock.tsx'), 'utf8');
+
+    expect(source).toContain('handleDownload');
+    expect(source).toContain('anchor.download = `code-block.${extension}`');
+    expect(source).toContain("useState<'preview' | 'source'>('preview')");
+    expect(source).toContain("setPreviewMode('source')");
+    expect(source).toContain('sandbox="allow-scripts allow-downloads"');
+  });
+
+  it('filters executable protocols from untrusted markdown links', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/MessageMarkdown.tsx'), 'utf8');
+
+    expect(source).toContain('safeMarkdownHref');
+    expect(source).toContain("['http:', 'https:', 'mailto:']");
+    expect(source).toContain('if (!safeHref) return <span');
+  });
+
+  it('renders markdown images as safe lazy thumbnails with an original-image fallback', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/MessageMarkdown.tsx'), 'utf8');
+
+    expect(source).toContain('safeMarkdownImageSrc');
+    expect(source).toContain("loading=\"lazy\"");
+    expect(source).toContain('查看原图');
+    expect(source).toContain('图片无法加载');
+    expect(source).toContain('图片尺寸');
+    expect(source).toContain('下载</a>');
+    expect(source).toContain("['http:', 'https:']");
+  });
+
+  it('bounds tool log previews and exposes an explicit full-log control', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ProcessingBlocksView.tsx'), 'utf8');
+
+    expect(source).toContain('MAX_TOOL_LOG_PREVIEW_CHARS = 12_000');
+    expect(source).toContain('查看完整日志');
+    expect(source).toContain('aria-expanded={expanded}');
+    expect(source).toContain('value.slice(0, MAX_TOOL_LOG_PREVIEW_CHARS)');
+  });
+
+  it('keeps Mermaid syntax errors readable with an explicit source fallback', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/MermaidBlock.tsx'), 'utf8');
+
+    expect(source).toContain('role="alert"');
+    expect(source).toContain('Mermaid 渲染失败，已显示源码');
+    expect(source).toContain('{chart}');
+  });
+
+  it('filters unsafe protocols from tool search source links', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ProcessingBlocksView.tsx'), 'utf8');
+
+    expect(source).toContain("['http:', 'https:'].includes(protocol)");
+    expect(source).toContain("new URL(candidate");
+    expect(source).toContain('href={source.url}');
+  });
+
+  it('shows optional tool summaries and durations in the activity row', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/chat/ProcessingBlocksView.tsx'), 'utf8');
+
+    expect(source).toContain('formatToolDuration');
+    expect(source).toContain('extra.durationMs');
+    expect(source).toContain('extra.summary');
+    expect(source).toContain('font-mono text-[11px]');
+  });
+
+  it('renders csv and tsv blocks as bounded, horizontally scrollable tables', () => {
+    const source = readFileSync(resolve(repoRoot, 'src/components/markdown/CodeBlock.tsx'), 'utf8');
+
+    expect(source).toContain('MAX_CSV_ROWS = 100');
+    expect(source).toContain('function CsvTable');
+    expect(source).toContain('overflow-auto bg-[#1e1e1e]');
+    expect(source).toContain("['csv', 'tsv']");
+    expect(source).toContain('已显示前 {MAX_CSV_ROWS} 行数据');
+  });
 });

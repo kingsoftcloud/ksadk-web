@@ -2,6 +2,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { useStreamingStore } from '../stores/streaming.js';
 
 describe('streaming store session activity', () => {
+  it('reports draft submission immediately before a session id or activity event exists', () => {
+    const store = useStreamingStore.getState();
+    store.setSessionStreaming(null, true);
+    expect(store.getSessionActivity(null)).toBeNull();
+    expect(store.isSessionStreaming(null)).toBe(true);
+    expect(store.isSessionStreaming('other-session')).toBe(false);
+    store.setSessionStreaming('created-session', true);
+    store.setSessionStreaming(null, false);
+    expect(store.isSessionStreaming(null)).toBe(false);
+    expect(store.isSessionStreaming('created-session')).toBe(true);
+    store.setSessionStreaming('created-session', false);
+    expect(useStreamingStore.getState().isStreaming).toBe(false);
+  });
   afterEach(() => {
     useStreamingStore.getState().resetRun();
   });

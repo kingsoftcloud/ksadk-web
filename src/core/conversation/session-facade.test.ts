@@ -1,0 +1,87 @@
+import { describe, expect, it, vi } from 'vitest';
+import { ApiSessionFacade } from './session-facade.js';
+import { ConversationController } from './studio-controller.js';
+
+function fakeApi() {
+  return {
+    listSessions: vi.fn(async () => ({ Sessions: [{ SessionId: 'ses_1', Title: 'A' }], Total: 1 })),
+    listSessionMessages: vi.fn(async () => ({ Messages: [{ id: 'item_1' }], LatestSeqId: 1, HasMore: false })),
+    getSession: vi.fn(async () => ({ SessionId: 'ses_1', Title: 'A', ActiveRunStatus: 'completed' })),
+    createSession: vi.fn(async () => ({ SessionId: 'ses_new' })),
+    runAgent: vi.fn(async () => new ReadableStream<Uint8Array>()),
+    cancelRun: vi.fn(async () => ({ status: 'accepted' })),
+    submitInteraction: vi.fn(async () => ({ status: 'accepted', command_id: 'cmd_1' })),
+  } as any;
+}
+
+describe('ApiSessionFacade', () => {
+  it('separates read queries from explicit execution binding', async () => {
+    const api = fakeApi();
+    const facade = new ApiSessionFacade(api, { agentId: 'agent-a', targetId: 'local' });
+    await expect(facade.listSessionSummaries()).resolves.toMatchObject({ total: 1, items: [{ sessionId: 'ses_1' }] });
+    const controller = new ConversationController();
+    const id = controller.getOrCreate('agent-a', null, 'local');
+    const binding = await facade.ensureExecutionBinding(id);
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    await facade.submit(binding, { text: 'hello', clientRequestId: 'req_1', idempotencyKey: 'idem_1' });
+    expect(api.runAgent).toHaveBeenCalledWith(expect.objectContaining({ SessionId: 'ses_new', InvocationId: 'req_1', IdempotencyKey: 'idem_1' }), {});
+  });
+
+  it('requires a binding for commands and preserves approval identity', async () => {
+    const facade = new ApiSessionFacade(fakeApi(), { agentId: 'agent-a' });
+    const binding = { conversationId: 'conversation_x' as any, agentId: 'agent-a' };
+    await expect(facade.interrupt(binding, 'run_1')).rejects.toThrow('binding');
+    const api = fakeApi();
+    const ready = new ApiSessionFacade(api, { agentId: 'agent-a' });
+    await ready.approve({ ...binding, nativeSessionId: 'ses_1' }, { interactionId: 'i_1', runId: 'run_1', expectedRevision: 7, approve: true, idempotencyKey: 'idem_7' });
+    expect(api.submitInteraction).toHaveBeenCalledWith(expect.objectContaining({ InteractionId: 'i_1', RunId: 'run_1', ExpectedRevision: 7, IdempotencyKey: 'idem_7' }), {});
+  });
+
+  it('rejects bindings owned by another Agent or execution target', async () => {
+    const api = fakeApi();
+    const facade = new ApiSessionFacade(api, { agentId: 'agent-a', targetId: 'target-a' });
+    const foreign = {
+      conversationId: 'conversation_foreign' as any,
+      agentId: 'agent-b',
+      targetId: 'target-a',
+      nativeSessionId: 'session-b',
+    };
+    await expect(facade.submit(foreign, {
+      text: 'must not cross owner', clientRequestId: 'req-cross-agent', idempotencyKey: 'idem-cross-agent',
+    })).rejects.toThrow('another Agent');
+    await expect(facade.interrupt({ ...foreign, agentId: 'agent-a', targetId: 'target-b' }, 'run-b'))
+      .rejects.toThrow('another execution target');
+    expect(api.runAgent).not.toHaveBeenCalled();
+    expect(api.cancelRun).not.toHaveBeenCalled();
+  });
+
+  it('carries tenant and workspace identity into new bindings', async () => {
+    const api = fakeApi();
+    const facade = new ApiSessionFacade(api, {
+      agentId: 'agent-a', targetId: 'target-a', tenantId: 'tenant-a', workspaceId: 'workspace-a',
+    });
+    const controller = new ConversationController();
+    const id = controller.getOrCreate('agent-a', null, 'target-a');
+    await expect(facade.ensureExecutionBinding(id)).resolves.toMatchObject({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+    });
+  });
+
+  it('single-flights concurrent native session creation', async () => {
+    const api = fakeApi();
+    let release!: (value: { SessionId: string }) => void;
+    api.createSession = vi.fn(() => new Promise(resolve => { release = resolve; }));
+    const facade = new ApiSessionFacade(api, { agentId: 'agent-a' });
+    const controller = new ConversationController();
+    const id = controller.getOrCreate('agent-a', null);
+    const first = facade.ensureExecutionBinding(id);
+    const second = facade.ensureExecutionBinding(id);
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    release({ SessionId: 'ses_once' });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ nativeSessionId: 'ses_once' }),
+      expect.objectContaining({ nativeSessionId: 'ses_once' }),
+    ]);
+  });
+});

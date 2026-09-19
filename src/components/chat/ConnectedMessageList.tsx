@@ -33,6 +33,7 @@ export type ConnectedMessageListProps = {
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
   interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
   className?: string;
+  revealMessage?: { id: string; request: number } | null;
 };
 
 export function ConnectedMessageList({
@@ -51,11 +52,12 @@ export function ConnectedMessageList({
   onLoadOlderSessionMessages,
   interactionRecords,
   className,
+  revealMessage,
 }: ConnectedMessageListProps) {
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
-  const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId));
   const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
   const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
   const currentMessageHistory = useSessionStore((s: SessionStore) =>
@@ -76,6 +78,10 @@ export function ConnectedMessageList({
   const olderLoadTokenRef = useRef<symbol | null>(null);
   const needsInitialScrollRef = useRef(true);
   const previousLastMessageIdRef = useRef('');
+  const revealRef = useRef(revealMessage);
+  useEffect(() => {
+    revealRef.current = revealMessage;
+  });
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -88,6 +94,14 @@ export function ConnectedMessageList({
       }) as ComposerContextIndicator,
     [selectedModelMetadata, contextUsage],
   );
+  const lastUserIndex = messages.reduce((index, message, currentIndex) => message.role === 'user' ? currentIndex : index, -1);
+  const hasModelOutput = (message: Message) => Boolean(message.role === 'model' && (
+    message.content || message.reasoning || message.blocks?.some(block => (
+      block.type === 'text' || block.type === 'thinking' ? block.content : true
+    )) || message.attachments?.length || message.a2ui || message.aguiActivity
+    || message.aguiActivities?.length || Object.keys(message.tools || {}).length
+  ));
+  const showWaitingIndicator = isStreaming && !messages.slice(lastUserIndex + 1).some(hasModelOutput);
 
   const scrollToBottom = useCallback(() => {
     const node = scrollRef.current;
@@ -134,6 +148,13 @@ export function ConnectedMessageList({
     olderLoadTokenRef.current = null;
     previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
+
+  useEffect(() => {
+    if (!revealMessage) return;
+    stickToBottomRef.current = false;
+    userDetachedFromBottomRef.current = true;
+    needsInitialScrollRef.current = false;
+  }, [revealMessage]);
 
   // Sending a new user turn always returns the viewport to the live edge.
   // This is an explicit user action, so it overrides a previous manual
@@ -261,6 +282,7 @@ export function ConnectedMessageList({
     // measured, so we pin to bottom on every scrollHeight change until it
     // stabilizes (or a 2s timeout elapses).
     if (messages.length > 0 && needsInitialScrollRef.current) {
+      const revealAtStart = revealRef.current;
       const sessionAtStart = useSessionStore.getState().currentSessionId;
       const node = scrollRef.current;
       // 临时禁用 CSS scroll-smooth:平滑滚动会让 scrollTop=scrollHeight 变成动画,
@@ -290,6 +312,10 @@ export function ConnectedMessageList({
       const finish = () => {
         if (finished) return;
         finished = true;
+        if (revealRef.current !== revealAtStart) {
+          if (node) node.style.scrollBehavior = prevScrollBehavior;
+          return;
+        }
         pinToBottom();
         if (node) node.style.scrollBehavior = prevScrollBehavior;
         stickToBottomRef.current = true;
@@ -298,6 +324,7 @@ export function ConnectedMessageList({
       };
       const pin = () => {
         if (finished) return;
+        if (revealRef.current !== revealAtStart) { finish(); return; }
         if (useSessionStore.getState().currentSessionId !== sessionAtStart) {
           finished = true;
           return;
@@ -339,7 +366,7 @@ export function ConnectedMessageList({
     if (!stickToBottomRef.current) return;
     scroller.scrollTop = scroller.scrollHeight;
     previousScrollTopRef.current = scroller.scrollTop;
-  }, [messages, isStreaming]);
+  }, [messages, isStreaming, revealMessage]);
 
   const openAttachmentPreview = (attachment: MessageAttachment) => {
     useUIStore.getState().setPreviewAttachment(attachment);
@@ -354,6 +381,7 @@ export function ConnectedMessageList({
   return (
     <>
       <ChatMessageList
+        revealMessage={revealMessage}
         emptyState={emptyState}
         agentName={agentName}
         isMobile={isMobile}
@@ -361,6 +389,7 @@ export function ConnectedMessageList({
         activity={activity}
         contextIndicator={contextIndicator}
         messages={messages}
+        showWaitingIndicator={showWaitingIndicator}
         isLoadingInitialHistory={isLoadingInitialHistory}
         onDeleteFeedback={onDeleteFeedback}
         onOpenAttachmentPreview={openAttachmentPreview}

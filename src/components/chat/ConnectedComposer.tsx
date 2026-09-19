@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { useModelStore } from '../../stores/model.js';
@@ -18,8 +18,15 @@ import type { ApprovalPolicyCapability } from '../../types/capabilities.js';
 import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
 import type { RuntimeExecutionMode } from '../../core/run/types.js';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
+import { DraftStore, type ConversationId } from '../../core/conversation/studio-controller.js';
 
 export type ConnectedComposerProps = {
+  /** Stable Studio conversation identity. Keeps drafts independent from the runtime session id. */
+  draftKey?: ConversationId;
+  /** Scope storage to the Studio owner. Dispose it when identity changes. */
+  draftStore?: DraftStore;
+  /** Optional host controls inside the composer's single surface. */
+  headerSlot?: React.ReactNode;
   onCompactContext?: () => Promise<void>;
   composerMaxHeight: number;
   submitDraft: (
@@ -45,6 +52,9 @@ export type ConnectedComposerProps = {
 };
 
 export function ConnectedComposer({
+  draftKey,
+  draftStore,
+  headerSlot,
   onCompactContext,
   composerMaxHeight,
   submitDraft,
@@ -66,7 +76,7 @@ export function ConnectedComposer({
   const input = useUIStore((s: UIStore) => s.input);
   const attachments = useUIStore((s: UIStore) => s.attachments);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
-  const isStreaming = useStreamingStore((s: StreamingStore) => Boolean(s.getSessionActivity(currentSessionId) && s.isSessionStreaming(currentSessionId)));
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId || draftKey));
   const queuedDrafts = useUIStore((s: UIStore) => s.queuedDrafts);
   const contextUsage = useSessionStore(s => s.sessions.find(item => item.SessionId === currentSessionId)?.ContextUsage);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
@@ -74,6 +84,37 @@ export function ConnectedComposer({
   const setThinkingMode = useModelStore((s: ModelStore) => s.setThinkingMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [localDrafts] = useState(() => new DraftStore());
+  const drafts = draftStore || localDrafts;
+
+  useLayoutEffect(() => {
+    if (!draftKey) return;
+    const draft = drafts.get(draftKey);
+    useUIStore.setState({ input: draft.text, attachments: draft.attachments });
+    // Save synchronously so typing then switching in the same frame cannot
+    // race a passive hydration effect or overwrite the next conversation.
+    return useUIStore.subscribe((state, previous) => {
+      if (state.input !== previous.input || state.attachments !== previous.attachments) {
+        drafts.set(draftKey, state.input, state.attachments);
+      }
+    });
+  }, [draftKey, drafts]);
+  useEffect(() => {
+    if (!draftKey || !draftStore) return;
+    const syncExternalDraft = () => {
+      // Keep divergent edits untouched until the host asks the user which
+      // side to keep. A newer, non-conflicting revision can hydrate directly.
+      if (drafts.getConflict(draftKey)) return;
+      const latest = drafts.get(draftKey);
+      const current = useUIStore.getState();
+      const sameAttachments = latest.attachments.length === current.attachments.length
+        && latest.attachments.every((file, index) => file === current.attachments[index]);
+      if (latest.text !== current.input || !sameAttachments) {
+        useUIStore.setState({ input: latest.text, attachments: latest.attachments });
+      }
+    };
+    return drafts.subscribe(syncExternalDraft);
+  }, [draftKey, draftStore, drafts]);
   const selectedModelMetadata = useMemo(
     () => availableModels.find((model) => model.id === selectedModel) || null,
     [availableModels, selectedModel],
@@ -149,8 +190,8 @@ export function ConnectedComposer({
         />
       ) : null}
       <ChatComposer
+      headerSlot={headerSlot}
       onCompactContext={currentSessionId ? onCompactContext : undefined}
-      key={currentSessionId || "new-session"}
       attachments={attachments}
       composerContextIndicator={composerContextIndicator}
       composerMaxHeight={composerMaxHeight}

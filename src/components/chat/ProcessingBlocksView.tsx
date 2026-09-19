@@ -10,6 +10,8 @@ import { ChevronDown, FileDiff, Globe2, LoaderCircle, Sparkles, Wrench } from 'l
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { MessageMarkdown } from '../MessageMarkdown';
+import { splitWorkspaceFilePaths } from '../../utils/workspace-file-paths.js';
+import { openWorkspaceFilePreview } from '../../utils/workspace-file-preview-bus.js';
 import { parseUnifiedDiff, summarizeDiffSection, isUnifiedDiff } from '../../utils/parse-unified-diff';
 import type { Message } from './types';
 import type { ProcessingBlock, ThinkingBlock, ToolBlock, TextBlock } from '../../core/run/blocks';
@@ -149,6 +151,8 @@ function ToolRow({
   const approvalProtocol = (extra.approvalProtocol as string) || tool?.approvalProtocol;
   const previousResponseId = (extra.previousResponseId as string) || tool?.previousResponseId;
   const running = status === 'running';
+  const summary = String(extra.summary ?? tool?.summary ?? '').trim();
+  const durationMs = Number(extra.durationMs ?? tool?.durationMs);
   // Codex reports a cancelled command as item.failed after the authoritative
   // interaction cancellation. Present that expected terminal state as
   // cancelled instead of turning the user's feedback into an execution error.
@@ -193,6 +197,8 @@ function ToolRow({
           <Wrench className={cn('h-3.5 w-3.5 shrink-0', tone)} />
           <span className={tone}>{prefix}</span>
           <span className="truncate font-medium text-slate-600 dark:text-slate-300">{block.toolName}</span>
+          {summary ? <span className="truncate text-slate-400 dark:text-slate-500">· {summary}</span> : null}
+          {Number.isFinite(durationMs) && durationMs >= 0 ? <span className="shrink-0 font-mono text-[11px] text-slate-400 dark:text-slate-500">· {formatToolDuration(durationMs)}</span> : null}
           {running && args && <span className="ml-0.5 animate-pulse text-slate-400">…</span>}
         </span>
       }
@@ -325,7 +331,14 @@ function parseWebSearchSources(output: string): { url: string; title: string }[]
     return arr
       .map((item: unknown) => {
         const obj = item as Record<string, unknown>;
-        const url = String(obj?.url ?? obj?.link ?? obj?.href ?? '');
+        const candidate = String(obj?.url ?? obj?.link ?? obj?.href ?? '');
+        let url = '';
+        try {
+          const protocol = new URL(candidate, typeof window === 'undefined' ? 'http://localhost/' : window.location.href).protocol.toLowerCase();
+          if (['http:', 'https:'].includes(protocol)) url = candidate;
+        } catch {
+          url = '';
+        }
         const title = String(obj?.title ?? obj?.name ?? url);
         return url ? { url, title } : null;
       })
@@ -370,7 +383,16 @@ function WebSearchSourcesChip({ sources }: { sources: { url: string; title: stri
   );
 }
 
+const MAX_TOOL_LOG_PREVIEW_CHARS = 12_000;
+
+function formatToolDuration(durationMs: number): string {
+  return durationMs < 1000 ? `${Math.round(durationMs)}ms` : `${(durationMs / 1000).toFixed(1)}s`;
+}
+
 function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | 'output' | 'error'; value: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const truncated = value.length > MAX_TOOL_LOG_PREVIEW_CHARS;
+  const displayValue = truncated && !expanded ? value.slice(0, MAX_TOOL_LOG_PREVIEW_CHARS) : value;
   return (
     <div>
       <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
@@ -384,8 +406,32 @@ function PayloadBlock({ label, tone, value }: { label: string; tone: 'input' | '
               : 'bg-slate-50 text-slate-700 dark:bg-slate-900/40 dark:text-slate-200',
         )}
       >
-        {value}
+        {splitWorkspaceFilePaths(displayValue).map((segment, index) =>
+          segment.type === 'text' ? (
+            <span key={index}>{segment.value}</span>
+          ) : (
+            <a
+              key={index}
+              href="#"
+              style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: 'rgba(0,0,0,0.35)' }}
+              title={`预览 ${segment.value}`}
+              onClick={(event) => { event.preventDefault(); openWorkspaceFilePreview(segment.value); }}
+            >
+              {segment.value}
+            </a>
+          ),
+        )}
       </pre>
+      {truncated ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((previous) => !previous)}
+          className="mt-1 text-xs text-primary hover:underline"
+          aria-expanded={expanded}
+        >
+          {expanded ? '收起完整日志' : `查看完整日志（已显示前 ${MAX_TOOL_LOG_PREVIEW_CHARS.toLocaleString()} 字符）`}
+        </button>
+      ) : null}
     </div>
   );
 }

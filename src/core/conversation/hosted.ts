@@ -372,7 +372,23 @@ export function projectConversationStreamForHostedUi(
     }
     const artifact = artifactById.get(item.itemId);
     if (artifact) {
-      messages.push(artifact.uri
+      messages.push(artifact.status === 'pending'
+        ? {
+            ...messageBase(item),
+            role: 'model',
+            content: artifact.name,
+            attachments: [{
+              name: artifact.name,
+              type: artifact.mimeType,
+              url: '',
+              artifactId: artifact.artifactId,
+              itemId: artifact.itemId,
+              runId: artifact.runId,
+              sizeBytes: artifact.sizeBytes,
+              status: 'pending',
+            }],
+          }
+        : artifact.status === 'ready' && artifact.uri
         ? {
             ...messageBase(item),
             role: 'model',
@@ -381,12 +397,19 @@ export function projectConversationStreamForHostedUi(
               name: artifact.name,
               type: artifact.mimeType,
               url: artifact.uri,
+              artifactId: artifact.artifactId,
+              itemId: artifact.itemId,
+              runId: artifact.runId,
+              sizeBytes: artifact.sizeBytes,
+              status: artifact.status,
             }],
           }
         : fallbackMessage(
-            item,
+              item,
             'Artifact unavailable',
-            'The artifact URI is not a safe HTTP(S) link.',
+            artifact.status === 'failed'
+              ? 'The artifact failed to generate or its URI is not a safe HTTP(S) link.'
+              : 'The artifact URI is not a safe HTTP(S) link.',
           ));
       continue;
     }
@@ -416,73 +439,35 @@ export function projectConversationStreamForHostedUi(
 export function mergeConversationRunMessages(
   previous: Message[],
   result: ConversationStreamResult,
+  optimisticMessageId?: string,
 ): Message[] {
   const projected = projectConversationStreamForHostedUi(result).messages;
-  // A reducer snapshot is allowed to contain only hidden progress or an
-  // extension that this renderer intentionally does not expose.  Such a
-  // snapshot is not a transcript replacement.  Removing the legacy preview
-  // here used to produce the brief blank screen seen during slow/reordered
-  // cloud streams.
+  // Hidden progress is not a transcript replacement.
   if (!projected.length) return previous;
-  // The canonical stream may contain a user_message item representing the
-  // turn input. Hosted UI marks the temporary row inserted by startDraft(),
-  // allowing this projection to replace exactly that row without mistaking an
-  // older unscoped user message for the current prompt.  If the turn input
-  // is absent from the canonical stream, the optimistic row is still
-  // absorbed so the user never sees a duplicate bubble.
-  let cleanPrevious = previous.filter(
-    (message) => message.eventType !== 'optimistic_assistant_placeholder',
-  );
-  {
-    let optimisticUserIndex = -1;
-    for (let index = cleanPrevious.length - 1; index >= 0; index -= 1) {
-      const message = cleanPrevious[index];
-      if (message.role === 'user' && message.eventType === 'optimistic_user_message') {
-        optimisticUserIndex = index;
-        break;
-      }
-    }
-    if (optimisticUserIndex >= 0) {
-      const optimistic = cleanPrevious[optimisticUserIndex];
-      const optimisticContent = String(optimistic.content || '').trim();
-      cleanPrevious = [
-        ...cleanPrevious.slice(0, optimisticUserIndex),
-        ...cleanPrevious.slice(optimisticUserIndex + 1),
-      ];
-      const hasProjectedUser = projected.some((m) => m.role === 'user');
-      if (!hasProjectedUser && optimisticContent) {
-        // Re-insert the optimistic row ahead of this run's assistant messages
-        // so the turn input stays visible even when the canonical stream
-        // did not carry a user_message item.
-        const retained = cleanPrevious.filter((message) => !(
-          (message.eventType === EVENT_TYPE && message.runId === result.runId)
-          || message.invocationId === result.runId
-        ));
-        const insertionIndex = cleanPrevious.findIndex((message) => (
-          (message.eventType === EVENT_TYPE && message.runId === result.runId)
-          || message.invocationId === result.runId
-        ));
-        const index = insertionIndex < 0 ? retained.length : insertionIndex;
-        return [
-          ...retained.slice(0, index),
-          { ...optimistic, timestamp: Date.now() },
-          ...projected,
-          ...retained.slice(index),
-        ];
-      }
-    }
-  }
-
+  const cleanPrevious = previous.filter(message => message.eventType !== 'optimistic_assistant_placeholder');
   const belongsToRun = (message: Message) => (
-    (message.eventType === EVENT_TYPE && message.runId === result.runId)
+    message.runId === result.runId
     || message.invocationId === result.runId
   );
-  const insertionIndex = cleanPrevious.findIndex(belongsToRun);
-  const retained = cleanPrevious.filter((message) => !belongsToRun(message));
-  const index = insertionIndex < 0 ? retained.length : insertionIndex;
+  const runIndex = cleanPrevious.findIndex(belongsToRun);
+  // Use the submitted input identity. A later queued input is not part of this
+  // run, even when it is the most recent optimistic message in the timeline.
+  const inputIndex = optimisticMessageId
+    ? cleanPrevious.findIndex(message => message.id === optimisticMessageId)
+    : runIndex < 0
+      ? cleanPrevious.findLastIndex(message => message.role === 'user' && message.eventType === 'optimistic_user_message')
+      : cleanPrevious.findIndex(message => message.role === 'user' && belongsToRun(message));
+  const input = cleanPrevious[inputIndex];
+  const retained = cleanPrevious.filter((message, index) => index !== inputIndex && !belongsToRun(message));
+  const positions = [inputIndex, runIndex].filter(index => index >= 0);
+  const insertionIndex = positions.length ? Math.min(...positions) : retained.length;
+  const preserveInput = input && !projected.some(message => message.role === 'user')
+    ? [{ ...input, invocationId: result.runId, eventType: undefined }]
+    : [];
   return [
-    ...retained.slice(0, index),
+    ...retained.slice(0, insertionIndex),
+    ...preserveInput,
     ...projected,
-    ...retained.slice(index),
+    ...retained.slice(insertionIndex),
   ];
 }

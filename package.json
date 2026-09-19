@@ -1,6 +1,6 @@
 {
   "name": "@kingsoftcloud/ksadk-web",
-  "version": "0.3.8",
+  "version": "0.3.10",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "build:all": "npm run build:ksadk && npm run build:hosted && npm run build:demo && npm run build:lib",
     "prepack": "npm run build:lib && npm run build:ksadk",
-    "lint": "eslint .",
+    "lint": "NODE_OPTIONS=--max-old-space-size=6144 eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
     "test:node": "node --test tests/*.test.mjs",
@@ -19,11 +19,14 @@
     "test:e2e:conversation": "playwright test --config playwright.canonical-conversation.config.mjs",
     "test:e2e:demo": "playwright test --config playwright.demo.config.mjs",
     "test:e2e:agui": "playwright test --config playwright.agui.config.mjs",
+    "test:e2e:run-owners": "playwright test --config playwright.run-owners.config.mjs",
     "test:e2e:reconnect": "playwright test --config playwright.reconnect.config.mjs",
     "build:ksadk": "VITE_BASE_PATH=./ vite build --outDir dist-ksadk",
     "release:provenance": "node scripts/release-provenance.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:e2e:teams": "playwright test --config playwright.teams.config.mjs"
+    "test:e2e:teams": "playwright test --config playwright.teams.config.mjs",
+    "test:perf:studio": "npm run build:lib && node scripts/test-studio-performance.mjs",
+    "verify:e2e:outbox": "node scripts/verify-outbox-recovery.mjs"
   },
   "exports": {
     ".": {
@@ -75,7 +78,11 @@
       "types": "./dist-lib/public/team-execution.d.ts",
       "import": "./dist-lib/team-execution.js"
     },
-    "./teams/styles": "./dist-lib/teams.css"
+    "./teams/styles": "./dist-lib/teams.css",
+    "./file-preview": {
+      "types": "./dist-lib/public/file-preview.d.ts",
+      "import": "./dist-lib/file-preview.js"
+    }
   },
   "files": [
     "dist-lib",

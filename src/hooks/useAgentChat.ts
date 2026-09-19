@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Message, ModelCatalogItem } from '../components/chat/types.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
 import type { ConversationClient } from '../core/conversation/types.js';
+import type { ConversationController, ConversationId } from '../core/conversation/studio-controller.js';
+import { scanConversationHistory, type HistorySearchResult } from '../core/conversation/history-search.js';
 import type { PermissionMode, RuntimeExecutionMode } from '../core/run/types.js';
 import { useBootstrapStore, type BootstrapStore } from '../stores/bootstrap.js';
 import { useMessageStore } from '../stores/message.js';
@@ -30,6 +32,12 @@ export type AgentChatSendOptions = {
 export type AgentChatOptions = {
   api?: ApiFacade;
   agentId?: string;
+  /** Optional deployment/target identity used to scope local conversation state. */
+  targetId?: string;
+  /** Whether opening an Agent should automatically restore its last session. */
+  restoreSession?: boolean;
+  /** Owner-scoped Studio identity and drafts; omit to retain Hosted UI behavior. */
+  conversationController?: ConversationController;
   /**
    * Omit for Hosted UI canonical negotiation. Pass `null` when the embedding
    * host intentionally exposes only `/agentengine/api/v1` actions.
@@ -49,6 +57,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const defaultApi = useMemo(() => new ApiFacadeImpl(), []);
   const api = options.api || defaultApi;
   const explicitAgentId = String(options.agentId || '').trim() || undefined;
+  const targetId = String(options.targetId || '').trim() || undefined;
 
   const bootstrapStatus = useBootstrapStore((s: BootstrapStore) => s.status);
   const bootstrapErrorMessage = useBootstrapStore((s: BootstrapStore) => s.errorMessage);
@@ -59,6 +68,19 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const uiCapabilities = useBootstrapStore((s: BootstrapStore) => s.capabilities) as UiCapabilities;
 
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
+  const [, setDraftRevision] = useState(0);
+  const controller = options.conversationController;
+  const identityAgentRef = useRef(explicitAgentId || agentId);
+  const identityChanged = identityAgentRef.current !== (explicitAgentId || agentId);
+  useEffect(() => { identityAgentRef.current = explicitAgentId || agentId; }, [agentId, explicitAgentId]);
+  const conversationId = controller?.getOrCreate(
+    explicitAgentId || agentId,
+    identityChanged ? null : currentSessionId,
+    targetId,
+  );
+  const activeConversationIdRef = useRef(conversationId);
+  activeConversationIdRef.current = conversationId;
+  const messageHistory = useSessionStore((s: SessionStore) => currentSessionId ? s.messageHistory[currentSessionId] : undefined);
   const sessions = useSessionStore((s: SessionStore) => s.sessions);
   const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
   const hasMoreSessions = useSessionStore((s: SessionStore) => s.hasMoreSessions);
@@ -71,8 +93,8 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const permissionMode = usePermissionStore((s) => s.permissionMode);
   const queuedDrafts = useUIStore((s) => s.queuedDrafts);
 
-  const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
-  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId));
+  const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId || conversationId));
+  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId || conversationId));
   const { isMobile } = useResponsiveViewport();
 
   const queuedDraftRef = useRef<Array<{
@@ -88,7 +110,9 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     loadSession,
     followAcceptedInteraction,
     loadOlderSessionMessages,
+    historySearchSnapshot,
     createNewSession,
+    startNewConversation: resetConversationView,
     adoptCreatedSession,
     waitForPendingSessionCreation,
     deleteSession,
@@ -103,11 +127,12 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     api,
     resetCompaction: () => {},
     disconnectRun: () => disconnectRunRef.current?.(),
+    restoreSession: options.restoreSession,
   });
 
-  const refreshSessionsAfterRun = useCallback((sessionId: string | null) => {
-    if (!sessionId) return;
-    void fetchSessions(agentIdRef.current, sessionId);
+  const refreshSessionsAfterRun = useCallback((sessionId: string | null, submittedAgentId = agentIdRef.current) => {
+    if (!sessionId || submittedAgentId !== agentIdRef.current) return;
+    void fetchSessions(submittedAgentId, sessionId);
   }, [agentIdRef, fetchSessions]);
 
   const selectedModelMetadata = useMemo(
@@ -117,6 +142,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
 
   const {
     submitDraft,
+    isOutboxRequestActive,
     stopGeneration,
     disconnectRun,
     resumeCheckpoint,
@@ -138,9 +164,18 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSessionsAfterRun,
-    onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
+    conversationIdRef: controller ? activeConversationIdRef : undefined,
+    onSessionCreated: (sessionId, submittedConversationId, submittedAgentId = agentId) => {
+      if (controller && submittedConversationId) controller.bindNative(submittedConversationId as ConversationId, sessionId);
+      // A late create belongs to the submitted draft, even after navigation.
+      // Persist its mapping but never let it take over the selected view.
+      if (agentIdRef.current !== submittedAgentId
+        || (controller && activeConversationIdRef.current !== submittedConversationId)) return;
+      adoptCreatedSession(sessionId, true);
+    },
     waitForPendingSessionCreation,
     conversationClient: options.conversationClient,
+    outbox: controller?.outbox,
   });
 
   useEffect(() => {
@@ -158,12 +193,13 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   const cancelRemote = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     const streaming = useStreamingStore.getState();
-    const invocationId = streaming.getSessionActivity(sessionId)?.runId || streaming.currentRunId || '';
+    const invocationId = streaming.getSessionActivity(sessionId)?.runId || '';
     if (!sessionId || !invocationId) return;
     await api.cancelRun(agentId, sessionId, invocationId);
-    streaming.stopSessionActivity(sessionId, '取消请求已发送。');
-    refreshSessionsAfterRun(sessionId);
-  }, [agentId, api, currentSessionIdRef, refreshSessionsAfterRun]);
+    streaming.stopSessionActivity(sessionId, '取消请求已发送。',
+      agentIdRef.current === agentId && currentSessionIdRef.current === sessionId);
+    refreshSessionsAfterRun(sessionId, agentId);
+  }, [agentId, agentIdRef, api, currentSessionIdRef, refreshSessionsAfterRun]);
 
   const { submitResponseFeedback, deleteResponseFeedback, respondToApproval } = useFeedback({
     agentId,
@@ -250,15 +286,89 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     );
   }, [submitDraft]);
 
+  const outboxActionsInFlight = useRef(new Set<string>());
+  const retryOutbox = useCallback(async (requestId: string): Promise<boolean> => {
+    if (!controller || !conversationId) return false;
+    const entry = controller.outbox.get(requestId);
+    if (!entry || entry.conversationId !== conversationId || entry.agentId !== agentId
+      || agentIdRef.current !== agentId || activeConversationIdRef.current !== conversationId
+      || !['pending', 'failed', 'unknown'].includes(entry.status)
+      || outboxActionsInFlight.current.has(requestId) || isOutboxRequestActive(requestId)) return false;
+    outboxActionsInFlight.current.add(requestId);
+    try {
+      if (entry.status === 'unknown') {
+        const unresolved = (error: string) => {
+          // A running stream may settle the entry while this query is pending.
+          if (controller.outbox.get(requestId) === entry) controller.outbox.update(requestId, { error });
+          return false;
+        };
+        if (!entry.nativeSessionId || !entry.invocationId) {
+          return unresolved('尚未取得原任务的完整标识，请先查看会话记录确认结果。');
+        }
+        let state: Awaited<ReturnType<ApiFacade['getSession']>>;
+        try { state = await api.getSession(entry.nativeSessionId); }
+        catch { return unresolved('暂时无法查询原任务状态，请稍后重新查询。'); }
+        if (controller.outbox.get(requestId) !== entry) return false;
+        // Session-level status may already refer to a later run. It is not a
+        // receipt for this request unless the original execution identity matches.
+        if (state.SessionId !== entry.nativeSessionId
+          || (state.AgentId && state.AgentId !== entry.agentId)
+          || state.ActiveInvocationId !== entry.invocationId) {
+          return unresolved('当前会话状态未对应原任务，请查看原任务记录确认结果。');
+        }
+        const status = String(state.ActiveRunStatus || '').trim().toLowerCase();
+        const terminal = ['completed', 'succeeded', 'success', 'done'].includes(status) ? 'completed'
+          : ['failed', 'error'].includes(status) ? 'failed'
+          : ['cancelled', 'canceled', 'stopped', 'aborted'].includes(status) ? 'cancelled'
+          : undefined;
+        if (terminal) {
+          controller.outbox.update(requestId, { status: terminal,
+            error: terminal === 'failed' ? '原任务已失败，请检查已产生的结果后决定是否重试。' : undefined });
+        } else {
+          unresolved(['running', 'in_progress', 'resuming', 'waiting', 'paused', 'awaiting_approval'].includes(status)
+            ? '原任务仍在执行或等待处理，请在会话中查看进度。'
+            : '原任务尚未返回可确认的结果，请稍后重新查询。');
+        }
+        // Querying an uncertain outcome never also executes a retry. A failed
+        // run needs a separate user action after its result has been displayed.
+        return false;
+      }
+      const attachments = controller.outbox.getRuntimeAttachments(requestId);
+      if (entry.attachments.length > 0 && attachments.length !== entry.attachments.length) return false;
+      // This is a correlation ID, not an assertion of server-side idempotency.
+      controller.outbox.requeue(requestId);
+      await submitDraft(entry.text, attachments, undefined, undefined,
+        entry.executionMode as RuntimeExecutionMode | undefined, requestId);
+      return true;
+    } finally {
+      outboxActionsInFlight.current.delete(requestId);
+    }
+  }, [agentId, agentIdRef, api, controller, conversationId, isOutboxRequestActive, submitDraft]);
+
   const selectSession = useCallback((sessionId: string | null) => {
     useSessionStore.getState().setCurrentSessionId(sessionId);
     if (sessionId) void loadSession(sessionId);
   }, [loadSession]);
 
+  const startNewConversation = useCallback(() => {
+    controller?.navigate();
+    activeConversationIdRef.current = controller?.createDraft(explicitAgentId || agentId, targetId);
+    resetConversationView();
+    // null -> null is still a new draft, so it must update the composer owner.
+    setDraftRevision((revision) => revision + 1);
+  }, [agentId, controller, explicitAgentId, resetConversationView, targetId]);
+
   const loadOlderMessages = useCallback(
     (sessionId?: string) => loadOlderSessionMessages(sessionId || currentSessionIdRef.current || ''),
     [currentSessionIdRef, loadOlderSessionMessages],
   );
+
+  const searchConversation = useCallback((query: string, signal: AbortSignal,
+    onProgress?: (result: HistorySearchResult) => void) => {
+    const sessionId = currentSessionIdRef.current || '';
+    return scanConversationHistory({ query, signal, onProgress, snapshot: historySearchSnapshot,
+      readOlder: searchSignal => loadOlderSessionMessages(sessionId, searchSignal) });
+  }, [currentSessionIdRef, historySearchSnapshot, loadOlderSessionMessages]);
 
   const refresh = useCallback(async () => {
     await fetchSessions(agentIdRef.current, currentSessionIdRef.current);
@@ -283,21 +393,29 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     uiCapabilities,
     sessions,
     currentSessionId,
+    conversationId,
+    conversationDrafts: controller?.drafts,
+    conversationOutbox: controller?.outbox,
+    messageHistory,
     isLoadingSessions,
     hasMoreSessions,
     isMobile,
     selectSession,
     createNewSession,
+    startNewConversation,
     deleteSession,
     loadMoreSessions,
     loadOlderMessages,
     refresh,
+    searchConversation,
     messages,
     activity,
     compactContext,
     isStreaming,
     queuedDrafts,
     send,
+    retryOutbox,
+    isOutboxRequestActive,
     stop,
     cancelRemote,
     resumeCheckpoint,

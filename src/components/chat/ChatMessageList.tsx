@@ -55,6 +55,8 @@ export type ChatMessageListProps = {
   activity: RunActivity | null;
   contextIndicator: ComposerContextIndicator;
   messages: Message[];
+  /** Show the explicit waiting state until the current run has emitted output. */
+  showWaitingIndicator?: boolean;
   isLoadingInitialHistory?: boolean;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
   onRespondToApproval: (options: {
@@ -79,6 +81,8 @@ export type ChatMessageListProps = {
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
   className?: string;
+  /** Explicit navigation to a row that may be outside the virtual window. */
+  revealMessage?: { id: string; request: number } | null;
 };
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
@@ -104,11 +108,13 @@ function MeasuredMessageRow({
   top,
   onMeasure,
   children,
+  highlighted,
 }: {
   messageId: string;
   top: number;
   onMeasure: (messageId: string, height: number, top: number) => void;
   children: ReactNode;
+  highlighted?: boolean;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
 
@@ -126,6 +132,9 @@ function MeasuredMessageRow({
   return (
     <div
       ref={rowRef}
+      data-message-id={messageId}
+      data-search-target={highlighted || undefined}
+      tabIndex={-1}
       style={{ position: 'absolute', top, left: 0, right: 0 }}
     >
       {children}
@@ -344,29 +353,49 @@ function MessageAttachments({
   isMobile: boolean;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
 }) {
+  const formatSize = (value: number | null | undefined) => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  };
+  const provenance = (attachment: MessageAttachment) => {
+    const state = attachment.status === 'pending' ? '生成中' : attachment.status === 'failed' ? '生成失败' : '';
+    const bits = [attachment.type, formatSize(attachment.sizeBytes), state, attachment.runId && `run ${attachment.runId.slice(0, 12)}`].filter(Boolean);
+    return bits.join(' · ');
+  };
+  const hasProvenance = (attachment: MessageAttachment) => Boolean(
+    attachment.artifactId || attachment.itemId || attachment.runId || attachment.sizeBytes != null,
+  );
   return (
     <div className="mb-3 flex flex-wrap gap-3">
       {attachments.map((attachment, attachmentIndex) =>
         attachment.type.startsWith('image/') ? (
           attachment.url ? (
-            <button
-              key={`${attachment.name}-${attachmentIndex}`}
-              type="button"
-              onClick={() => onOpenAttachmentPreview(attachment)}
-              className={cn(
-                'group relative overflow-hidden rounded-xl border border-slate-200 shadow-sm dark:border-slate-700',
-                isMobile ? 'w-full max-w-full' : 'max-w-[200px]',
-              )}
-            >
-              <img
-                src={attachment.url}
-                alt={attachment.name}
+            <div key={`${attachment.name}-${attachmentIndex}`} className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => onOpenAttachmentPreview(attachment)}
                 className={cn(
-                  'object-cover transition group-hover:scale-[1.02]',
-                  isMobile ? 'max-h-[16rem] w-full max-w-full' : 'max-h-[200px] max-w-[200px]',
+                  'group relative overflow-hidden rounded-xl border border-slate-200 shadow-sm dark:border-slate-700',
+                  isMobile ? 'w-full max-w-full' : 'max-w-[200px]',
                 )}
-              />
-            </button>
+              >
+                <img
+                  src={attachment.url}
+                  alt={attachment.name}
+                  className={cn(
+                    'object-cover transition group-hover:scale-[1.02]',
+                    isMobile ? 'max-h-[16rem] w-full max-w-full' : 'max-h-[200px] max-w-[200px]',
+                  )}
+                />
+              </button>
+              {hasProvenance(attachment) && (
+                <span className="max-w-[200px] truncate text-[11px] text-slate-500 dark:text-slate-400" title={`来源 item ${attachment.itemId || '未知'} · run ${attachment.runId || '未知'}`}>
+                  {provenance(attachment)}
+                </span>
+              )}
+            </div>
           ) : (
             <div
               key={`${attachment.name}-${attachmentIndex}`}
@@ -400,6 +429,11 @@ function MessageAttachments({
             ) : (
               <span className="truncate text-sm text-slate-700 dark:text-slate-300" title={attachment.name}>
                 {attachment.name}
+              </span>
+            )}
+            {hasProvenance(attachment) && (
+              <span className="text-[11px] text-slate-500 dark:text-slate-400" title={`来源 item ${attachment.itemId || '未知'} · run ${attachment.runId || '未知'}`}>
+                {provenance(attachment)}
               </span>
             )}
           </div>
@@ -640,6 +674,7 @@ function ChatMessage({
   isMobile,
   isStreaming,
   isLastMessage,
+  suppressWaitingIndicator = false,
   showAgentHeader,
   message,
   onDeleteFeedback,
@@ -654,6 +689,7 @@ function ChatMessage({
   isMobile: boolean;
   isStreaming: boolean;
   isLastMessage: boolean;
+  suppressWaitingIndicator?: boolean;
   showAgentHeader: boolean;
   message: Message;
   interactionRecords?: readonly Interaction[];
@@ -667,7 +703,7 @@ function ChatMessage({
   if (message.role === 'user') {
     return (
       <div className="mb-3 flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-[14px] leading-relaxed text-foreground">
+        <div data-slot="user-message" className="max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-[14px] leading-relaxed text-foreground">
           {message.attachments?.length ? (
             <MessageAttachments
               attachments={message.attachments}
@@ -694,7 +730,7 @@ function ChatMessage({
   const reasoningStreaming = isStreaming && isLastMessage && !message.content;
 
   return (
-    <div className="group mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
+    <div data-slot="assistant-message" className="group mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
       {showAgentHeader ? (
         <div className="mb-1.5 flex items-center gap-2 text-xs text-text-muted">
           <Bot className="w-3.5 h-3.5" />
@@ -919,11 +955,11 @@ function ChatMessage({
             ))
         : null}
 
-      <div className="w-full break-words">
+      <div data-slot="assistant-content" className="w-full break-words">
         {message.content ? (
           <MessageMarkdown content={message.content} />
-        ) : (isStreaming && isLastMessage && !message.reasoning && !message.tools)
-          || message.eventType === 'optimistic_assistant_placeholder' ? (
+        ) : !suppressWaitingIndicator && ((isStreaming && isLastMessage && !message.reasoning && !message.tools)
+          || message.eventType === 'optimistic_assistant_placeholder') ? (
           <span className="relative mt-1 inline-flex h-4 w-4 items-center justify-center" role="status" aria-label="正在生成">
             <span className="waiting-generation-breathe h-2.5 w-2.5 rounded-full" />
           </span>
@@ -960,6 +996,7 @@ export function ChatMessageList({
   activity,
   contextIndicator,
   messages,
+  showWaitingIndicator = false,
   isLoadingInitialHistory = false,
   onDeleteFeedback,
   onOpenAttachmentPreview,
@@ -975,6 +1012,7 @@ export function ChatMessageList({
   interactionRecords,
   scrollRef,
   className,
+  revealMessage,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
   void checkpoints;
@@ -1033,6 +1071,46 @@ export function ChatMessageList({
 
   const visibleItems = virtualWindow.visibleItems;
 
+  useEffect(() => {
+    if (!revealMessage) return;
+    const scroller = scrollRef.current;
+    const index = messages.findIndex(message => message.id === revealMessage.id);
+    if (!scroller || index < 0) return;
+    const behavior = scroller.style.scrollBehavior;
+    scroller.style.scrollBehavior = 'auto';
+    let frame = 0;
+    let attempts = 0;
+    let stableFrames = 0;
+    let previousTop = -1;
+    // Measuring a new virtual window can replace several estimated heights
+    // before the requested row mounts. Recompute that row's offset until the
+    // window settles, rather than assuming one animation frame is sufficient.
+    const reveal = () => {
+      const top = messages.slice(0, index).reduce((sum, message) =>
+        sum + (measuredHeightsRef.current.get(message.id) || DEFAULT_MESSAGE_ROW_HEIGHT), 0);
+      scroller.scrollTop = Math.max(0, top - 24);
+      setScrollTop(scroller.scrollTop);
+      setViewportHeight(scroller.clientHeight);
+      const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]'))
+        .find(element => element.dataset.messageId === revealMessage.id);
+      stableFrames = row && Math.abs(previousTop - top) < 1 ? stableFrames + 1 : 0;
+      previousTop = top;
+      if (row && (stableFrames >= 3 || attempts >= 30)) {
+        scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24;
+        row.focus({ preventScroll: true });
+        scroller.dispatchEvent(new Event('scroll'));
+        scroller.style.scrollBehavior = behavior;
+        return;
+      }
+      if (++attempts < 30) frame = requestAnimationFrame(reveal);
+      else scroller.style.scrollBehavior = behavior;
+    };
+    frame = requestAnimationFrame(reveal);
+    return () => { cancelAnimationFrame(frame); scroller.style.scrollBehavior = behavior; };
+    // A reveal request is explicit navigation, not an instruction to re-center
+    // the reader on every subsequent streaming or history update.
+  }, [revealMessage, scrollRef]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const updateMeasuredHeight = useCallback((messageId: string, height: number, top: number) => {
     if (!messageId || !Number.isFinite(height) || height <= 0) {
       return;
@@ -1074,18 +1152,21 @@ export function ChatMessageList({
         className,
       )}
       data-slot="message-list"
+      style={{ overflowAnchor: 'none' }}
     >
-      <div className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
+      <div data-slot="message-list-content" className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && !showWaitingIndicator ? (
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
-          <div style={{ height: virtualWindow.totalHeight }} className="relative">
-            {visibleItems.map((entry) => (
+          <>
+            {messages.length > 0 && <div style={{ height: virtualWindow.totalHeight }} className="relative">
+              {visibleItems.map((entry) => (
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}
                 messageId={entry.item.id || String(entry.index)}
+                highlighted={entry.item.id === revealMessage?.id}
                 top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >
@@ -1096,6 +1177,7 @@ export function ChatMessageList({
                     agentName={agentName}
                     isMobile={isMobile}
                     isStreaming={isStreaming}
+                    suppressWaitingIndicator={showWaitingIndicator}
                     isLastMessage={entry.index === messages.length - 1}
                     showAgentHeader={!continuesAssistantTurn(messages[entry.index - 1], entry.item)}
                     message={entry.item}
@@ -1109,8 +1191,12 @@ export function ChatMessageList({
                   />
                 )}
               </MeasuredMessageRow>
-            ))}
-          </div>
+              ))}
+            </div>}
+            {showWaitingIndicator && <div className="mx-auto w-full max-w-[60rem] px-2 sm:px-4" role="status" data-testid="waiting-first-token">
+              <span className="waiting-thinking-text">正在思考…</span>
+            </div>}
+          </>
         )}
       </div>
       <StatusBanner />

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { GroupComposer, GroupTimeline, MemberInspector, TaskBoard, TaskDetail, TeamWorkspace } from '../public/team-components.js';
+import { groupTeamCandidates } from '../core/teams/grouping.js';
 import { InteractionMessage } from '../components/teams/InteractionMessage.js';
 import { ExecutionTree } from '../public/team-execution.js';
 import { memberRef, teamSnapshot } from '../../e2e/fixtures/teams-data.js';
@@ -9,6 +10,7 @@ describe('Teams presentation boundaries', () => {
   it('defaults to chat and progress, with no graph or sidepanel', () => {
     const markup = renderToStaticMarkup(<TeamWorkspace snapshot={teamSnapshot()} onSend={async () => {}} />);
     expect(markup).toContain('team-progress-card');
+    expect(markup).toContain('team-progress-live');
     expect(markup).not.toContain('team-sidepanel');
     expect(markup).not.toContain('team-graph-node');
     expect(markup).toContain('描述目标');
@@ -74,4 +76,29 @@ describe('Teams presentation boundaries', () => {
     const ids = [...markup.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
     expect(new Set(ids).size).toBe(ids.length);
   });
+});
+
+describe('task presentation isolation', () => {
+  it('keeps other task messages hidden and offers artifacts only as explicit references', () => {
+    const snapshot = teamSnapshot();
+    snapshot.teamRuns.push({ ...snapshot.teamRuns[0], teamRunId: 'other-run', goal: '另一个目标' });
+    snapshot.messages = snapshot.messages.map(message => ({ ...message, teamRunId: 'other-run', parts: [{ kind: 'text', text: 'other-task-secret' }] }));
+    snapshot.artifacts = [{ artifactId: 'other-artifact', name: 'other-task-file.md', mediaType: 'text/markdown', source: { ...memberRef(), sessionId: 'other-session' } }];
+    snapshot.runMembers = [{ ...snapshot.members[1], runMemberId: 'frozen-member', teamRunId: 'team-run', groupRevision: 1 }];
+    const markup = renderToStaticMarkup(<TeamWorkspace snapshot={snapshot} initialSelection={{ teamRunId: 'team-run' }} onSend={async () => {}} />);
+    expect(markup).not.toContain('other-task-secret');
+    expect(markup).toContain('其他任务（显式引用）');
+    expect(markup).toContain('<option value="other-artifact">other-task-file.md</option>');
+    expect(markup).not.toContain('已选择的交付物');
+    expect(markup).toContain('团队任务');
+    expect(markup).toContain('新任务');
+  });
+});
+
+it('groups versions by Agent and prefers the latest available build', () => {
+  const member = teamSnapshot().members[0];
+  const make = (buildId: string, createdAt: string, enqueue: boolean) => ({ memberId: buildId, name: member.name, binding: { ...member.binding, buildId, bindingRef: buildId, createdAt, capabilities: { ...member.binding.capabilities, enqueue } } });
+  const groups = groupTeamCandidates([make('old', '2026-09-01', true), make('broken-latest', '2026-09-12', false), make('latest-ready', '2026-09-11', true)]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0].map(row => row.binding.buildId)).toEqual(['latest-ready', 'old', 'broken-latest']);
 });

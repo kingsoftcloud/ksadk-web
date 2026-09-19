@@ -5,6 +5,7 @@ import type {
   FormEvent,
   KeyboardEvent,
   RefObject,
+  ReactNode,
 } from 'react';
 
 import { useState } from 'react';
@@ -25,6 +26,8 @@ import { PermissionMenu } from './PermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
 export type ChatComposerProps = {
+  /** Optional host controls, such as an Agent selector. */
+  headerSlot?: ReactNode;
   onCompactContext?: () => Promise<void>;
   attachments: File[];
   composerContextIndicator: ComposerContextIndicator;
@@ -53,6 +56,7 @@ export type ChatComposerProps = {
 };
 
 export function ChatComposer({
+  headerSlot,
   onCompactContext,
   attachments,
   composerContextIndicator,
@@ -133,7 +137,14 @@ export function ChatComposer({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
+      // Enter confirms an IME candidate while composing (Safari can report
+      // keyCode 229 after compositionend). It must never send or stop a run.
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       event.preventDefault();
+      if (isStreaming) {
+        if (!isCompacting && canSubmit) onSubmit(input.trim(), attachments);
+        return;
+      }
       event.currentTarget.form?.requestSubmit();
     }
   };
@@ -187,9 +198,10 @@ export function ChatComposer({
           </div>
         ) : null}
 
-        <div className="relative rounded-[var(--chat-composer-radius,28px)] bg-surface shadow-[0_0_0_0.5px_rgba(15,23,42,0.08),0_5px_18px_rgba(15,23,42,0.07)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06),0_8px_24px_rgba(0,0,0,0.24)]">
+        <div data-slot="composer-surface" className="relative rounded-[var(--chat-composer-radius,28px)] bg-surface shadow-[0_0_0_0.5px_rgba(15,23,42,0.08),0_5px_18px_rgba(15,23,42,0.07)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06),0_8px_24px_rgba(0,0,0,0.24)]">
           <div className="flex items-center gap-3">
             <form
+              data-slot="composer-form"
               onSubmit={handleSubmit}
               onDragOver={(event) => {
                 event.preventDefault();
@@ -198,6 +210,7 @@ export function ChatComposer({
               onDrop={handleDrop}
               className="relative flex min-h-[116px] min-w-0 flex-1 flex-col rounded-[var(--chat-composer-radius,28px)] border border-border/55 bg-background px-4 pb-3 pt-3 transition-all focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:px-5"
             >
+              {headerSlot != null ? <div data-slot="composer-header" className="mb-2 min-w-0">{headerSlot}</div> : null}
               {attachments.length > 0 ? (
                 <div className="mb-1.5 flex flex-wrap gap-2">
                   {attachments.map((file, index) => (
@@ -229,6 +242,7 @@ export function ChatComposer({
               ) : null}
 
               <textarea
+                data-slot="composer-input"
                 ref={textareaRef}
                 rows={1}
                 value={input}
@@ -243,8 +257,8 @@ export function ChatComposer({
                 style={{ maxHeight: `${composerMaxHeight}px`, overflowY: 'auto' }}
               />
 
-              <div className="mt-auto flex min-h-8 items-center justify-between gap-2 pt-1.5">
-                <div className="flex min-w-0 items-center gap-1.5">
+              <div data-slot="composer-toolbar" className="mt-auto flex min-h-8 items-center justify-between gap-2 pt-1.5">
+                <div data-slot="composer-toolbar-start" className="flex min-w-0 items-center gap-1.5">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -268,7 +282,7 @@ export function ChatComposer({
                   {approvalEnabled ? <PermissionMenu approvalPolicy={approvalPolicy} /> : null}
                 </div>
 
-                <div className="flex min-w-0 items-center gap-1.5">
+                <div data-slot="composer-toolbar-end" className="flex min-w-0 items-center gap-1.5">
                   {composerContextIndicator ? <ContextUsageIndicator indicator={composerContextIndicator} onCompact={compactContext} disabled={isStreaming} /> : null}
 
                   {availableModels.length > 0 ? (

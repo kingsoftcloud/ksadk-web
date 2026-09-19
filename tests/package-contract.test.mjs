@@ -23,6 +23,7 @@ test('package metadata exposes release artifacts and public entrypoints', () => 
     './chat/timeline',
     './components',
     './conversation',
+    './file-preview',
     './hooks',
     './runtime',
     './styles',

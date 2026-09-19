@@ -68,7 +68,7 @@ export type RunEvent =
   | { type: 'rate_limited'; retryAfterSec?: number; message?: string; sessionId?: string | null }
   | { type: 'terminal'; status: string; sessionId?: string | null }
   | { type: 'stream_event'; event: import('../../types/session-events.js').SessionEventRecord; sessionId?: string | null }
-  | { type: 'conversation_snapshot'; result: ConversationStreamResult; sessionId?: string | null }
+  | { type: 'conversation_snapshot'; result: ConversationStreamResult; sessionId?: string | null; optimisticMessageId?: string }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }
   | { type: 'a2ui_surface_update'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }
   | { type: 'a2ui_surface_end'; surfaceId: string; sessionId?: string | null }
@@ -97,17 +97,20 @@ export type RunEngineConfig = {
 };
 
 export interface RunEngine {
+  readonly activeInvocationId: string;
   updateConfig(config: RunEngineConfig): void;
   start(draft: {
     text: string;
     attachments: File[];
+    optimisticMessageId?: string;
     responsesInput?: unknown;
     previousResponseId?: string;
     executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
+    onInvocationCreated?: (invocationId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   disconnect(): void;
   stop(): void;
@@ -123,14 +126,14 @@ export interface RunEngine {
     runId: string;
     checkpointId: string;
     resumeAttemptId?: string;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   resumeAguiInterrupt(params: {
     sessionId?: string | null;
     interruptId: string;
     status: 'resolved' | 'cancelled';
     payload?: unknown;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   readonly stage: RunStage;
   readonly controlState: RunControlState;
@@ -138,6 +141,8 @@ export interface RunEngine {
   retryControl(): Promise<RunControlState>;
   subscribe(listener: (event: RunEvent) => void): () => void;
 }
+
+export type RunSettlement = 'completed' | 'failed' | 'cancelled' | 'unknown';
 
 /**
  * agent-kernel/v1 control surface state. `accepted`/`duplicate` receipts move

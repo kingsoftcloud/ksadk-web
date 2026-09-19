@@ -103,6 +103,13 @@
 .ksadk-teams .team-progress-card{display:block;width:100%;padding:17px 19px;text-align:left;border:1px solid var(--team-border);background:var(--team-bg);border-radius:var(--team-radius);margin:6px 0 12px;transition:border-color .16s ease,background .16s ease}
 .ksadk-teams .team-progress-card:hover{border-color:var(--team-border);background:var(--team-soft)}
 .ksadk-teams .team-progress-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.ksadk-teams .team-progress-status{display:inline-flex;align-items:center;gap:8px}
+.ksadk-teams .team-progress-live{display:inline-flex;align-items:center;gap:5px;color:var(--team-accent);font-size:11px;font-weight:500;white-space:nowrap}
+.ksadk-teams .team-progress-live>span{display:inline-flex;gap:2px;align-items:center}
+.ksadk-teams .team-progress-live i{width:4px;height:4px;border-radius:50%;background:currentColor;animation:team-progress-pulse 1.2s ease-in-out infinite}
+.ksadk-teams .team-progress-live i:nth-child(2){animation-delay:.16s}.ksadk-teams .team-progress-live i:nth-child(3){animation-delay:.32s}
+@keyframes team-progress-pulse{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
+@media (prefers-reduced-motion:reduce){.ksadk-teams .team-progress-live i{animation:none;opacity:.7}}
 .ksadk-teams .team-progress-card>strong{display:block;font-size:14px;font-weight:550;margin-bottom:10px;overflow-wrap:anywhere}
 .ksadk-teams .team-progress-caption{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--team-muted)}
 .ksadk-teams .team-progress-caption>span{color:var(--team-accent);white-space:nowrap}
@@ -132,13 +139,20 @@
 .ksadk-teams .team-connection{font-size:11px;color:var(--team-muted)}
 .ksadk-teams .team-top-error{display:flex;align-items:center;justify-content:space-between;gap:15px;background:var(--team-danger-soft);padding:10px 28px;color:var(--team-danger);font-size:12px}
 .ksadk-teams .team-inline-error{font-size:12px;color:var(--team-danger);padding:9px 0;line-height:1.6}
-.ksadk-teams .team-sidepanel{display:flex;flex-direction:column;width:350px;min-width:300px;max-width:380px;border-left:1px solid var(--team-border);background:var(--team-soft);flex:0 0 auto;min-height:0;outline-offset:-3px}
+.ksadk-teams .team-sidepanel{display:flex;flex-direction:column;width:330px;min-width:290px;max-width:380px;border-left:1px solid var(--team-border);background:var(--team-soft);flex:0 0 auto;min-height:0;outline-offset:-3px}
 .ksadk-teams .team-panel-header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px;border-bottom:1px solid var(--team-border);flex-shrink:0}
 .ksadk-teams .team-panel-header h2{font-size:14px;font-weight:550;overflow-wrap:anywhere}
 .ksadk-teams .team-panel-scroll{overflow:auto;flex:1;min-height:0;padding:0 20px 20px;scrollbar-width:thin}
 .ksadk-teams .team-run-overview{padding:21px 0;border-bottom:1px solid var(--team-border);margin-bottom:20px}
 .ksadk-teams .team-run-overview h3{font-size:14px;line-height:1.7;margin:7px 0;font-weight:550}
 .ksadk-teams .team-run-overview p{font-size:12px;color:var(--team-muted);margin:8px 0}
+.ksadk-teams .team-run-goal summary{cursor:pointer;list-style:none}
+.ksadk-teams .team-run-goal summary::-webkit-details-marker{display:none}
+.ksadk-teams .team-run-goal summary h3{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}
+.ksadk-teams .team-run-goal summary span{font-size:12px;color:var(--team-accent)}
+.ksadk-teams .team-run-goal summary span::after{content:' ↓'}
+.ksadk-teams .team-run-goal[open] summary span::after{content:' ↑'}
+.ksadk-teams .team-run-goal>p{white-space:pre-wrap;overflow-wrap:anywhere}
 .ksadk-teams .team-run-actions{display:flex;gap:17px;margin-top:13px}
 .ksadk-teams .team-run-actions button{font-size:11px}
 .ksadk-teams .team-task-board section{margin-bottom:23px}
@@ -224,13 +238,15 @@
 .ksadk-teams .team-loading span{display:block;background:var(--team-soft);border-radius:var(--team-radius);width:90%;height:15px}
 .ksadk-teams .team-loading span:first-child{width:35%;height:22px}
 .ksadk-teams .team-loading span:last-child{width:65%}
-.ksadk-teams.team-create-dialog{border:1px solid var(--team-border);border-radius:var(--team-radius);padding:0;margin:auto;height:fit-content;min-height:0;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow:auto;background:var(--team-bg);box-shadow:var(--team-shadow)}
+.ksadk-teams.team-create-dialog{border:1px solid var(--team-border);border-radius:var(--team-radius);padding:0;margin:auto;height:fit-content;min-height:0;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow:hidden;background:var(--team-bg);box-shadow:var(--team-shadow)}
 .ksadk-teams.team-create-dialog::backdrop{background:#20282d59}
-.ksadk-teams.team-create-dialog form{padding:24px}
-.ksadk-teams.team-create-dialog header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:25px}
+.ksadk-teams.team-create-dialog form{display:flex;flex-direction:column;max-height:calc(100dvh - 50px);padding:0}
+.ksadk-teams.team-create-dialog header{display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;padding:24px 24px 16px}
+.ksadk-teams .team-create-body{min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 24px 20px;scrollbar-width:thin}
+.ksadk-teams .team-create-body>.team-field:first-child{margin-top:0}
 .ksadk-teams.team-create-dialog header h2{font-size:20px;font-weight:600;margin:4px 0 8px}
 .ksadk-teams.team-create-dialog header p{font-size:12px;color:var(--team-muted)}
-.ksadk-teams.team-create-dialog fieldset{border:0;padding:0;margin:0 0 20px}
+.ksadk-teams.team-create-dialog fieldset{border:0;padding:0;margin:0 0 20px;min-inline-size:0}
 .ksadk-teams.team-create-dialog legend{font-size:12px;font-weight:500;margin-bottom:10px;width:100%;display:flex;justify-content:space-between}
 .ksadk-teams.team-create-dialog legend span{color:var(--team-muted);font-size:11px}
 .ksadk-teams .team-candidate-list{max-height:240px;overflow:auto;border:1px solid var(--team-border);border-radius:var(--team-radius);padding:4px}
@@ -244,9 +260,9 @@
 .ksadk-teams .team-field textarea{min-height:80px;resize:vertical}
 .ksadk-teams .team-field :is(input,select,textarea):hover:not(:disabled){border-color:var(--team-accent)}
 .ksadk-teams .team-field small{color:var(--team-muted);font-size:11px;font-weight:400;line-height:1.65}
-.ksadk-teams.team-create-dialog footer{display:flex;justify-content:flex-end;gap:9px;padding-top:10px}
+.ksadk-teams.team-create-dialog footer{display:flex;justify-content:flex-end;flex-shrink:0;gap:9px;padding:16px 24px;border-top:1px solid var(--team-border);background:var(--team-bg)}
 @container (max-width:900px){.ksadk-teams .team-sidepanel{width:320px;min-width:300px}.ksadk-teams .team-header{padding:15px 20px}.ksadk-teams .team-header-actions>.team-connection{display:none}.ksadk-teams .team-timeline-inner{padding:25px 22px 18px}.ksadk-teams .team-composer-wrap{padding-left:22px;padding-right:22px}}
-@container (max-width:850px){.ksadk-teams[data-panel]:not([data-panel=closed]) .team-chat-pane{display:none}.ksadk-teams .team-sidepanel{width:100%;max-width:none;border-left:0}.ksadk-teams .team-panel-scroll{padding-left:24px;padding-right:24px}.ksadk-teams .team-panel-header{padding-left:24px;padding-right:24px}}
+@container (max-width:850px){.ksadk-teams[data-panel]:not([data-panel=closed]) .team-chat-pane{display:none}.ksadk-teams .team-sidepanel{width:100%;min-width:0;max-width:none;border-left:0}.ksadk-teams .team-panel-scroll{padding-left:24px;padding-right:24px}.ksadk-teams .team-panel-header{padding-left:24px;padding-right:24px}}
 @container (max-width:480px){.ksadk-teams .team-header{padding:13px 16px;min-height:74px;gap:8px}.ksadk-teams .team-avatar-stack{display:none}.ksadk-teams .team-header h1{font-size:15px}.ksadk-teams .team-header-actions{gap:6px}.ksadk-teams .team-header-actions .team-button{padding:5px 8px;font-size:11px}.ksadk-teams .team-timeline-inner{padding:22px 16px 16px}.ksadk-teams .team-message{gap:9px}.ksadk-teams .team-message>.team-avatar{width:27px;height:27px;border-radius:var(--team-radius);font-size:11px}.ksadk-teams .team-message header time{display:none}.ksadk-teams .team-message-body{font-size:13px}.ksadk-teams .team-composer-wrap{padding:10px 12px 12px}.ksadk-teams .team-composer-toolbar>div{gap:8px}.ksadk-teams .team-composer-toolbar select{max-width:128px}.ksadk-teams .team-progress-card{padding:14px}.ksadk-teams .team-progress-caption{flex-wrap:wrap;gap:6px}.ksadk-teams .team-empty{padding:45px 8px}.ksadk-teams .team-empty h2{font-size:22px}.ksadk-teams .team-attention-banner{width:calc(100% - 24px)}.ksadk-teams .team-execution-list button{grid-template-columns:minmax(0,1fr) 85px}.ksadk-teams .team-execution-list button>span:not(.team-status){display:none}.ksadk-teams .team-view-switch{padding-left:16px;padding-right:16px}}
 @media(prefers-reduced-motion:reduce){.ksadk-teams *{transition:none!important;animation:none!important;scroll-behavior:auto!important}.ksadk-teams button:not(:disabled):active{transform:none}}
 
@@ -312,5 +328,102 @@
   .ksadk-teams .team-view-switch button { min-height: 40px; }
   .ksadk-teams .team-field :is(input,select,textarea),
   .ksadk-teams .team-composer textarea { font-size: 16px; }
-  .ksadk-teams.team-create-dialog form { padding: 20px; }
+  .ksadk-teams.team-create-dialog header { padding: 20px 20px 16px; }
+  .ksadk-teams .team-create-body { padding: 0 20px 16px; }
+  .ksadk-teams.team-create-dialog footer { padding: 14px 20px; }
 }
+
+/* Long-lived teams contain independent task conversations. */
+.ksadk-teams .team-run-directory { width: 194px; flex: 0 0 194px; border-right: 1px solid var(--team-border); display: flex; flex-direction: column; min-height: 0; background: var(--team-soft); }
+.ksadk-teams .team-run-directory > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 14px 14px; }
+.ksadk-teams .team-run-directory h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.ksadk-teams .team-run-list { overflow: auto; padding: 0 8px 16px; }
+.ksadk-teams .team-run-list > p { padding: 12px; font-size: 13px; }
+.ksadk-teams .team-run-item { width: 100%; padding: 12px 10px; margin-bottom: 4px; display: flex; flex-direction: column; gap: 8px; text-align: left; border: 0; border-radius: var(--team-control-radius); background: transparent; color: var(--team-ink); }
+.ksadk-teams .team-run-item strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.ksadk-teams .team-run-item:hover { background: var(--team-bg); }
+.ksadk-teams .team-run-item[aria-current=page] { background: var(--team-accent-soft); color: var(--team-accent); }
+.ksadk-teams .team-task-heading { padding: 22px 28px 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ksadk-teams .team-task-heading > div { min-width: 0; }
+.ksadk-teams .team-task-heading h2 { margin: 5px 0 0; font-size: 17px; line-height: 1.5; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ksadk-teams .team-task-heading > button { flex-shrink: 0; }
+.ksadk-teams .team-mobile-task-picker { display: none; }
+.ksadk-teams .team-progress-card { background: var(--team-soft); border: 0; border-left: 3px solid var(--team-accent); padding: 15px 17px; box-shadow: none; }
+.ksadk-teams .team-progress-caption, .ksadk-teams .team-message-body { font-size: 14px; }
+.ksadk-teams .team-detail-tabs { display: flex; gap: 4px; }
+.ksadk-teams .team-detail-tabs button { border: 0; border-radius: var(--team-control-radius); background: transparent; padding: 7px 10px; font-size: 13px; color: var(--team-muted); }
+.ksadk-teams .team-detail-tabs button[aria-pressed=true] { color: var(--team-ink); background: var(--team-bg); font-weight: 600; }
+.ksadk-teams .team-composer { overflow: visible; border-radius: 12px; box-shadow: 0 4px 20px color-mix(in srgb, var(--team-ink) 5%, transparent); }
+.ksadk-teams .team-composer textarea { min-height: 76px; }
+.ksadk-teams .team-composer-toolbar select { font-size: 13px; max-width: 200px; background: transparent; }
+.ksadk-teams .team-composer-help { font-size: 11px; }
+.ksadk-teams .team-composer-more { position: relative; }
+.ksadk-teams .team-composer-more > summary { font-size: 20px; line-height: 1; width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; list-style: none; border-radius: var(--team-control-radius); color: var(--team-muted); }
+.ksadk-teams .team-composer-more > summary:hover { background: var(--team-soft); }
+.ksadk-teams .team-composer-more[open] > label { position: absolute; bottom: 40px; left: 0; z-index: 3; width: 212px; padding: 14px; box-shadow: var(--team-shadow); border: 1px solid var(--team-border); border-radius: 8px; background: var(--team-bg); font-size: 13px; }
+.ksadk-teams .team-mention-options button[aria-selected=true] { background: var(--team-accent-soft); }
+.ksadk-teams .team-final-delivery { margin-top: 22px; padding: 22px; background: var(--team-accent-soft); border-radius: 10px; }
+.ksadk-teams .team-final-delivery h3 { margin: 5px 0 8px; font-size: 17px; }
+.ksadk-teams .team-final-delivery > p { font-size: 14px; color: var(--team-muted); margin-bottom: 18px; }
+.ksadk-teams .team-final-delivery .team-field { margin-top: 14px; }
+.ksadk-teams .team-final-delivery textarea { min-height: 90px; }
+.ksadk-teams .team-artifact-list > h3 { font-size: 15px; margin: 0 0 18px; }
+.ksadk-teams .team-artifact { padding: 13px 0; border-bottom: 1px solid var(--team-border); }
+.ksadk-teams .team-directory-search { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+.ksadk-teams .team-directory-search input { min-width: 0; flex: 1; width: 100%; }
+.ksadk-teams .team-candidate-list { max-height: clamp(144px, 30dvh, 260px); overscroll-behavior: contain; scrollbar-width: thin; }
+.ksadk-teams .team-candidate-group { border-bottom: 1px solid var(--team-border); }
+.ksadk-teams .team-candidate-group:last-child { border: 0; }
+.ksadk-teams .team-candidate { border: 0; border-radius: 6px; margin: 0; padding: 13px 10px; }
+.ksadk-teams .team-candidate > span:has(strong) { flex: 1; min-width: 0; }
+.ksadk-teams .team-candidate strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ksadk-teams .team-candidate small { white-space: normal; font-size: 12px; line-height: 1.6; }
+.ksadk-teams .team-candidate .team-candidate-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.ksadk-teams .team-candidate-reason { color: var(--team-warning); }
+.ksadk-teams .team-source { flex-shrink: 0; display: flex; align-items: center; gap: 5px; color: var(--team-muted); font-size: 12px; }
+.ksadk-teams .team-source:before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--team-muted); }
+.ksadk-teams .team-source[data-available=true]:before { background: var(--team-success); }
+.ksadk-teams .team-version-choice { margin: 0 12px 12px 43px; font-size: 12px; color: var(--team-muted); overflow-wrap: anywhere; }
+.ksadk-teams .team-version-choice summary { cursor: pointer; }
+.ksadk-teams .team-version-choice .team-field { margin-top: 10px; }
+.ksadk-teams .team-create-footnote { color: var(--team-muted); font-size: 12px; }
+@container (max-width: 1100px) {
+  .ksadk-teams .team-run-directory { width: 170px; flex-basis: 170px; }
+  .ksadk-teams[data-panel]:not([data-panel=closed]) .team-run-directory { display: none; }
+}
+@container (max-width: 760px) {
+  .ksadk-teams .team-run-directory { display: none; }
+  .ksadk-teams .team-mobile-task-picker { display: flex; flex-direction: row; align-items: center; gap: 10px; font-size: 12px; margin: 0 18px 12px; }
+  .ksadk-teams .team-mobile-task-picker select { min-width: 0; flex: 1; }
+  .ksadk-teams .team-task-heading { padding: 16px 18px 12px; }
+  .ksadk-teams .team-task-heading h2 { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .ksadk-teams *, .ksadk-teams *:before { transition: none !important; animation: none !important; } }
+.ksadk-teams .team-composer-menu { display: none; }
+.ksadk-teams .team-composer-more[open] > .team-composer-menu { display: block; position: absolute; bottom: 40px; left: 0; z-index: 3; width: min(320px, 75vw); max-height: 55vh; overflow: auto; padding: 16px; box-shadow: var(--team-shadow); border: 1px solid var(--team-border); border-radius: 9px; background: var(--team-bg); font-size: 13px; }
+.ksadk-teams .team-composer-menu .team-note-toggle { font-size: 13px; }
+.ksadk-teams .team-workspace-options { margin-top: 14px; border-top: 1px solid var(--team-border); padding-top: 12px; }
+.ksadk-teams .team-workspace-options summary { cursor: pointer; margin-bottom: 12px; }
+.ksadk-teams .team-workspace-options .team-field { margin: 10px 0; font-size: 12px; }
+.ksadk-teams .team-workspace-options textarea { border: 1px solid var(--team-border); min-height: 60px; padding: 8px; font-size: 13px; border-radius: var(--team-control-radius); }
+.ksadk-teams .team-workspace-options p { font-size: 12px; line-height: 1.6; color: var(--team-muted); margin: 12px 0 0; }
+.ksadk-teams .team-final-summary { margin: 16px 0; font-size: 14px; line-height: 1.7; }
+.ksadk-teams .team-final-summary :first-child { margin-top: 0; }
+.ksadk-teams .team-member-responsibility { font-size: 14px; color: var(--team-muted); line-height: 1.7; margin: 16px 0; }
+@media (max-height: 650px) {
+  .ksadk-teams .team-header { min-height: 54px; padding: 8px 18px; }
+  .ksadk-teams .team-header h1 { font-size: 14px; }
+  .ksadk-teams .team-header-identity { gap: 10px; }
+  .ksadk-teams .team-task-heading { padding: 8px 18px; }
+  .ksadk-teams .team-task-heading .team-eyebrow { display: none; }
+  .ksadk-teams .team-task-heading h2 { font-size: 14px; margin: 0; }
+  .ksadk-teams .team-mobile-task-picker { margin: 0 18px 6px; }
+  .ksadk-teams .team-composer-wrap { padding: 6px 18px 8px; }
+  .ksadk-teams .team-composer textarea { min-height: 50px; max-height: 112px; padding: 10px 13px 3px; }
+  .ksadk-teams .team-composer-toolbar { padding: 3px 9px 7px; }
+  .ksadk-teams .team-composer-help { margin-top: 3px; }
+  .ksadk-teams .team-timeline-inner { padding-top: 14px; padding-bottom: 12px; }
+  .ksadk-teams .team-attention-banner { padding-block: 6px; margin-block: 3px; }
+  .ksadk-teams .team-final-delivery { padding: 16px; margin-top: 14px; }
+}
+.ksadk-teams .team-source[data-state=unchecked]:before { background: var(--team-muted); }

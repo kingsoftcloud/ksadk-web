@@ -5,6 +5,7 @@ import type {
   RunEvent,
   RunEngineConfig,
   RuntimeExecutionMode,
+  RunSettlement,
   SubmitControlCommand,
 } from './types.js';
 import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
@@ -114,6 +115,12 @@ export class RunEngineImpl implements RunEngine {
   private abortController: AbortController | null = null;
   private activeCompactionId: string | null = null;
   private activeSessionId: string | null = null;
+  private invocationId = '';
+  /** Monotonic owner epoch; disconnect invalidates late async finalizers. */
+  private operationEpoch = 0;
+  private lastSeqId = 0;
+  private pendingConfig: RunEngineConfig | null = null;
+  private readonly projection: { isVisible?: () => boolean; draftId?: string };
   private aguiClient: AguiRunClient | null = null;
   private aguiThreadSessionId: string | null = null;
   private api: ApiFacade;
@@ -127,8 +134,37 @@ export class RunEngineImpl implements RunEngine {
     thinkingMode: 'auto',
   };
 
-  constructor(api: ApiFacade) {
+  constructor(api: ApiFacade, projection: { isVisible?: () => boolean; draftId?: string } = {}) {
     this.api = api;
+    this.projection = projection;
+  }
+
+  get activeInvocationId(): string { return this.invocationId; }
+
+  private get streamingKey(): string | null {
+    return this.activeSessionId || this.projection.draftId || null;
+  }
+
+  private publishInvocation(invocationId: string): void {
+    this.invocationId = invocationId;
+    if (invocationId) useStreamingStore.getState().updateActivity({
+      sessionId: this.streamingKey, runId: invocationId, countEvent: false, visible: this.projection.isVisible?.(),
+    });
+    if (this.projection.isVisible?.() === false) return;
+    useStreamingStore.getState().setCurrentRunId(invocationId);
+    useStreamingStore.getState().setActiveInvocationId(invocationId);
+  }
+
+  private recordCursor(seq: number): void {
+    this.lastSeqId = seq === 0 ? 0 : Math.max(this.lastSeqId, seq);
+    if (this.projection.isVisible?.() !== false) useStreamingStore.getState().setLastSeqId(this.lastSeqId);
+  }
+
+  private stopActivity(detail?: string): void {
+    const store = useStreamingStore.getState();
+    const visible = this.projection.isVisible?.() !== false;
+    if (this.streamingKey) store.stopSessionActivity(this.streamingKey, detail, visible);
+    else if (visible) store.stopActivity(detail);
   }
 
   get stage() { return this._stage; }
@@ -207,13 +243,14 @@ export class RunEngineImpl implements RunEngine {
   }
 
   updateConfig(config: RunEngineConfig): void {
-    this.config = {
-      ...config,
-      apiFormats: [...config.apiFormats],
-    };
+    const snapshot = { ...config, apiFormats: [...config.apiFormats] };
+    // Changes to the selected Agent/model apply to the next turn only.
+    if (this._stage !== 'idle') this.pendingConfig = snapshot;
+    else this.config = snapshot;
   }
 
   private emit(event: RunEvent) {
+    if (event.type === 'stream_event' && typeof event.event.SeqId === 'number') this.recordCursor(event.event.SeqId);
     const scopedEvent = 'sessionId' in event
       ? event
       : { ...event, sessionId: this.activeSessionId };
@@ -238,11 +275,16 @@ export class RunEngineImpl implements RunEngine {
   }
 
   private setStage(stage: RunStage) {
+    if (this._stage === stage) return;
     const allowed = VALID_TRANSITIONS[this._stage];
     if (allowed && !allowed.includes(stage)) {
       console.warn(`[RunEngine] Invalid transition: ${this._stage} → ${stage}`);
     }
     this._stage = stage;
+    if (stage === 'idle' && this.pendingConfig) {
+      this.config = this.pendingConfig;
+      this.pendingConfig = null;
+    }
     this.emit({ type: 'stage_changed', stage });
   }
 
@@ -254,35 +296,41 @@ export class RunEngineImpl implements RunEngine {
   start(draft: {
     text: string;
     attachments: File[];
+    optimisticMessageId?: string;
     responsesInput?: unknown;
     previousResponseId?: string;
     executionMode?: RuntimeExecutionMode;
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
+    onInvocationCreated?: (invocationId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
 
+    const operationEpoch = ++this.operationEpoch;
     this.abortController = new AbortController();
+    this.activeSessionId = draft.sessionId || null;
+    this.invocationId = '';
+    this.recordCursor(0);
+    this.setStage(this.activeSessionId ? 'connecting' : 'creating-session');
     const isResponsesResume = draft.responsesInput !== undefined;
 
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
+      let settlement: RunSettlement = 'unknown';
       try {
         if (!sessionId) {
           sessionId = await this.createSession(draft);
         }
 
-        if (!sessionId) {
-          sessionId = `default-session-${Date.now()}`;
-        }
+        if (!sessionId) throw new Error('运行时未返回会话身份，请确认创建结果后重试。');
         this.activeSessionId = sessionId;
 
         const invocationId = createInvocationId();
-        useStreamingStore.getState().setCurrentRunId(invocationId);
-        useStreamingStore.getState().setActiveInvocationId(invocationId);
-        useStreamingStore.getState().setLastSeqId(0);
+        this.publishInvocation(invocationId);
+        draft.onInvocationCreated?.(invocationId);
+        this.recordCursor(0);
 
         const conversationBootstrap = !isResponsesResume
           ? await this.getConversationBootstrap(sessionId)
@@ -314,17 +362,20 @@ export class RunEngineImpl implements RunEngine {
             signal: this.abortController?.signal,
             onUpdate: (snapshot) => {
               if (snapshot.runId) {
-                useStreamingStore.getState().setCurrentRunId(snapshot.runId);
-                useStreamingStore.getState().setActiveInvocationId(snapshot.runId);
+                this.publishInvocation(snapshot.runId);
+                draft.onInvocationCreated?.(snapshot.runId);
               }
               this.emit({
                 type: 'conversation_snapshot',
                 result: snapshot,
                 sessionId,
+                optimisticMessageId: draft.optimisticMessageId,
               });
             },
           });
+          if (this.operationEpoch !== operationEpoch) return;
           if (result.presentation.terminalStatus === 'failed') {
+            settlement = 'failed';
             this.setStage('error');
             this.emit({
               type: 'activity',
@@ -335,6 +386,7 @@ export class RunEngineImpl implements RunEngine {
             return;
           }
           this.setStage('completing');
+          settlement = 'completed';
           this.emit({
             type: 'activity',
             phase: '运行完成',
@@ -371,16 +423,19 @@ export class RunEngineImpl implements RunEngine {
             this.abortController?.signal,
           );
           if (aguiResult.status === 'interrupted') {
+            settlement = 'cancelled';
             this.setStage('completing');
             this.emit({ type: 'stream_ended' });
             return;
           }
           if (aguiResult.status !== 'completed') {
+            settlement = 'failed';
             this.setStage('error');
             this.emit({ type: 'activity', phase: 'AG-UI 运行失败', status: 'failed', countEvent: false });
             return;
           }
           this.setStage('completing');
+          settlement = 'completed';
           this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
           this.emit({ type: 'stream_ended' });
           return;
@@ -415,10 +470,12 @@ export class RunEngineImpl implements RunEngine {
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
         }
+        if (this.operationEpoch !== operationEpoch) return;
 
         if (streamResult.terminalStatus === 'cancelled') {
+          settlement = 'cancelled';
           this.setStage('stopping');
-          useStreamingStore.getState().stopActivity('运行时已取消本次执行。');
+          this.stopActivity('运行时已取消本次执行。');
           this.emit({
             type: 'activity',
             phase: '运行已取消',
@@ -430,6 +487,7 @@ export class RunEngineImpl implements RunEngine {
         }
 
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
+          settlement = 'failed';
           this.setStage('error');
           this.emit({
             type: 'activity',
@@ -441,6 +499,7 @@ export class RunEngineImpl implements RunEngine {
         }
 
         this.setStage('completing');
+        settlement = 'completed';
         this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
@@ -448,18 +507,19 @@ export class RunEngineImpl implements RunEngine {
         const isAbort = (error instanceof DOMException && error.name === 'AbortError')
           || (error instanceof ConversationClientError && error.code === 'conversation_aborted');
         if (!isAbort) {
+          const isNetwork = error instanceof TypeError;
+          settlement = isNetwork ? 'unknown' : 'failed';
           console.error('[RunEngine] start() error:', error);
-          const isNetwork = error instanceof TypeError && error.message.includes('fetch');
           if (isNetwork) {
             this.setStage('recovering');
             this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
             // 断线续订:有 lastSeqId + invocationId 时用 subscribeRunEvents(afterSeqId) 续订,
             // 避免从头 runAgent 导致已流式内容重复。续订失败再回退普通 error。
-            const lastSeq = useStreamingStore.getState().lastSeqId;
-            const resumeInvocationId = useStreamingStore.getState().activeInvocationId;
+            const lastSeq = this.lastSeqId;
+            const resumeInvocationId = this.invocationId;
             if (lastSeq > 0 && resumeInvocationId && this.activeSessionId) {
               try {
-                this.resumeRun({
+                await this.resumeRun({
                   sessionId: this.activeSessionId,
                   invocationId: resumeInvocationId,
                   afterSeqId: lastSeq,
@@ -469,6 +529,8 @@ export class RunEngineImpl implements RunEngine {
                 console.warn('[RunEngine] afterSeqId resume failed, fall back to error:', resumeErr);
               }
             }
+            this.setStage('error');
+            this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
           } else if (error instanceof ApiError && error.code === 429) {
             // 限流:单独事件,前端显示友好提示而非"运行失败"白屏。
             this.setStage('error');
@@ -481,13 +543,20 @@ export class RunEngineImpl implements RunEngine {
             this.setStage('error');
             this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
           }
+        } else {
+          settlement = 'cancelled';
         }
       } finally {
-        useStreamingStore.getState().setSessionStreaming(sessionId, false);
-        this.setStage('idle');
-        this.activeCompactionId = null;
-        this.activeSessionId = null;
-        draft.onSettled?.(sessionId);
+        // A detached renderer may have started another owner before this
+        // stream's promise settled. Do not let the old finalizer clear the
+        // new owner's stage, invocation, activity, or outbox settlement.
+        if (this.operationEpoch === operationEpoch) {
+          useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
+          this.setStage('idle');
+          this.activeCompactionId = null;
+          this.activeSessionId = null;
+          draft.onSettled?.(sessionId, settlement);
+        }
       }
     })();
     return true;
@@ -496,7 +565,7 @@ export class RunEngineImpl implements RunEngine {
   stop(): void {
     if (this._stage === 'idle') return;
     this.setStage('stopping');
-    const invocationId = useStreamingStore.getState().currentRunId;
+    const invocationId = this.invocationId;
     if (invocationId && this.activeSessionId) {
       void this.api.cancelRun(this.config.agentId, this.activeSessionId, invocationId).catch((err) => {
         console.warn('[RunEngine] cancelRun on stop failed:', err);
@@ -504,12 +573,12 @@ export class RunEngineImpl implements RunEngine {
     }
     this.abortController?.abort();
     this.aguiClient?.abort();
-    useStreamingStore.getState().stopActivity(
+    this.stopActivity(
       invocationId
         ? '已向运行时发送取消请求；如果当前框架只支持协作式取消，后台可能会在下一个安全点停止。'
         : undefined,
     );
-    useStreamingStore.getState().setCurrentRunId('');
+    this.publishInvocation('');
     this.setStage('cancelled');
     this.emit({
       type: 'system_message',
@@ -521,10 +590,11 @@ export class RunEngineImpl implements RunEngine {
 
   disconnect(): void {
     if (this._stage === 'idle') return;
+    this.operationEpoch += 1;
     this.abortController?.abort();
     this.aguiClient?.abort();
-    useStreamingStore.getState().setSessionStreaming(this.activeSessionId, false);
-    useStreamingStore.getState().clearActivity();
+    useStreamingStore.getState().setSessionStreaming(this.streamingKey, false);
+    if (this.projection.isVisible?.() !== false) useStreamingStore.getState().clearActivity();
     this._stage = 'idle';
     this.activeCompactionId = null;
     this.activeSessionId = null;
@@ -541,83 +611,92 @@ export class RunEngineImpl implements RunEngine {
     this.stop();
   }
 
-  resumeRun(params: {
+  async resumeRun(params: {
     sessionId: string;
     invocationId: string;
     afterSeqId: number;
     onSessionReloadNeeded?: () => void;
-  }): void {
+  }): Promise<void> {
     this.abortController?.abort();
     this.abortController = new AbortController();
     this.activeSessionId = params.sessionId;
-    useStreamingStore.getState().setCurrentRunId(params.invocationId);
+    this.publishInvocation(params.invocationId);
     this.setStage('connecting');
     this.emit({ type: 'activity', phase: '恢复运行事件订阅', status: 'connecting', countEvent: false });
 
-    (async () => {
-      let terminalStatus: string | null = null;
-      try {
-        const stream = await this.api.subscribeRunEvents(
-          {
-            sessionId: params.sessionId,
-            invocationId: params.invocationId,
-            afterSeqId: params.afterSeqId,
-          },
-          { signal: this.abortController?.signal },
-        );
-        this.setStage('streaming');
-        this.emit({ type: 'activity', phase: '等待恢复事件', status: 'waiting', countEvent: false });
+    let terminalStatus: string | null = null;
+    try {
+      const stream = await this.api.subscribeRunEvents(
+        {
+          sessionId: params.sessionId,
+          invocationId: params.invocationId,
+          afterSeqId: params.afterSeqId,
+        },
+        { signal: this.abortController?.signal },
+      );
+      this.setStage('streaming');
+      this.emit({ type: 'activity', phase: '等待恢复事件', status: 'waiting', countEvent: false });
 
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const { chunks, remainder } = splitSseBuffer(buffer);
-          buffer = remainder;
+        buffer += decoder.decode(value, { stream: true });
+        const { chunks, remainder } = splitSseBuffer(buffer);
+        buffer = remainder;
 
-          for (const chunk of chunks) {
-            if (!chunk.trim()) continue;
-            const events = parseSseChunk(chunk);
-            for (const event of events) {
-              if (event.eventName === '__done__' || event.eventName === '__ping__') continue;
-              this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
-              this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
-              terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
-            }
+        for (const chunk of chunks) {
+          if (!chunk.trim()) continue;
+          const events = parseSseChunk(chunk);
+          for (const event of events) {
+            if (event.eventName === '__done__' || event.eventName === '__ping__') continue;
+            this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
+            this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
+            terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
           }
         }
-
-        this.setStage('completing');
-        if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') {
-          this.emit({ type: 'activity', phase: '后台长任务已取消', status: 'stopped', countEvent: false });
-        } else if (terminalStatus === 'interrupted') {
-          this.emit({ type: 'activity', phase: '后台长任务已中断', status: 'stopped', countEvent: false });
-        } else if (terminalStatus === 'failed' || terminalStatus === 'error') {
-          this.emit({ type: 'activity', phase: '后台长任务失败', status: 'failed', countEvent: false });
-        } else if (terminalStatus === 'resume_failed') {
-          this.emit({ type: 'activity', phase: '后台长任务恢复失败', status: 'failed', countEvent: false });
-        } else {
-          this.emit({ type: 'activity', phase: '后台长任务已完成', status: 'completed', countEvent: false });
-        }
-        this.emit({ type: 'stream_ended' });
-        params.onSessionReloadNeeded?.();
-      } catch (error) {
-        const isAbort = error instanceof DOMException && error.name === 'AbortError';
-        if (!isAbort) {
-          console.error('Failed to subscribe to run events:', error);
-        }
-      } finally {
-        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
-        useStreamingStore.getState().setCurrentRunId('');
-        this.setStage('idle');
-        this.activeSessionId = null;
       }
-    })();
+
+      this.setStage('completing');
+      if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') {
+        this.emit({ type: 'activity', phase: '后台长任务已取消', status: 'stopped', countEvent: false });
+      } else if (terminalStatus === 'interrupted') {
+        this.emit({ type: 'activity', phase: '后台长任务已中断', status: 'stopped', countEvent: false });
+      } else if (terminalStatus === 'failed' || terminalStatus === 'error') {
+        this.emit({ type: 'activity', phase: '后台长任务失败', status: 'failed', countEvent: false });
+      } else if (terminalStatus === 'resume_failed') {
+        this.emit({ type: 'activity', phase: '后台长任务恢复失败', status: 'failed', countEvent: false });
+      } else if (terminalStatus) {
+        this.emit({ type: 'activity', phase: '后台长任务已完成', status: 'completed', countEvent: false });
+      } else {
+        // EOF without a durable terminal event only proves that this
+        // subscription ended. It does not prove the remote run completed.
+        // Leave a reconciliable waiting state for SessionLifecycle to query.
+        this.emit({
+          type: 'activity',
+          phase: '后台长任务状态待确认',
+          status: 'waiting',
+          detail: '事件流已结束，但运行时尚未提供终态；正在等待会话状态对账。',
+          countEvent: false,
+        });
+      }
+      if (terminalStatus) this.emit({ type: 'stream_ended' });
+      params.onSessionReloadNeeded?.();
+    } catch (error) {
+      const isAbort = error instanceof DOMException && error.name === 'AbortError';
+      if (!isAbort) {
+        console.error('Failed to subscribe to run events:', error);
+      }
+    } finally {
+      useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
+      this.publishInvocation('');
+      this.setStage('idle');
+      this.activeSessionId = null;
+    }
   }
 
   resumeCheckpoint(params: {
@@ -625,16 +704,18 @@ export class RunEngineImpl implements RunEngine {
     runId: string;
     checkpointId: string;
     resumeAttemptId?: string;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
 
+    const operationEpoch = ++this.operationEpoch;
     this.abortController = new AbortController();
     this.activeSessionId = params.sessionId;
     const invocationId = createInvocationId();
-    useStreamingStore.getState().setCurrentRunId(invocationId);
+    this.publishInvocation(invocationId);
 
     (async () => {
+      let settlement: RunSettlement = 'unknown';
       try {
         this.setStage('connecting');
         this.emit({
@@ -698,8 +779,9 @@ export class RunEngineImpl implements RunEngine {
         );
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
           if (streamResult.terminalStatus === 'cancelled') {
+            settlement = 'cancelled';
             this.setStage('stopping');
-            useStreamingStore.getState().stopActivity('运行时已取消本次恢复。');
+            this.stopActivity('运行时已取消本次恢复。');
             this.emit({
               type: 'activity',
               source: 'restore',
@@ -711,6 +793,7 @@ export class RunEngineImpl implements RunEngine {
             return;
           }
           this.setStage('error');
+          settlement = 'failed';
           this.emit({
             type: 'activity',
             source: 'restore',
@@ -721,21 +804,27 @@ export class RunEngineImpl implements RunEngine {
           return;
         }
         this.setStage('completing');
+        settlement = 'completed';
         this.emit({ type: 'activity', source: 'restore', phase: '恢复完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
         const isAbort = error instanceof DOMException && error.name === 'AbortError';
         if (!isAbort) {
+          settlement = 'failed';
           console.error('[RunEngine] resumeCheckpoint() error:', error);
           this.setStage('error');
           this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
+        } else {
+          settlement = 'cancelled';
         }
       } finally {
-        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
-        useStreamingStore.getState().setCurrentRunId('');
-        this.setStage('idle');
-        this.activeSessionId = null;
-        params.onSettled?.(params.sessionId);
+        if (this.operationEpoch === operationEpoch) {
+          useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
+          this.publishInvocation('');
+          this.setStage('idle');
+          this.activeSessionId = null;
+          params.onSettled?.(params.sessionId, settlement);
+        }
       }
     })();
 
@@ -747,7 +836,7 @@ export class RunEngineImpl implements RunEngine {
     interruptId: string;
     status: 'resolved' | 'cancelled';
     payload?: unknown;
-    onSettled?: (sessionId: string | null) => void;
+    onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
 
@@ -755,13 +844,15 @@ export class RunEngineImpl implements RunEngine {
     if (!sessionId) return false;
     const aguiClient = this.getAguiClient(sessionId);
     if (!aguiClient) return false;
+    const operationEpoch = ++this.operationEpoch;
     this.activeSessionId = sessionId;
     const invocationId = createInvocationId();
-    useStreamingStore.getState().setCurrentRunId(invocationId);
+    this.publishInvocation(invocationId);
     this.setStage('connecting');
     this.emit({ type: 'activity', phase: '提交人工确认', status: 'connecting', countEvent: false });
 
     void (async () => {
+      let settlement: RunSettlement = 'unknown';
       try {
         this.setStage('streaming');
         const result = await aguiClient.resume(invocationId, {
@@ -783,26 +874,32 @@ export class RunEngineImpl implements RunEngine {
             : 'approved',
         });
         if (result.status === 'interrupted') {
+          settlement = 'cancelled';
           this.setStage('completing');
           this.emit({ type: 'stream_ended' });
           return;
         }
         if (result.status !== 'completed') {
+          settlement = 'failed';
           this.setStage('error');
           this.emit({ type: 'activity', phase: '人工确认恢复失败', status: 'failed', countEvent: false });
           return;
         }
         this.setStage('completing');
+        settlement = 'completed';
         this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
+        settlement = error instanceof DOMException && error.name === 'AbortError' ? 'cancelled' : 'failed';
         this.setStage('error');
         this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
       } finally {
-        useStreamingStore.getState().setCurrentRunId('');
-        this.setStage('idle');
-        this.activeSessionId = null;
-        params.onSettled?.(sessionId);
+        if (this.operationEpoch === operationEpoch) {
+          this.publishInvocation('');
+          this.setStage('idle');
+          this.activeSessionId = null;
+          params.onSettled?.(sessionId, settlement);
+        }
       }
     })();
     return true;
@@ -812,21 +909,14 @@ export class RunEngineImpl implements RunEngine {
     onSessionCreated?: (sessionId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
   }): Promise<string | null> {
-    this.setStage('creating-session');
-    try {
-      const session = await this.api.createSession(this.config.agentId, { signal: this.abortController?.signal });
-      const sessionId = session.SessionId || null;
-      if (sessionId) {
-        draft.onSessionCreated?.(sessionId);
-        draft.onSessionUpsert?.(sessionId);
-      }
-      return sessionId;
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        console.error('Failed to create session:', error);
-      }
-      return null;
-    }
+    const session = await this.api.createSession(this.config.agentId, { signal: this.abortController?.signal });
+    this.abortController?.signal.throwIfAborted();
+    const sessionId = session.SessionId || null;
+    if (!sessionId) throw new Error('运行时未返回会话身份，请确认创建结果后重试。');
+    this.activeSessionId = sessionId;
+    draft.onSessionCreated?.(sessionId);
+    draft.onSessionUpsert?.(sessionId);
+    return sessionId;
   }
 
   private async getConversationBootstrap(
@@ -1119,7 +1209,7 @@ export class RunEngineImpl implements RunEngine {
 
     while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
       try {
-        const afterSeq = useStreamingStore.getState().lastSeqId || 0;
+        const afterSeq = this.lastSeqId;
         const stream = await this.api.subscribeSessionEvents(
           sessionId,
           afterSeq,
@@ -1143,7 +1233,7 @@ export class RunEngineImpl implements RunEngine {
               const record = translator.translate(frame);
               const seq = Number(frame.seq);
               if (Number.isFinite(seq) && seq > 0) {
-                useStreamingStore.getState().setLastSeqId(seq);
+                this.recordCursor(seq);
               }
               if (!record) continue;
               this.emit({ type: 'stream_event', event: record as SessionEventRecord, sessionId });
@@ -1191,8 +1281,9 @@ export class RunEngineImpl implements RunEngine {
     let buffer = '';
     let messageCreated = false;
     let receivedByteCount = 0;
+    let terminalStatus: string | undefined;
 
-    try {
+    {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -1221,7 +1312,6 @@ export class RunEngineImpl implements RunEngine {
 
           const events = parseSseChunk(chunk);
           let shouldStop = false;
-          let terminalStatus: string | undefined;
 
           for (const event of events) {
             if (event.eventName === '__done__') {
@@ -1237,6 +1327,7 @@ export class RunEngineImpl implements RunEngine {
             const actions = protocol.parse(event, protocolState);
             for (const action of actions) {
               this.dispatchAction(action, messageId);
+              if (action.type === 'terminal') terminalStatus = action.status;
             }
 
             if (shouldStopReadingRunStream(actions as Array<{ type: string; status?: string }>)) {
@@ -1254,17 +1345,14 @@ export class RunEngineImpl implements RunEngine {
           }
         }
       }
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        throw error;
-      }
     }
 
     if (receivedByteCount === 0) {
       throw new Error('运行时返回了空响应流，请稍后重试；若问题持续，请检查运行时状态。');
     }
 
-    return {};
+    if (terminalStatus) return { terminalStatus };
+    throw new TypeError('运行时连接已结束，但尚未收到执行终态；请查询原任务状态。');
   }
 
   private isCompactionChunk(chunk: string): boolean {

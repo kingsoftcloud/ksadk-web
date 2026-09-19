@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunEngineImpl } from '../core/run/engine.js';
 import type { ApiFacade } from '../core/api/types.js';
+import type { RunEvent } from '../core/run/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useMessageStore } from '../stores/message.js';
 import { useSessionStore } from '../stores/session.js';
@@ -187,6 +188,33 @@ function canonicalResultWithUser(text: string): ConversationStreamResult {
 }
 
 describe('RunEngineImpl', () => {
+  it.each(['disconnect', 'eof'] as const)('keeps partial output %s uncertain and publishes its invocation identity', async (ending) => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    api.runAgent = async body => {
+      calls.push(body);
+      return new ReadableStream<Uint8Array>({ start(controller) {
+        streamController = controller;
+        controller.enqueue(new TextEncoder().encode('event: response.output_text.delta\ndata: {"delta":"partial"}\n\n'));
+      } });
+    };
+    const engine = createRunEngine(api);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework: 'codex', apiFormats: ['responses'], selectedModel: 'test', thinkingMode: 'auto' });
+    const invocation = vi.fn();
+    const settled = vi.fn();
+    const events: RunEvent[] = [];
+    engine.subscribe(event => events.push(event));
+    engine.start({ text: 'one action', attachments: [], onInvocationCreated: invocation, onSettled: settled });
+    await vi.waitFor(() => expect(events.some(event => event.type === 'text_delta')).toBe(true));
+    if (ending === 'disconnect') streamController.error(new TypeError('Connection lost'));
+    else streamController.close();
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledWith('session-1', 'unknown'));
+    expect(invocation).toHaveBeenCalledWith(calls[0].InvocationId);
+    expect(events.some(event => event.type === 'stream_ended')).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
   afterEach(async () => {
     await Promise.all([...activeEngines].map(waitForEngineIdle));
     activeEngines.clear();
@@ -326,6 +354,23 @@ describe('RunEngineImpl', () => {
       'new prompt',
       'canonical answer',
     ]);
+  });
+
+  it.each([true, false])('keeps queued user echoes when canonical snapshots repeat (input item: %s)', (hasInputItem) => {
+    useSessionStore.getState().setCurrentSessionId('session-canonical');
+    useMessageStore.getState().setMessages([
+      { id: 'first-input', role: 'user', content: 'first question', timestamp: 1, eventType: 'optimistic_user_message' },
+      { id: 'second-input', role: 'user', content: 'second question', timestamp: 2, eventType: 'optimistic_user_message' },
+      { id: 'third-input', role: 'user', content: 'third question', timestamp: 3, eventType: 'optimistic_user_message' },
+    ]);
+    const result = hasInputItem ? canonicalResultWithUser('first question') : canonicalResult();
+    for (let update = 0; update < 3; update++) {
+      dispatchRunEventToStores({ type: 'conversation_snapshot', sessionId: 'session-canonical',
+        optimisticMessageId: 'first-input', result });
+      expect(useMessageStore.getState().messages.map(message => message.content)).toEqual([
+        'first question', 'canonical answer', 'second question', 'third question',
+      ]);
+    }
   });
 
   it('reuses the pending assistant row for the first legacy stream event', () => {
@@ -1499,6 +1544,19 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('does not call an empty resume subscription completed without a terminal event', async () => {
+    const api = createApiFacade([]);
+    api.subscribeRunEvents = async () => new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
+    const engine = createRunEngine(api);
+    const events: RunEvent[] = [];
+    engine.subscribe(event => { events.push(event); dispatchRunEventToStores(event); });
+    engine.updateConfig({ agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'langgraph', selectedModel: '', thinkingMode: 'auto' });
+    await engine.resumeRun({ sessionId: 'session-unknown', invocationId: 'run-unknown', afterSeqId: 12 });
+    expect(events.some(event => event.type === 'activity' && event.phase === '后台长任务状态待确认')).toBe(true);
+    expect(events.some(event => event.type === 'stream_ended')).toBe(false);
+    expect(useStreamingStore.getState().getSessionActivity('session-unknown')?.status).toBe('waiting');
+  });
+
   it('does not replace an existing session when the runtime returns an empty stream', async () => {
     const calls: Record<string, unknown>[] = [];
     const createdSessions: string[] = [];
@@ -1720,6 +1778,40 @@ describe('RunEngineImpl', () => {
     expect(engine.stage).toBe('idle');
     expect(useStreamingStore.getState().isStreaming).toBe(false);
     expect(useMessageStore.getState().messages.some((message) => message.role === 'system')).toBe(false);
+  });
+
+  it('does not let a detached run finalizer clobber a replacement run', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    let runCount = 0;
+    api.runAgent = async (body, options) => {
+      calls.push(body);
+      const runNumber = ++runCount;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"type":"response.in_progress"}\n\n'));
+          if (runNumber === 1) {
+            options?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+          }
+        },
+      });
+    };
+    const engine = createRunEngine(api);
+    engine.updateConfig({
+      agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'langgraph',
+      selectedModel: '', thinkingMode: 'auto',
+    });
+
+    engine.start({ text: 'first', attachments: [], sessionId: 'session-first' });
+    await waitForCalls(calls);
+    engine.disconnect();
+    expect(engine.start({ text: 'replacement', attachments: [], sessionId: 'session-second' })).toBe(true);
+    await waitForCalls(calls, 2);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(engine.stage).toBe('streaming');
+    expect(engine.activeInvocationId).toBeTruthy();
+    expect(calls).toHaveLength(2);
   });
 
   it('passes a stable invocation id to RunAgent and uses it for remote cancel', async () => {

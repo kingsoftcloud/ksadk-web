@@ -20,4 +20,19 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Test and fixture files are not components; the v7 compiler rules and
+    // fast-refresh lint target component boundaries only.
+    files: ['**/*.test.{ts,tsx}', 'e2e/**', '**/*.fixture.tsx'],
+    rules: {
+      'react-hooks/react-compiler': 'off',
+      'react-hooks/globals': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/rules-of-hooks': 'off',
+      'react-hooks/exhaustive-deps': 'off',
+      'react-refresh/only-export-components': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 ])

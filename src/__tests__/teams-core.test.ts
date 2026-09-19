@@ -199,3 +199,33 @@ describe('execution projection contract', () => {
     expect(() => decodeExecutionSnapshot({ ...execution, nodes: [{ ...execution.nodes[1], source: { ...memberRef(), groupId: 'other-group' } }] })).toThrow(TeamsError);
   });
 });
+
+describe('task member snapshots', () => {
+  it('limits reconciliation evidence to the selected task and rejects another team', async () => {
+    const client = new HttpTeamsClient({ fetch: async () => new Response(JSON.stringify({ groupId: 'g', items: [{ commandId: 'a', teamRunId: 'run-a' }, { commandId: 'b', teamRunId: 'run-b' }] })) });
+    expect((await client.reconciliation('g', 'run-a')).map(item => item.commandId)).toEqual(['a']);
+    await expect(client.reconciliation('other', 'run-a')).rejects.toThrow(TeamsError);
+  });
+  it('preserves frozen members independently of later group edits and newer run events', () => {
+    const snapshot = teamSnapshot();
+    const member = { ...snapshot.members[0], name: '原来的 Leader', runMemberId: 'run-member-one', teamRunId: 'team-run', groupRevision: 1, sessionId: 'isolated-session' };
+    snapshot.runMembers = [member];
+    snapshot.group.policy = { taskAcceptance: 'leader', peerWake: false };
+    const reducer = new GroupReducer(snapshot);
+    reducer.apply(teamEvent(1, 'member.updated', { member: { ...snapshot.members[0], name: '下一任务的 Leader', revision: 2 } }));
+    expect(reducer.snapshot().runMembers?.[0].name).toBe('原来的 Leader');
+    reducer.apply(teamEvent(2, 'run_member.updated', { runMember: { ...member, revision: 3, executionStatus: 'running' } }));
+    reducer.apply(teamEvent(3, 'run_member.updated', { runMember: { ...member, revision: 2, executionStatus: 'idle' } }));
+    expect(reducer.snapshot().runMembers?.[0].executionStatus).toBe('running');
+    expect(reducer.snapshot().members[0].name).toBe('下一任务的 Leader');
+    expect(() => decodeGroupSnapshot({ ...snapshot, runMembers: [member, member] })).toThrow(TeamsError);
+    expect(() => decodeGroupSnapshot({ ...snapshot, runMembers: [{ ...member, teamRunId: 'foreign-run' }] })).toThrow(TeamsError);
+  });
+  it('sends explicit task scope and request_changes semantics through the public client', async () => {
+    const bodies: unknown[] = [];
+    const client = new HttpTeamsClient({ fetch: async (_url, init) => { bodies.push(JSON.parse(String(init?.body))); return new Response(JSON.stringify({ status: 'accepted', groupId: 'fixture-group' })); } });
+    await client.send('fixture-group', { teamRunId: 'team-run', intent: 'followup', mentions: [], parts: [{ kind: 'text', text: '补充边界' }], idempotencyKey: 'message-key' });
+    await client.acceptRun('fixture-group', 'team-run', { action: 'request_changes', reason: '补充回归结果', expectedRevision: 3, idempotencyKey: 'change-key' });
+    expect(bodies).toEqual([{ teamRunId: 'team-run', intent: 'followup', mentions: [], parts: [{ kind: 'text', text: '补充边界' }], idempotencyKey: 'message-key' }, { action: 'request_changes', reason: '补充回归结果', expectedRevision: 3, idempotencyKey: 'change-key' }]);
+  });
+});

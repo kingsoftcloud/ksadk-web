@@ -24,6 +24,10 @@ export type ApprovalPolicyCapability = {
 };
 
 export type UiCapabilities = {
+  /** Provider-declared presentation strategy; UI must not branch on engine names. */
+  ConversationPresentation?: { Timeline?: 'standard' | 'compact' };
+  /** Host may safely warm a provider binding without starting a run. */
+  RuntimePrewarm?: boolean;
   Attachments?: boolean;
   Approval?: boolean;
   ApprovalPolicy?: ApprovalPolicyCapability;

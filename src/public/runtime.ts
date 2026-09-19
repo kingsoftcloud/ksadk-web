@@ -7,7 +7,7 @@ export type { ApiFacade } from '../core/api/types.js';
 export { AgentEngineClient } from '../api/client.js';
 export type { AgentEngineClientOptions, AgentEngineFetch } from '../api/client.js';
 export { RunEngineImpl } from '../core/run/engine.js';
-export type { RunEngine, RunEngineConfig, RunEvent, RunStage } from '../core/run/types.js';
+export type { RunEngine, RunEngineConfig, RunEvent, RunSettlement, RunStage } from '../core/run/types.js';
 export { createProtocol } from '../core/stream/index.js';
 export type { StreamAction, StreamProtocol } from '../core/stream/types.js';
 export { SseGetTransport, SsePostTransport } from '../core/transport/sse-transport.js';

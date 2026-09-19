@@ -305,14 +305,28 @@ export function rebuildPersistedSessionHistory(
     fallbackByRun.get(runId) || [],
   ));
   const partialFallbackByRun = new Map<string, Message[]>();
+  const partialCanonicalMessages: Message[] = [];
   for (const [runId, fallback] of fallbackByRun) {
     if (completeCanonicalRunIds.has(runId) || !canonicalRunIds.has(runId)) continue;
-    partialFallbackByRun.set(
-      runId,
-      enrichPartialCanonicalRun(
-        fallback,
-        projected.filter((message) => message.invocationId === runId),
-      ),
+    const canonical = projected.filter((message) => message.invocationId === runId);
+    partialFallbackByRun.set(runId, enrichPartialCanonicalRun(fallback, canonical));
+    // During an active run the compatibility endpoint can legitimately have
+    // only the user row. Keep any streamed canonical assistant text visible
+    // after refresh; once a legacy model row exists it remains the fallback
+    // source and canonical facts are merged into it above.
+    const hasVisibleFallbackModel = fallback.some(
+      (message) => message.role === 'model' && String(message.content || '').trim(),
+    );
+    if (!hasVisibleFallbackModel) {
+      partialCanonicalMessages.push(...canonical.map(withHistoryBlocks));
+    }
+  }
+  for (const runId of canonicalRunIds) {
+    if (completeCanonicalRunIds.has(runId) || fallbackByRun.has(runId)) continue;
+    partialCanonicalMessages.push(
+      ...projected
+        .filter((message) => message.invocationId === runId)
+        .map(withHistoryBlocks),
     );
   }
   const partialFallbackMessageById = new Map(
@@ -328,7 +342,7 @@ export function rebuildPersistedSessionHistory(
       || !completeCanonicalRunIds.has(message.invocationId)
     )
   )).map((message) => partialFallbackMessageById.get(message.id) || message);
-  let messages = [...retainedFallback, ...canonicalMessages].sort(
+  let messages = [...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );
 

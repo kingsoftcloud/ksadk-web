@@ -70,3 +70,25 @@ export type {
 } from '../core/conversation/index.js';
 export { RuntimeConversationIngress, runtimeConversationIdentity, agentBlockProfile } from '../core/conversation/index.js';
 export type { AgentBlockActions, AgentScopeAction, AgentExecutionStatus, ExecutionScopeDescriptor } from '../core/conversation/index.js';
+export {
+  createConversationId,
+  createNavigationEpoch,
+  ConversationController,
+  DraftStore,
+  OutboxStore,
+  isCurrentNavigation,
+} from '../core/conversation/studio-controller.js';
+export { ApiSessionFacade } from '../core/conversation/session-facade.js';
+export type { SessionFacade, SessionOwner, SessionSummary } from '../core/conversation/session-facade.js';
+export { ConversationProjectionStore } from '../core/conversation/projection-store.js';
+export type { ProjectionCheckpoint } from '../core/conversation/projection-store.js';
+export { searchConversationMessages, scanConversationHistory } from '../core/conversation/history-search.js';
+export type { HistorySearchMatch, HistorySearchResult } from '../core/conversation/history-search.js';
+export type {
+  ConversationId,
+  ConversationBinding,
+  DraftSession,
+  OutboxEntry,
+  OutboxAttachment,
+  OutboxStatus,
+} from '../core/conversation/studio-controller.js';

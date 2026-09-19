@@ -1,8 +1,10 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { preprocessMarkdown } from '../utils/markdown.js';
+import { rehypeWorkspaceFilePaths } from '../utils/workspace-file-paths.js';
+import { openWorkspaceFilePreview } from '../utils/workspace-file-preview-bus.js';
 
 const LazyCodeBlock = React.lazy(() =>
   import('./markdown/CodeBlock.js').then((m) => ({ default: m.CodeBlock }))
@@ -31,6 +33,63 @@ type MarkdownTableProps = React.TableHTMLAttributes<HTMLTableElement>;
 type MarkdownCellProps = React.ThHTMLAttributes<HTMLTableCellElement>;
 type MarkdownDataCellProps = React.TdHTMLAttributes<HTMLTableCellElement>;
 type MarkdownLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement>;
+type MarkdownImageProps = React.ImgHTMLAttributes<HTMLImageElement>;
+
+/** Markdown content can come from tools or remote agents. Only navigation
+ * protocols are allowed; javascript:, data: and vbscript: must never reach
+ * an anchor because the content is untrusted. */
+function safeMarkdownHref(href: string | undefined): string | undefined {
+  if (!href) return undefined;
+  try {
+    const protocol = new URL(href, typeof window === 'undefined' ? 'http://localhost/' : window.location.href).protocol.toLowerCase();
+    return ['http:', 'https:', 'mailto:'].includes(protocol) ? href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeMarkdownImageSrc(src: string | undefined): string | undefined {
+  if (!src) return undefined;
+  try {
+    const protocol = new URL(src, typeof window === 'undefined' ? 'http://localhost/' : window.location.href).protocol.toLowerCase();
+    return ['http:', 'https:'].includes(protocol) ? src : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function MarkdownImage({ src, alt, ...props }: MarkdownImageProps) {
+  const safeSrc = safeMarkdownImageSrc(src);
+  const [state, setState] = useState<'loading' | 'loaded' | 'error'>(safeSrc ? 'loading' : 'error');
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  if (!safeSrc || state === 'error') {
+    return <span role="img" aria-label={alt || '图片无法加载'} className="my-2 inline-flex rounded-md border border-border bg-muted px-3 py-2 text-xs text-text-secondary">{alt || '图片无法加载'}</span>;
+  }
+  return (
+    <figure className="my-3 max-w-full">
+      <a href={safeSrc} target="_blank" rel="noopener noreferrer" title="查看原图">
+        <img
+          {...props}
+          src={safeSrc}
+          alt={alt || '图片'}
+          loading="lazy"
+          decoding="async"
+          onLoad={(event) => {
+            setState('loaded');
+            setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
+          }}
+          onError={() => setState('error')}
+          className="max-h-[28rem] max-w-full cursor-zoom-in rounded-lg border border-border object-contain shadow-sm"
+        />
+      </a>
+      <figcaption className="mt-1 flex items-center gap-2 text-xs text-text-secondary">
+        <span>{state === 'loading' ? '图片加载中…' : '点击查看原图'}</span>
+        {dimensions ? <span aria-label="图片尺寸">· {dimensions.width} × {dimensions.height}</span> : null}
+        <a href={safeSrc} download target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">下载</a>
+      </figcaption>
+    </figure>
+  );
+}
 
 const markdownComponents = {
   h1({ children }: { children?: React.ReactNode }) {
@@ -105,7 +164,26 @@ const markdownComponents = {
     return <td className="break-words border-b border-border px-3 py-2 align-top text-text-secondary" {...props}>{children}</td>;
   },
   a({ children, href, ...props }: MarkdownLinkProps) {
-     return <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+     const filePath = (props as Record<string, unknown>)['data-workspace-file'];
+     if (typeof filePath === 'string' && filePath) {
+       return (
+         <a
+           href="#"
+           className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+           title={`预览 ${filePath}`}
+           onClick={(event) => { event.preventDefault(); openWorkspaceFilePreview(filePath); }}
+           {...props}
+         >
+           {children}
+         </a>
+       );
+     }
+     const safeHref = safeMarkdownHref(href);
+     if (!safeHref) return <span className="text-text-secondary">{children}</span>;
+     return <a href={safeHref} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+  },
+  img({ src, alt, ...props }: MarkdownImageProps) {
+    return <MarkdownImage src={src} alt={alt} {...props} />;
   }
 };
 
@@ -116,6 +194,7 @@ const PlainMarkdown: React.FC<{ content: string }> = React.memo(({ content }) =>
     <div className="max-w-none break-words text-[14px] leading-[1.65] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
+        rehypePlugins={[rehypeWorkspaceFilePaths]}
         components={markdownComponents}
       >
         {processedContent}
