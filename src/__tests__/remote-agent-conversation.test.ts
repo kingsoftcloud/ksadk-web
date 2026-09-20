@@ -674,3 +674,25 @@ describe('runtime bootstrap presentation negotiation', () => {
     expect(projectConversationItems(ingress.snapshot(), {profile:'flat-v1'}).output).toBe('Root final answer');
   });
 });
+
+it('keeps a safe unknown-outcome error inside its child scope', () => {
+  const first = events.find(e => e.parent_scope_id && e.item_kind === 'status');
+  const cutoff = events.indexOf(first);
+  const ingress = replay(events.slice(0, cutoff + 1));
+  const common = { ...first, item_id: 'local-outcome-error', item_kind: 'status' };
+  delete common.snapshot;
+  delete common.initial;
+  ingress.apply({ ...common, event_id: 'local-error-start', seq: first.seq + 1,
+    event_type: 'item.started', initial: { parts: [] } });
+  const failed = { ...common, event_id: 'local-error-failed', seq: first.seq + 2,
+    event_type: 'item.failed', error: { code: 'A2A_SEND_OUTCOME_UNKNOWN',
+      message: 'Remote result is unknown; do not resend the call.', source: 'a2a', scope_id: first.scope_id } };
+  ingress.apply(failed);
+  const snapshot = ingress.snapshot();
+  const error = snapshot.items.find(item => item.kind === 'error');
+  expect(error?.parentItemId).toBeTruthy();
+  expect(error?.payload.error).toContain('Remote result is unknown');
+  expect(projectConversationItems(snapshot).output).toBe('');
+  ingress.apply(failed);
+  expect(ingress.snapshot()).toEqual(snapshot);
+});

@@ -251,6 +251,7 @@ export class RuntimeConversationIngress {
         .snapshot()
         .items.find((i) => i.scopeId === scope && i.itemId === nativeItem);
       if (!item) return null;
+      if (parent && item.itemKind === 'status' && item.status === 'open' && !item.parts.length) return null;
       if (parent && ['artifact', 'tool_call', 'tool_result'].includes(item.itemKind) && !item.parts.length) {
         this.runId = run;
         this.parents.set(scope, parent);
@@ -345,6 +346,11 @@ export class RuntimeConversationIngress {
           mimeType: artifact.mime_type,
           uri: artifact.uri,
         };
+      } else if (item.status === 'failed') {
+        const error = record(frame.error);
+        base.kind = 'error';
+        base.payloadSchemaRef = 'conversation.item.error/v1';
+        base.payload = { error: String(error.message || error.code || 'Remote call failed') };
       } else {
         base.visibility = visibility === 'public' ? 'public' : 'hidden';
         base.kind = 'unknown';
