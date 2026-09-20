@@ -227,6 +227,18 @@ describe('shared remote profile, history and reconnect', () => {
       })),
     );
   });
+  it('keeps the durable user input once before its remote run on refresh', () => {
+    const history = rebuildPersistedSessionHistory(
+      [{ id: 'input-1', role: 'user', content: 'question', timestamp: 999000,
+        invocationId: 'root-run-1' }],
+      events.map(e => ({ SeqId: e.seq, EventType: 'runtime_event',
+        Content: { runtime_event: e } })),
+      'session',
+    );
+    expect(history.messages.filter(m => m.role === 'user')).toHaveLength(1);
+    expect(history.messages[0]?.id).toBe('input-1');
+    expect(history.messages.some(m => m.agentBlock)).toBe(true);
+  });
   it('descriptor-first retains the trigger position', () => {
     const frames = [
       events[0],

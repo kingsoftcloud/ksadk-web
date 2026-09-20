@@ -370,8 +370,12 @@ export function rebuildPersistedSessionHistory(
       .map((message, index) => ({...message, invocationId:runId, timestamp:timestamp + index}));
     if (projectedRemote.length && fullyObservedRunIds.has(runId)) {
       const index = messages.findIndex(message => message.invocationId === runId || message.runId === runId);
-      const retained = messages.filter(message => (message.invocationId !== runId && message.runId !== runId) || message.role === 'user');
-      messages = [...retained.slice(0,index < 0 ? retained.length : index), ...projectedRemote, ...retained.slice(index < 0 ? retained.length : index)];
+      const belongsToRun = (message: Message) => message.invocationId === runId || message.runId === runId;
+      const input = messages.find(message => belongsToRun(message) && message.role === 'user');
+      const replacement = input && !projectedRemote.some(message => message.role === 'user')
+        ? [input, ...projectedRemote] : projectedRemote;
+      const retained = messages.filter(message => !belongsToRun(message));
+      messages = [...retained.slice(0,index < 0 ? retained.length : index), ...replacement, ...retained.slice(index < 0 ? retained.length : index)];
       completeCanonicalRunIds.add(runId);
     }
   }
