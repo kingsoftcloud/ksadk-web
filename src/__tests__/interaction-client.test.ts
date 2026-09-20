@@ -496,6 +496,8 @@ describe('Inbox execution rejection after an accepted receipt', () => {
     await client.respond(input);
     if (!early) client.store.rejectCommand('session-1', 'cmd-1', 'runtime_interaction_unavailable');
     expect(client.store.get('session-1', 'int-1')?.status).toBe('failed');
+    client.ingestHistory([interactionFromSessionEvent(FIXTURES.interactionV1)!]);
+    expect(client.store.get('session-1', 'int-1')?.status).toBe('failed');
     submitInteraction.mockResolvedValue(okReceipt({ command_id: 'cmd-2' }));
     await client.respond(input);
     expect(submitInteraction).toHaveBeenLastCalledWith(expect.objectContaining({

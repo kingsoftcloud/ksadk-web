@@ -105,6 +105,16 @@ export class InteractionStore {
     ) {
       next = existing;
       event = { type: 'interaction_updated', interaction: next };
+    } else if (
+      existing.status === 'failed'
+      && existing.extensions.rejected_command_id
+      && interaction.revision === existing.revision
+      && !isTerminalInteraction(interaction.status)
+    ) {
+      // Replaying the original request does not undo a later command rejection
+      // or discard the command identity needed for a deliberate retry.
+      next = existing;
+      event = { type: 'interaction_updated', interaction: next };
     } else if (existing.status === 'resolving' && !isTerminalInteraction(interaction.status)) {
       // An in-flight submit is never demoted by a non-terminal fact (the
       // receipt path no longer resolves locally): keep resolving until the
@@ -145,9 +155,12 @@ export class InteractionStore {
   markResolving(sessionId: string, interactionId: string): void {
     const existing = this.get(sessionId, interactionId);
     if (!existing || !['pending', 'failed'].includes(existing.status)) return;
+    const extensions = { ...existing.extensions };
+    delete extensions.submit_error;
     this.records.set(this.key(sessionId, interactionId), {
       ...existing,
       status: 'resolving',
+      extensions,
     });
     this.emit({
       type: 'interaction_updated',
