@@ -247,6 +247,7 @@ export function rebuildPersistedSessionHistory(
   fallbackMessages: Message[],
   records: PersistedSessionEventRecord[],
   sessionId: string,
+  profile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
 ): {
   messages: Message[];
   canonicalRunIds: string[];
@@ -354,7 +355,7 @@ export function rebuildPersistedSessionHistory(
       ? [String(frame.run_id)] : [];
   }));
   for (const runId of remoteRuns) {
-    const ingress = new RuntimeConversationIngress(sessionId);
+    const ingress = new RuntimeConversationIngress(sessionId, undefined, profile);
     let cursor = 0;
     let timestamp = 0;
     for (const persisted of orderedRecords) {
@@ -365,7 +366,7 @@ export function rebuildPersistedSessionHistory(
       if (!timestamp) timestamp = eventTimestamp(frame.timestamp);
     }
     const state = ingress.snapshot();
-    const presentation = projectConversationItems(state);
+    const presentation = projectConversationItems(state, { profile });
     const projectedRemote = projectConversationStreamForHostedUi({state,presentation,runId,cursor}).messages
       .map((message, index) => ({...message, invocationId:runId, timestamp:timestamp + index}));
     if (projectedRemote.length && fullyObservedRunIds.has(runId)) {

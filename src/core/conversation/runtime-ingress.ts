@@ -36,7 +36,7 @@ export class RuntimeConversationIngress {
   constructor(
     private readonly sessionId: string,
     private readonly conversation = new ConversationItemReducer(),
-    private readonly profile: 'agent-block-v1' | 'flat-v1' = 'agent-block-v1',
+    private readonly profile: 'agent-block-v1' | 'flat-v1' = 'flat-v1',
   ) {}
   private identity(run: string, scope: string, item: string, child = false): string {
     return this.profile === 'agent-block-v1' || child

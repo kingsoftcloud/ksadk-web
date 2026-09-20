@@ -452,6 +452,8 @@ export class RunEngineImpl implements RunEngine {
           invocationId,
         );
 
+        const requestedProfile = this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
+          ? 'agent-block-v1' : 'flat-v1';
         const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
         this.setStage('streaming');
         this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
@@ -467,6 +469,7 @@ export class RunEngineImpl implements RunEngine {
             sessionId,
             peeked.receipt,
             draft.onInvocationCreated,
+            requestedProfile,
           );
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
@@ -1121,6 +1124,8 @@ export class RunEngineImpl implements RunEngine {
       InvocationId: invocationId,
       Stream: true,
       ...(this.config.kernelSessionEventsEnabled ? { Background: true } : {}),
+      ...(this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
+        ? { Extensions: { 'ksadk.presentation': { profile: 'agent-block-v1' } } } : {}),
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,
       ModelMetadata: this.config.selectedModelMetadata || undefined,
@@ -1177,6 +1182,7 @@ export class RunEngineImpl implements RunEngine {
     sessionId: string,
     receipt: import('../stream/kernel-events.js').KernelRunReceipt,
     onInvocationCreated?: (runId: string) => void,
+    requestedProfile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
   ): Promise<StreamConsumeResult> {
     if (receipt.status === 'rejected' || receipt.status === 'unsupported') {
       this.setStage('error');
@@ -1203,7 +1209,9 @@ export class RunEngineImpl implements RunEngine {
     this.emit({ type: 'activity', phase: '已提交运行，订阅事件流', status: 'running', countEvent: false });
 
     const translator = new KernelRunEventTranslator(sessionId);
-    const canonical = new RuntimeConversationIngress(sessionId);
+    const profile = requestedProfile === 'agent-block-v1' && receipt.presentationProfile === 'agent-block-v1'
+      ? 'agent-block-v1' : 'flat-v1';
+    const canonical = new RuntimeConversationIngress(sessionId, undefined, profile);
     // Inbox acceptedSeq is not a SessionEvent cursor. Scope replay to the
     // admitted command before considering any older run's terminal facts.
     let commandSeen = !receipt.commandId;
@@ -1261,7 +1269,7 @@ export class RunEngineImpl implements RunEngine {
                   const state = canonical.snapshot();
                   this.emit({
                     type: 'conversation_snapshot', sessionId,
-                    result: { state, presentation: projectConversationItems(state),
+                    result: { state, presentation: projectConversationItems(state, { profile }),
                       runId: kernelRunId, cursor: this.lastSeqId },
                   });
                 }

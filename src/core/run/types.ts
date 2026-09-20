@@ -94,6 +94,7 @@ export type RunEngineConfig = {
   checkpointResumePreviewEnabled?: boolean;
   /** RunAgent receipt + canonical SubscribeSessionEvents supported by this endpoint. */
   kernelSessionEventsEnabled?: boolean;
+  presentationProfile?: 'flat-v1' | 'agent-block-v1';
   /** Optional headless ConversationSurface/Input/Item v1 transport. */
   conversationClient?: ConversationClient;
 };

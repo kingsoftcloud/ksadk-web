@@ -1869,7 +1869,7 @@ describe('RunEngineImpl agent control receipts', () => {
     expect(calls[0].Background).toBe(enabled ? true : undefined);
   });
 
-  it('projects scoped kernel output after the admitted command, ignoring older run terminals', async () => {
+  it.each([['flat-v1', 'flat-v1'], ['agent-block-v1', 'agent-block-v1'], ['agent-block-v1', undefined]] as const)('projects kernel output requested %s acknowledged %s', async (profile, acknowledged) => {
     const frames = readFileSync(new URL('./fixtures/a2a_remote_agent/v1/a2a_stream_tool_terminal.jsonl', import.meta.url), 'utf8')
       .trim().split('\n').map(line => JSON.parse(line))
       .filter(row => row.kind === 'runtime_event').map(row => row.payload);
@@ -1878,7 +1878,7 @@ describe('RunEngineImpl agent control receipts', () => {
     } });
     const api = createApiFacade([]);
     api.runAgent = async () => bytes(JSON.stringify({ Data: {
-      ReceiptStatus: 'accepted', CommandId: 'command-new', AcceptedSeq: 1,
+      ReceiptStatus: 'accepted', CommandId: 'command-new', AcceptedSeq: 1, PresentationProfile: acknowledged,
     } }));
     const backlog = [
       { seq: 1, family: 'runtime', event_type: 'run.completed', run_id: 'old-run' },
@@ -1890,12 +1890,14 @@ describe('RunEngineImpl agent control receipts', () => {
     const events: RunEvent[] = [];
     const settled = vi.fn();
     engine.subscribe(event => events.push(event));
+    engine.updateConfig({ agentId: 'agent', apiFormats: ['responses'], agentFramework: 'adk',
+      selectedModel: '', thinkingMode: 'auto', kernelSessionEventsEnabled: true, presentationProfile: profile });
     engine.start({ text: 'remote task', sessionId: 'session-1', attachments: [], onSettled: settled });
     await vi.waitFor(() => expect(settled).toHaveBeenCalledWith('session-1', 'completed'));
     const snapshots = events.filter((event): event is Extract<RunEvent, {type: 'conversation_snapshot'}> => event.type === 'conversation_snapshot');
     expect(snapshots.at(-1)?.result.presentation.output).toBe('Root final answer');
-    expect(snapshots.at(-1)?.result.presentation.timeline.filter(entry => entry.item.kind === 'agent')).toHaveLength(1);
-    expect(snapshots.some(event => event.result.presentation.timeline[0]?.children?.some(child => child.item.kind === 'tool_call') && !event.result.presentation.terminalStatus)).toBe(true);
+    expect(snapshots.at(-1)?.result.presentation.timeline.filter(entry => entry.item.kind === 'agent')).toHaveLength(profile === 'agent-block-v1' && acknowledged === 'agent-block-v1' ? 1 : 0);
+    if (profile === 'agent-block-v1' && acknowledged === 'agent-block-v1') expect(snapshots.some(event => event.result.presentation.timeline[0]?.children?.some(child => child.item.kind === 'tool_call') && !event.result.presentation.terminalStatus)).toBe(true);
     expect(events.filter(event => event.type === 'stream_event').some(event => event.event.InvocationId === 'old-run')).toBe(false);
   });
 

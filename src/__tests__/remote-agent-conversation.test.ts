@@ -15,7 +15,7 @@ const events = readFileSync(
   .filter((x) => x.kind === 'runtime_event')
   .map((x) => x.payload);
 function replay(frames = events) {
-  const ingress = new RuntimeConversationIngress('session');
+  const ingress = new RuntimeConversationIngress('session', undefined, 'agent-block-v1');
   frames.forEach((e) => ingress.apply(e));
   return ingress;
 }
@@ -74,7 +74,7 @@ describe('remote AgentBlock canonical fixture', () => {
 });
 
 import { HttpConversationClient } from '../core/conversation/client';
-import { agentBlockProfile } from '../core/conversation/agent';
+import { agentBlockProfile, bootstrapPresentationProfile } from '../core/conversation/agent';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry';
 import { decodeConversationInput } from '../core/conversation/contracts';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history';
@@ -205,6 +205,7 @@ describe('shared remote profile, history and reconnect', () => {
         Content: { runtime_event: e },
       })),
       'session',
+      'agent-block-v1',
     );
     const state = replay().snapshot();
     const live = projectConversationStreamForHostedUi({
@@ -234,6 +235,7 @@ describe('shared remote profile, history and reconnect', () => {
       events.map(e => ({ SeqId: e.seq, EventType: 'runtime_event',
         Content: { runtime_event: e } })),
       'session',
+      'agent-block-v1',
     );
     expect(history.messages.filter(m => m.role === 'user')).toHaveLength(1);
     expect(history.messages[0]?.id).toBe('input-1');
@@ -656,3 +658,19 @@ it.each(['before', 'after'])(
     )).toHaveLength(1);
   },
 );
+
+
+describe('runtime bootstrap presentation negotiation', () => {
+  it('defaults unknown producers, versions, and renderers to flat', () => {
+    expect(bootstrapPresentationProfile(undefined, agentBlockRendererCatalog)).toBe('flat-v1');
+    expect(bootstrapPresentationProfile({...surface, apiVersion:'conversation.ksadk.io/v99'}, agentBlockRendererCatalog)).toBe('flat-v1');
+    expect(bootstrapPresentationProfile(surface)).toBe('flat-v1');
+    expect(bootstrapPresentationProfile(surface, agentBlockRendererCatalog)).toBe('agent-block-v1');
+  });
+  it('raw runtime ingress does not enable hierarchy without negotiation', () => {
+    const ingress = new RuntimeConversationIngress('session');
+    events.forEach(e => ingress.apply(e));
+    expect(projectConversationItems(ingress.snapshot(), {profile:'flat-v1'}).timeline.some(e => e.item.kind === 'agent')).toBe(false);
+    expect(projectConversationItems(ingress.snapshot(), {profile:'flat-v1'}).output).toBe('Root final answer');
+  });
+});

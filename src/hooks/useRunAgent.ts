@@ -1,3 +1,4 @@
+import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useRef, useCallback, useEffect, useMemo } from 'react';
 import { useStreamingStore } from '../stores/streaming.js';
@@ -108,6 +109,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     }),
     checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
     kernelSessionEventsEnabled: uiCapabilities.KernelSessionEvents === true,
+    presentationProfile: bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog),
     conversationClient: conversationClient || undefined,
   }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
 

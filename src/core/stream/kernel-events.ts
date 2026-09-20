@@ -505,6 +505,7 @@ export class KernelRunEventTranslator {
 export type KernelRunReceipt = {
   status: string;
   commandId?: string | null;
+  presentationProfile?: 'flat-v1' | 'agent-block-v1';
   messageId?: string | null;
   runId?: string | null;
   acceptedSeq?: number | null;
@@ -619,6 +620,7 @@ function parseReceipt(text: string): KernelRunReceipt | null {
     const error = asRecord(data?.Error);
     return {
       status,
+      presentationProfile: data?.PresentationProfile === 'agent-block-v1' ? 'agent-block-v1' : 'flat-v1',
       commandId: (data?.CommandId as string | null) ?? null,
       messageId: (data?.MessageId as string | null) ?? null,
       runId: (data?.RunId as string | null) ?? null,

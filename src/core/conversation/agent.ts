@@ -1,3 +1,4 @@
+import { decodeConversationSurface } from './contracts.js';
 import type { ConversationItem, ConversationSurface } from './types.js';
 import type { TrustedRendererCatalog } from './renderer-registry.js';
 
@@ -44,6 +45,15 @@ export type AgentScopeAction = {
 export type AgentBlockActions = {
   cancel?: (action: AgentScopeAction) => void | Promise<void>;
 };
+
+/** Select only from a producer-declared, versioned surface and host renderer. */
+export function bootstrapPresentationProfile(
+  value: unknown,
+  catalog?: TrustedRendererCatalog,
+): 'agent-block-v1' | 'flat-v1' {
+  const surface = decodeConversationSurface(value);
+  return surface ? agentBlockProfile(surface, catalog) : 'flat-v1';
+}
 
 export function agentBlockProfile(
   surface: ConversationSurface,

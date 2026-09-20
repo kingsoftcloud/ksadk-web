@@ -1,3 +1,5 @@
+import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
+import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
@@ -159,6 +161,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
   const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
+  const historyProfileBySessionRef = useRef(new Map<string, 'flat-v1' | 'agent-block-v1'>());
   const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
   const eventHistoryBySessionRef = useRef(new Map<string, SessionEventHistoryCache>());
   // CreateSession can become usable before ListSessions' projection catches up.
@@ -426,6 +429,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const loadSession = useCallback(
     async (sessionId: string) => {
+      const profile = bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog);
+      historyProfileBySessionRef.current.set(sessionId, profile);
       const previousSessionId = currentSessionIdRef.current;
       const generation = ++loadSessionGenerationRef.current;
       historyHydrationGenerationRef.current = generation;
@@ -546,6 +551,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               fallbackHistory,
               eventHistory.events,
               sessionId,
+              profile,
             );
             canonicalRunIds = rebuilt.canonicalRunIds;
             history = rebuilt.messages;
@@ -862,6 +868,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         useSessionStore.getState().clearSessionMessageHistory(sessionId);
         sessionTranscriptCacheRef.current.delete(sessionId);
         fallbackHistoryBySessionRef.current.delete(sessionId);
+        historyProfileBySessionRef.current.delete(sessionId);
         eventHistoryBySessionRef.current.delete(sessionId);
         canonicalRunIdsBySessionRef.current.delete(sessionId);
         pendingCreatedSessionAgentsRef.current.delete(sessionId);
@@ -972,7 +979,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       }
 
-      const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId);
+      const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
+        historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
       const mergedHistory = rebuilt.messages;
       rememberSessionCache(
         canonicalRunIdsBySessionRef.current,
