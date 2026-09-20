@@ -145,7 +145,7 @@ export interface RunEngine {
   subscribe(listener: (event: RunEvent) => void): () => void;
 }
 
-export type RunSettlement = 'completed' | 'failed' | 'cancelled' | 'unknown';
+export type RunSettlement = 'completed' | 'awaiting-input' | 'failed' | 'cancelled' | 'unknown';
 
 /**
  * agent-kernel/v1 control surface state. `accepted`/`duplicate` receipts move

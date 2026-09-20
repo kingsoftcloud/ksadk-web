@@ -289,7 +289,8 @@ export function useRunAgent(ctx: RunAgentContext) {
         onSettled: (sessionId, outcome = 'unknown') => {
           if (outboxEntry) outboxRequestsRef.current.delete(outboxEntry.requestId);
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, {
-            status: outcome === 'completed' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
+            // The outbox tracks delivery: an actionable approval proves the input was accepted.
+            status: outcome === 'completed' || outcome === 'awaiting-input' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
           });
           onRunSettled?.(sessionId, owner.agentId, outcome);
           if (outcome === 'completed') drainQueue(owner);
@@ -328,9 +329,9 @@ export function useRunAgent(ctx: RunAgentContext) {
 
       const accepted = engine.resumeCheckpoint({
         ...params,
-        onSettled: (sessionId) => {
-          onRunSettled?.(sessionId, owner.agentId);
-          drainQueue(owner);
+        onSettled: (sessionId, outcome) => {
+          onRunSettled?.(sessionId, owner.agentId, outcome);
+          if (outcome === 'completed') drainQueue(owner);
         },
       });
       if (!accepted) {

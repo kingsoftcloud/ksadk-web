@@ -38,7 +38,7 @@ import type {
   ConversationSurfaceBootstrap,
 } from '../conversation/types.js';
 
-type StreamConsumeResult = { terminalStatus?: string };
+type StreamConsumeResult = { terminalStatus?: string; awaitingInput?: boolean };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -476,6 +476,14 @@ export class RunEngineImpl implements RunEngine {
         }
         if (this.operationEpoch !== operationEpoch) return;
 
+        if (streamResult.awaitingInput) {
+          settlement = 'awaiting-input';
+          this.setStage('completing');
+          this.emit({ type: 'activity', phase: '等待人工确认', status: 'waiting', countEvent: false });
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
+
         if (streamResult.terminalStatus === 'cancelled') {
           settlement = 'cancelled';
           this.setStage('stopping');
@@ -781,6 +789,13 @@ export class RunEngineImpl implements RunEngine {
           assistantMessageId,
           invocationId,
         );
+        if (streamResult.awaitingInput) {
+          settlement = 'awaiting-input';
+          this.setStage('completing');
+          this.emit({ type: 'activity', source: 'restore', phase: '等待人工确认', status: 'waiting', countEvent: false });
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
           if (streamResult.terminalStatus === 'cancelled') {
             settlement = 'cancelled';
@@ -1322,6 +1337,11 @@ export class RunEngineImpl implements RunEngine {
     let messageCreated = false;
     let receivedByteCount = 0;
     let terminalStatus: string | undefined;
+    const pendingApprovals = new Set<string>();
+    const result = (): StreamConsumeResult => ({
+      terminalStatus,
+      awaitingInput: pendingApprovals.size > 0 && (!terminalStatus || terminalStatus === 'incomplete'),
+    });
 
     {
       while (true) {
@@ -1360,12 +1380,15 @@ export class RunEngineImpl implements RunEngine {
             }
 
             const activity = activityForTransportEvent(event.eventName, event.data);
-            if (activity) {
+            if (activity && !(pendingApprovals.size > 0 && (event.eventName === 'response.incomplete'
+              || (event.data as { type?: string })?.type === 'response.incomplete'))) {
               this.emit({ type: 'activity', ...activity });
             }
 
             const actions = protocol.parse(event, protocolState);
             for (const action of actions) {
+              if (action.type === 'approval_request') pendingApprovals.add(action.approvalRequestId);
+              if (action.type === 'approval_resolved') pendingApprovals.delete(action.approvalRequestId);
               this.dispatchAction(action, messageId);
               if (action.type === 'terminal') terminalStatus = action.status;
             }
@@ -1381,7 +1404,7 @@ export class RunEngineImpl implements RunEngine {
 
           if (shouldStop) {
             reader.cancel().catch(() => {});
-            return { terminalStatus };
+            return result();
           }
         }
       }
@@ -1391,7 +1414,7 @@ export class RunEngineImpl implements RunEngine {
       throw new Error('运行时返回了空响应流，请稍后重试；若问题持续，请检查运行时状态。');
     }
 
-    if (terminalStatus) return { terminalStatus };
+    if (terminalStatus || pendingApprovals.size > 0) return result();
     throw new TypeError('运行时连接已结束，但尚未收到执行终态；请查询原任务状态。');
   }
 
