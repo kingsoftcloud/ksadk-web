@@ -214,6 +214,9 @@ export class KernelRunEventTranslator {
     }
 
     if (family === 'control') {
+      if (eventType === 'control.command_rejected') {
+        return { ...base(), EventType: eventType, Content: frame };
+      }
       if (eventType === 'control.run_transition') {
         const state = String(frame.state || '').toLowerCase();
         if (TERMINAL_CONTROL_STATES.has(state)) {

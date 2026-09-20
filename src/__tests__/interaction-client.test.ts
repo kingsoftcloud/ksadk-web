@@ -482,3 +482,32 @@ describe('store first-wins semantics', () => {
     expect(store.get('session-1', 'int-1')!.status).toBe('expired');
   });
 });
+
+describe('Inbox execution rejection after an accepted receipt', () => {
+  it.each([false, true])('allows a fresh command after rejection (event before receipt: %s)', async (early) => {
+    const submitInteraction = vi.fn().mockImplementation(async () => {
+      if (early) client.store.rejectCommand('session-1', 'cmd-1', 'runtime_interaction_unavailable');
+      return okReceipt();
+    });
+    const client = new InteractionClientImpl({ agentId: 'agent-1', submitInteraction });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+    const input = { interactionId: 'int-1', expectedRevision: 1, action: 'approve' as const,
+      response: {}, idempotencyKey: 'same-user-decision' };
+    await client.respond(input);
+    if (!early) client.store.rejectCommand('session-1', 'cmd-1', 'runtime_interaction_unavailable');
+    expect(client.store.get('session-1', 'int-1')?.status).toBe('failed');
+    submitInteraction.mockResolvedValue(okReceipt({ command_id: 'cmd-2' }));
+    await client.respond(input);
+    expect(submitInteraction).toHaveBeenLastCalledWith(expect.objectContaining({
+      IdempotencyKey: 'same-user-decision:retry-cmd-1',
+    }));
+    expect(client.store.get('session-1', 'int-1')?.status).toBe('resolving');
+    client.store.rejectCommand('session-1', 'cmd-1', 'runtime_interaction_unavailable');
+    expect(client.store.get('session-1', 'int-1')?.status).toBe('resolving');
+    client.store.rejectCommand('another-session', 'cmd-2', 'runtime_interaction_unavailable');
+    expect(client.store.get('session-1', 'int-1')?.status).toBe('resolving');
+    client.ingest({ ...client.store.get('session-1', 'int-1')!, status: 'resolved', revision: 2 });
+    client.store.rejectCommand('session-1', 'cmd-2', 'runtime_interaction_unavailable');
+    expect(client.store.get('session-1', 'int-1')?.status).toBe('resolved');
+  });
+});

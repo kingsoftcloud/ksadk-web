@@ -19,6 +19,7 @@ export class InteractionStore {
   private records = new Map<string, Interaction>();
   /** Run terminal facts can arrive before replay reaches its interaction. */
   private terminalRuns = new Set<string>();
+  private rejectedCommands = new Map<string, string>();
   private listeners = new Set<InteractionStoreListener>();
 
   private key(sessionId: string, interactionId: string): string {
@@ -143,7 +144,7 @@ export class InteractionStore {
   /** Locally mark a record as resolving while a submit is in flight. */
   markResolving(sessionId: string, interactionId: string): void {
     const existing = this.get(sessionId, interactionId);
-    if (!existing || existing.status !== 'pending') return;
+    if (!existing || !['pending', 'failed'].includes(existing.status)) return;
     this.records.set(this.key(sessionId, interactionId), {
       ...existing,
       status: 'resolving',
@@ -170,6 +171,34 @@ export class InteractionStore {
     };
     this.records.set(this.key(sessionId, interactionId), next);
     this.emit({ type: 'interaction_resolved', interaction: next });
+  }
+
+  /** Correlate durable Inbox receipts with later execution rejections. */
+  recordCommand(sessionId: string, interactionId: string, commandId: string): void {
+    const existing = this.get(sessionId, interactionId);
+    if (!existing || !commandId || isTerminalInteraction(existing.status)) return;
+    this.records.set(this.key(sessionId, interactionId), {
+      ...existing, extensions: { ...existing.extensions, submit_command_id: commandId },
+    });
+    const reason = this.rejectedCommands.get(this.key(sessionId, commandId));
+    if (reason) this.rejectCommand(sessionId, commandId, reason);
+  }
+
+  rejectCommand(sessionId: string, commandId: string, reason: string): void {
+    if (!sessionId || !commandId) return;
+    this.rejectedCommands.set(this.key(sessionId, commandId), reason);
+    for (const record of this.listAll(sessionId)) {
+      if (record.extensions.submit_command_id !== commandId) continue;
+      this.markFailed(sessionId, record.interactionId, {
+        code: reason, message: `提交未执行（${reason}），请重试`, retryable: true,
+      });
+      const updated = this.get(sessionId, record.interactionId);
+      if (updated?.status === 'failed') {
+        this.records.set(this.key(sessionId, record.interactionId), {
+          ...updated, extensions: { ...updated.extensions, rejected_command_id: commandId },
+        });
+      }
+    }
   }
 
   /** Attach an idempotency key to a resolving record (replay correlation). */
@@ -267,6 +296,9 @@ export class InteractionStore {
       this.remove(sessionId, interaction.interactionId);
     }
     const prefix = `${sessionId}\u0000`;
+    for (const key of this.rejectedCommands.keys()) {
+      if (key.startsWith(prefix)) this.rejectedCommands.delete(key);
+    }
     for (const key of this.terminalRuns) {
       if (key.startsWith(prefix)) this.terminalRuns.delete(key);
     }
