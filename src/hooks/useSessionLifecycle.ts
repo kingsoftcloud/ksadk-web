@@ -429,7 +429,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const loadSession = useCallback(
     async (sessionId: string) => {
-      const profile = bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog);
+      // Bootstrap can invoke the initial list callback before React replaces
+      // its closure. Read the committed capabilities for this Agent, then
+      // freeze the selected profile for this history read and its pages.
+      const bootstrap = useBootstrapStore.getState();
+      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilities;
+      const profile = bootstrapPresentationProfile(capabilities.ConversationSurface, agentBlockRendererCatalog);
       historyProfileBySessionRef.current.set(sessionId, profile);
       const previousSessionId = currentSessionIdRef.current;
       const generation = ++loadSessionGenerationRef.current;
