@@ -3,7 +3,7 @@ import {
   AgentEngineClient,
   type AgentEngineClientOptions,
 } from '../../api/client.js';
-import { decodeReceipt } from '../../types/agent-control.js';
+import { decodeActionReceipt } from '../../types/agent-control.js';
 
 type ListSessionsData = {
   Sessions?: unknown[];
@@ -201,7 +201,7 @@ export class ApiFacadeImpl implements ApiFacade {
       IdempotencyKey: command.idempotency_key,
       Payload: command.payload,
     }, opts);
-    return decodeReceipt(data);
+    return decodeActionReceipt(data);
   }
 
   async submitInteraction(
@@ -217,7 +217,7 @@ export class ApiFacadeImpl implements ApiFacade {
     },
     opts?: { signal?: AbortSignal },
   ) {
-    return decodeReceipt(await this.client.postJsonAction<unknown>('SubmitInteraction', { ...params }, opts));
+    return decodeActionReceipt(await this.client.postJsonAction<unknown>('SubmitInteraction', { ...params }, opts));
   }
 
   async getAgentStatus(opts?: { signal?: AbortSignal }) {

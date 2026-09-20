@@ -65,6 +65,20 @@ const controlErrorShape = z.object({
   details: z.record(z.string(), z.unknown()).optional(),
 });
 
+/** Decode the public Action Data shape, then enforce the canonical contract. */
+export function decodeActionReceipt(raw: unknown): AgentControlReceipt {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return decodeReceipt(raw);
+  const value = raw as Record<string, unknown>;
+  if ('schema_version' in value || !('SchemaVersion' in value)) return decodeReceipt(raw);
+  const fields: Record<string, string> = {
+    SchemaVersion: 'schema_version', CommandId: 'command_id', Status: 'status',
+    MessageId: 'message_id', RunId: 'run_id', AcceptedSeq: 'accepted_seq', Error: 'error',
+  };
+  return decodeReceipt(Object.fromEntries(Object.entries(value).map(([key, value]) => [
+    fields[key] ?? key, value,
+  ])));
+}
+
 export function decodeReceipt(raw: unknown): AgentControlReceipt {
   const parsed = z
     .object({

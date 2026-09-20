@@ -1,5 +1,5 @@
 import { streamAction, postJsonAction } from './client.js';
-import { decodeReceipt, type AgentControlReceipt } from '../types/agent-control.js';
+import { decodeActionReceipt, type AgentControlReceipt } from '../types/agent-control.js';
 
 export async function runAgent(
   body: Record<string, unknown>,
@@ -28,7 +28,7 @@ export async function submitAgentControl(
     IdempotencyKey: params.idempotencyKey,
     Payload: params.payload,
   }, options);
-  return decodeReceipt(data);
+  return decodeActionReceipt(data);
 }
 
 export type SubmitInteractionParams = {
@@ -52,5 +52,5 @@ export async function submitInteraction(
   options?: { signal?: AbortSignal },
 ): Promise<AgentControlReceipt> {
   const data = await postJsonAction<unknown>('SubmitInteraction', { ...params }, options);
-  return decodeReceipt(data);
+  return decodeActionReceipt(data);
 }
