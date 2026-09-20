@@ -1,0 +1,16 @@
+import { teamSnapshot, memberRef } from './teams-data.js';
+import { decodeTeamWorkspaceSnapshot, type TeamWorkspaceSnapshot, type WorkspaceClientScope, type WorkspaceMessage } from '../../src/public/teams.js';
+
+/** Controlled test data only; not imported by any product entry. */
+export function cloudTeamScope(origin = 'https://studio.example'): WorkspaceClientScope {
+  return { origin, authorityId: 'fixture-local', ownerScopeRef: 'fixture-owner', groupId: 'fixture-group' };
+}
+export function cloudTeamSnapshot(run = 'run-a', watermark = 10): TeamWorkspaceSnapshot {
+  const local = teamSnapshot(); const { authorityId, ownerScopeRef, groupId } = cloudTeamScope(); const scope = { authorityId, ownerScopeRef, groupId };
+  const members = local.members.map((member, index) => ({ ...member, responsibility: member.responsibility ?? '', activeRunId: member.activeRunId ?? null, reason: null,
+    binding: { ...member.binding, kind: index === 0 ? 'cloud' : 'local_build', availability: { state: index === 0 ? 'ready' : 'unavailable', code: index === 0 ? null : 'node_offline', reason: index === 0 ? null : '本地节点离线，等待重新连接', action: null } } }));
+  const runs = ['run-a', 'run-b'].map((id, index) => { const value = { ...local.teamRuns[0], teamRunId: id, goal: index === 0 ? '评估端云协同架构并提交报告' : '核对上一轮测试结果', taskCount: 2, pendingCount: index === 0 ? 1 : 0, reason: null } as Record<string, unknown>; delete value.budget; return value; });
+  const selectedRun = runs.find(value => value.teamRunId === run)!;
+  const message: WorkspaceMessage = { messageId: `${run}-message-8`, groupId: scope.groupId, teamRunId: run, revision: 1, createdSeq: 8, createdAt: '2026-09-18T08:00:00.000Z', senderPrincipal: 'owner', senderName: '产品负责人', groupRole: 'owner', memberId: null, parts: [{ kind: 'text', text: run === 'run-a' ? '请核对接口边界，并给出可以验证的结论。' : '这里只展示上一轮协作的消息。' }], mentions: [], intent: 'followup', replyTo: null, sourceRefs: [], visibility: 'public' };
+  return decodeTeamWorkspaceSnapshot({ apiVersion: 'teams.ksadk.io/v1', viewVersion: 'workspace/v1', scope, snapshotId: `snapshot-${run}`, watermark, group: { ...local.group, policy: { taskAcceptance: 'human', peerWake: false } }, members, runSummaries: runs, selectedRun, selectedRunMembers: members.map(member => ({ ...member, teamRunId: run, runMemberId: `${run}-${member.memberId}`, groupRevision: 1 })), taskSummaries: [{ taskId: `${run}-task-a`, groupId: scope.groupId, teamRunId: run, revision: 1, title: '核对接口契约', ownerMemberId: 'engineer', dependencies: [], status: 'running', attemptCount: 1, reason: null }], pendingInteractions: run === 'run-a' ? [{ ref: { ...memberRef(), interactionId: 'question-a' }, groupId: scope.groupId, teamRunId: run, revision: 1, title: '确认调研范围', kind: 'input', status: 'pending', createdAt: '2026-09-18T08:00:00.000Z' }] : [], recentMessages: [message], artifactSummaries: [{ artifactId: `${run}-artifact`, groupId: scope.groupId, teamRunId: run, revision: 1, name: '架构分析.md', mediaType: 'text/markdown', source: memberRef(), digest: `sha256:${'a'.repeat(64)}`, sizeBytes: 1024, state: 'ready' }], cursors: { runSummaries: 'runs-next', taskSummaries: 'tasks-next', pendingInteractions: null, recentMessages: 'messages-earlier', artifactSummaries: null } });
+}

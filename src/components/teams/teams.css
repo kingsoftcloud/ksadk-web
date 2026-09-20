@@ -427,3 +427,57 @@
   .ksadk-teams .team-final-delivery { padding: 16px; margin-top: 14px; }
 }
 .ksadk-teams .team-source[data-state=unchecked]:before { background: var(--team-muted); }
+
+/* Cloud projection: independent pagination; shares existing host-overridable Teams tokens. */
+.ksadk-teams .team-cloud-notice{padding:12px 24px;background:var(--team-soft);border-bottom:1px solid var(--team-border);font-size:13px}
+.ksadk-teams .team-cloud-layout{display:grid;grid-template-columns:minmax(200px,248px) minmax(0,1fr);flex:1;min-height:0}
+.ksadk-teams .team-cloud-runs{border-right:1px solid var(--team-border);padding:20px 16px;overflow:auto;min-width:0}
+.ksadk-teams .team-cloud-runs>header,.ksadk-teams .team-cloud-operations>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.ksadk-teams .team-cloud-runs h2{font-size:14px;font-weight:600}
+.ksadk-teams .team-cloud-run{display:flex;flex-direction:column;align-items:flex-start;gap:8px;width:100%;border:1px solid transparent;border-radius:var(--team-radius);background:transparent;padding:12px;margin-bottom:8px;text-align:left}
+.ksadk-teams .team-cloud-run strong{font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.ksadk-teams .team-cloud-run span,.ksadk-teams .team-cloud-run small{font-size:11px;color:var(--team-muted)}
+.ksadk-teams .team-cloud-run[aria-current=page]{background:var(--team-soft);border-color:var(--team-border)}
+.ksadk-teams .team-cloud-main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.ksadk-teams .team-cloud-run-header{padding:20px 28px 16px;max-height:35%;overflow:auto;flex-shrink:0}
+.ksadk-teams .team-cloud-run-header h2{font-size:16px;line-height:1.6;margin-bottom:12px;overflow-wrap:anywhere}
+.ksadk-teams .team-cloud-tabs{display:flex;gap:6px;padding:0 24px;border-bottom:1px solid var(--team-border);overflow:auto;flex-shrink:0}
+.ksadk-teams .team-cloud-tabs button{border:0;border-bottom:2px solid transparent;padding:12px 14px;background:transparent;color:var(--team-muted);white-space:nowrap}
+.ksadk-teams .team-cloud-tabs button[aria-selected=true]{color:var(--team-ink);border-bottom-color:var(--team-primary);font-weight:600}
+.ksadk-teams .team-cloud-panel{flex:1;min-height:0;overflow:auto;overflow-anchor:none;padding:24px 28px;outline-offset:-3px}
+.ksadk-teams .team-cloud-task,.ksadk-teams .team-cloud-artifact,.ksadk-teams .team-cloud-member{padding:16px 0;border-bottom:1px solid var(--team-border)}
+.ksadk-teams .team-cloud-task:first-child,.ksadk-teams .team-cloud-artifact:first-child,.ksadk-teams .team-cloud-member:first-child{padding-top:0}
+.ksadk-teams .team-cloud-task-title{display:flex;align-items:center;justify-content:space-between;gap:16px;background:transparent;border:0;padding:8px 0;width:100%;text-align:left}
+.ksadk-teams .team-cloud-task-title strong{overflow-wrap:anywhere}
+.ksadk-teams .team-cloud-artifact{display:flex;align-items:center;justify-content:space-between;gap:20px;overflow-wrap:anywhere}
+.ksadk-teams .team-cloud-member p{margin-top:8px}
+.ksadk-teams .team-cloud-operations{margin-top:24px;border-top:1px solid var(--team-border);padding-top:18px;font-size:11px}
+.ksadk-teams .team-cloud-operations header{flex-wrap:wrap}.ksadk-teams .team-cloud-operations p{display:flex;justify-content:space-between;gap:8px;padding:6px 0}
+.ksadk-teams .team-cloud-operations [data-status=uncertain],.ksadk-teams .team-cloud-operations [data-status=rejected]{color:var(--team-warning)}
+.ksadk-teams .team-cloud-goal{flex:1;display:flex;flex-direction:column;justify-content:center;padding:32px;gap:14px}.ksadk-teams .team-cloud-goal h2{font-size:22px;line-height:1.5}.ksadk-teams .team-cloud-goal p{color:var(--team-muted)}
+.ksadk-teams .team-cloud-acceptance{padding-top:16px;display:flex;flex-wrap:wrap;gap:12px}.ksadk-teams .team-cloud-acceptance .team-field{width:100%}
+.ksadk-teams .team-effect-review { display: grid; gap: 20px; max-width: 1040px; }
+.ksadk-teams .team-effect-review-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.ksadk-teams .team-effect-review-header h3, .ksadk-teams .team-effect-form h3 { font-size: 15px; line-height: 1.6; margin: 0; }
+.ksadk-teams .team-effect-review-header p { margin-top: 6px; }
+.ksadk-teams .team-effect-card, .ksadk-teams .team-effect-form { display: grid; gap: 16px; padding: 20px; border: 1px solid var(--team-border); border-radius: var(--team-radius); overflow-wrap: anywhere; }
+.ksadk-teams .team-effect-card > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.ksadk-teams .team-effect-card > button { justify-self: start; }
+.ksadk-teams .team-effect-state { color: var(--team-warning); font-size: 12px; }
+.ksadk-teams .team-effect-form { background: var(--team-soft); }
+.ksadk-teams .team-effect-consent { display: flex; align-items: flex-start; gap: 10px; line-height: 1.7; font-size: 13px; }
+.ksadk-teams .team-effect-consent input { flex-shrink: 0; width: 16px; height: 16px; margin-top: 3px; }
+.ksadk-teams.team-cloud-workspace .team-composer-wrap{flex-shrink:0;width:auto;min-width:0;padding:0;margin:16px 28px 18px;max-width:none}.ksadk-teams.team-cloud-workspace .team-composer textarea{min-height:88px;max-height:160px;resize:vertical}
+.ksadk-teams.team-cloud-workspace .team-composer details{max-width:360px;font-size:12px}.ksadk-teams.team-cloud-workspace .team-composer details[open]{padding:10px;background:var(--team-soft);border-radius:var(--team-radius)}
+@container (max-width:760px){.ksadk-teams .team-cloud-layout{grid-template-columns:minmax(0,1fr)}.ksadk-teams .team-cloud-runs{max-height:172px;border-right:0;border-bottom:1px solid var(--team-border);display:flex;gap:12px;flex-wrap:wrap}.ksadk-teams .team-cloud-runs>header{width:100%;margin-bottom:0}.ksadk-teams .team-cloud-run{width:180px;flex-shrink:0}.ksadk-teams .team-cloud-operations{width:100%;margin-top:0}.ksadk-teams .team-cloud-panel{padding:20px 18px}.ksadk-teams .team-cloud-run-header{padding:16px 18px}.ksadk-teams.team-cloud-workspace .team-composer-wrap{margin:12px 18px}.ksadk-teams .team-header{flex-wrap:wrap}}
+.team-cloud-materials { margin: 8px 0 12px; padding: 12px 14px; border: 1px solid var(--team-border, #e5e5e5); border-radius: 12px; background: var(--team-surface, #fafafa); font-size: 13px; }
+.team-cloud-material-status, .team-cloud-materials li { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.team-cloud-material-status { margin-bottom: 8px; }
+.team-cloud-materials ul { display: grid; gap: 6px; max-height: 132px; overflow: auto; list-style: none; padding: 0; margin: 0 0 8px; }
+.team-cloud-materials li > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.team-cloud-materials li > :last-child { flex-shrink: 0; color: var(--team-muted, #737373); }
+
+.ksadk-teams .team-cloud-standby{display:grid;gap:6px;margin-top:16px;padding:14px 16px;border:1px solid var(--team-border);border-radius:var(--team-radius);background:var(--team-soft);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.ksadk-teams .team-cloud-standby strong{font-size:13px;font-weight:600;color:var(--team-ink)}
+.ksadk-teams .team-cloud-standby p{margin:0;color:var(--team-muted)}
+.ksadk-teams .team-cloud-standby[data-state=blocked] .team-cloud-standby-reason{color:var(--team-warning)}
