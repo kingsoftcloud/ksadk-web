@@ -107,6 +107,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),
     }),
     checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
+    kernelSessionEventsEnabled: uiCapabilities.KernelSessionEvents === true,
     conversationClient: conversationClient || undefined,
   }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
 

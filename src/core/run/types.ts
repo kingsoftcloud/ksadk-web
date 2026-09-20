@@ -92,6 +92,8 @@ export type RunEngineConfig = {
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;
+  /** RunAgent receipt + canonical SubscribeSessionEvents supported by this endpoint. */
+  kernelSessionEventsEnabled?: boolean;
   /** Optional headless ConversationSurface/Input/Item v1 transport. */
   conversationClient?: ConversationClient;
 };

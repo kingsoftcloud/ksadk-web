@@ -29,6 +29,8 @@ import {
   buildConversationInput,
   preflightConversationInput,
   surfacePermitsInput,
+  RuntimeConversationIngress,
+  projectConversationItems,
 } from '../conversation/index.js';
 import type {
   ConversationInput,
@@ -463,9 +465,8 @@ export class RunEngineImpl implements RunEngine {
         if (peeked.receipt) {
           streamResult = await this.consumeKernelRunEvents(
             sessionId,
-            invocationId,
             peeked.receipt,
-            assistantMessageId,
+            draft.onInvocationCreated,
           );
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
@@ -1119,6 +1120,7 @@ export class RunEngineImpl implements RunEngine {
       SessionId: sessionId,
       InvocationId: invocationId,
       Stream: true,
+      ...(this.config.kernelSessionEventsEnabled ? { Background: true } : {}),
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,
       ModelMetadata: this.config.selectedModelMetadata || undefined,
@@ -1173,9 +1175,8 @@ export class RunEngineImpl implements RunEngine {
    */
   private async consumeKernelRunEvents(
     sessionId: string,
-    invocationId: string,
     receipt: import('../stream/kernel-events.js').KernelRunReceipt,
-    assistantMessageId: string,
+    onInvocationCreated?: (runId: string) => void,
   ): Promise<StreamConsumeResult> {
     if (receipt.status === 'rejected' || receipt.status === 'unsupported') {
       this.setStage('error');
@@ -1199,10 +1200,18 @@ export class RunEngineImpl implements RunEngine {
       });
     }
 
-    this.emit({ type: 'assistant_message_created', messageId: assistantMessageId, invocationId });
     this.emit({ type: 'activity', phase: '已提交运行，订阅事件流', status: 'running', countEvent: false });
 
     const translator = new KernelRunEventTranslator(sessionId);
+    const canonical = new RuntimeConversationIngress(sessionId);
+    // Inbox acceptedSeq is not a SessionEvent cursor. Scope replay to the
+    // admitted command before considering any older run's terminal facts.
+    let commandSeen = !receipt.commandId;
+    let kernelRunId = receipt.runId || '';
+    if (kernelRunId) {
+      this.publishInvocation(kernelRunId);
+      onInvocationCreated?.(kernelRunId);
+    }
     let terminalStatus: string | undefined;
     let consecutiveErrors = 0;
     const maxConsecutiveErrors = 6;
@@ -1230,11 +1239,34 @@ export class RunEngineImpl implements RunEngine {
             for (const transportEvent of parseSseChunk(chunk)) {
               const frame = transportEvent.data as Record<string, unknown> | undefined;
               if (!frame || typeof frame !== 'object') continue;
-              const record = translator.translate(frame);
               const seq = Number(frame.seq);
               if (Number.isFinite(seq) && seq > 0) {
                 this.recordCursor(seq);
               }
+              if (!commandSeen) {
+                commandSeen = frame.event_type === 'control.command_accepted'
+                  && frame.command_id === receipt.commandId;
+                continue;
+              }
+              const frameRunId = String(frame.run_id || '');
+              if (!kernelRunId && frameRunId) {
+                kernelRunId = frameRunId;
+                this.publishInvocation(kernelRunId);
+                onInvocationCreated?.(kernelRunId);
+              }
+              if (frameRunId && kernelRunId !== frameRunId) continue;
+              if (frame.schema_version === 2 && frame.family === 'runtime') {
+                const item = canonical.apply(frame);
+                if (item) {
+                  const state = canonical.snapshot();
+                  this.emit({
+                    type: 'conversation_snapshot', sessionId,
+                    result: { state, presentation: projectConversationItems(state),
+                      runId: kernelRunId, cursor: this.lastSeqId },
+                  });
+                }
+              }
+              const record = translator.translate(frame);
               if (!record) continue;
               this.emit({ type: 'stream_event', event: record as SessionEventRecord, sessionId });
               if (record.EventType === 'run_status') {

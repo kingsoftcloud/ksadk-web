@@ -66,6 +66,7 @@ export type UiCapabilities = {
   BuiltinTools: BuiltinToolCapability[];
   /** agent-kernel/v1 Interaction capability (bootstrap `interaction_v1`). */
   InteractionV1?: boolean;
+  KernelSessionEvents?: boolean;
   /** Canonical agent-kernel/v1 projection. Absent means no execution-mode UI. */
   RuntimeCapabilityMatrix?: RuntimeCapabilityMatrix;
 };

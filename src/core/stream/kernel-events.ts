@@ -504,6 +504,7 @@ export class KernelRunEventTranslator {
 /** Parsed RunAgent receipt on the kernel control path (ActionResponse.Data). */
 export type KernelRunReceipt = {
   status: string;
+  commandId?: string | null;
   messageId?: string | null;
   runId?: string | null;
   acceptedSeq?: number | null;
@@ -618,6 +619,7 @@ function parseReceipt(text: string): KernelRunReceipt | null {
     const error = asRecord(data?.Error);
     return {
       status,
+      commandId: (data?.CommandId as string | null) ?? null,
       messageId: (data?.MessageId as string | null) ?? null,
       runId: (data?.RunId as string | null) ?? null,
       acceptedSeq: (data?.AcceptedSeq as number | null) ?? null,
