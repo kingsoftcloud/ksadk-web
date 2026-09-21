@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { ArrowUp, FileText, Paperclip, Square } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useImeComposition } from '@/hooks/useImeComposition.js';
 import { useModelStore } from '@/stores/model.js';
 import type { ModelStore } from '@/stores/model.js';
 import type { ApprovalPolicyCapability } from '@/types/capabilities.js';
@@ -84,6 +85,7 @@ export function ChatComposer({
   className,
 }: ChatComposerProps) {
   const [isCompacting, setIsCompacting] = useState(false);
+  const isImeComposing = useImeComposition();
   const compactContext = onCompactContext ? async () => {
     setIsCompacting(true);
     try { await onCompactContext(); } finally { setIsCompacting(false); }
@@ -137,9 +139,10 @@ export function ChatComposer({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
-      // Enter confirms an IME candidate while composing (Safari can report
-      // keyCode 229 after compositionend). It must never send or stop a run.
-      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      // Enter confirms an IME candidate while composing. It must never
+      // send or stop a run. Use the shared hook so the check is reliable
+      // even when the engine fires compositionend before this keydown.
+      if (isImeComposing(event)) return;
       event.preventDefault();
       if (isStreaming) {
         if (!isCompacting && canSubmit) onSubmit(input.trim(), attachments);
