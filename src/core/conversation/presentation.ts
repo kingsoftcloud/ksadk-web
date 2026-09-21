@@ -235,7 +235,16 @@ export function projectConversationItems(
     const triggers = new Set(agents.flatMap(agent => triggerFamily(agent, visible).map(item => item.itemId)));
     const agentIds = new Set(agents.map(item => item.itemId));
     const rootTerminal = visible.find(item => conversationTerminalStatus(item));
-    let root = visible.filter(item => item.kind !== 'agent' && !agentIds.has(item.parentItemId || '') && !item.nativeRef.parentScopeId && !item.nativeRef.parent_scope_id && !triggers.has(item.itemId));
+    // A flat client cannot render the child AgentBlock hierarchy, but a public
+    // child failure is still an actionable safety fact. Keep it in the flat
+    // timeline instead of silently dropping an unknown-outcome warning.
+    let root = visible.filter(item => item.kind !== 'agent' && (
+      item.kind === 'error'
+      || (!agentIds.has(item.parentItemId || '')
+        && !item.nativeRef.parentScopeId
+        && !item.nativeRef.parent_scope_id
+        && !triggers.has(item.itemId))
+    ));
     const refs = rootTerminal?.payload.outputRefs || rootTerminal?.payload.output_refs;
     if (Array.isArray(refs) && refs.length) root = root.filter(item => item.kind !== 'assistant_text' || refs.some(ref => item.nativeRef.scopeId === ref.scope_id && item.nativeRef.runtimeItemId === ref.item_id));
     const rootText = root.filter(item => item.kind === 'assistant_text');

@@ -696,3 +696,49 @@ it('keeps a safe unknown-outcome error inside its child scope', () => {
   ingress.apply(failed);
   expect(ingress.snapshot()).toEqual(snapshot);
 });
+
+it('keeps a public child unknown-outcome warning visible for flat clients', () => {
+  const first = events.find(e => e.parent_scope_id && e.item_kind === 'status');
+  const cutoff = events.indexOf(first);
+  const ingress = replay(events.slice(0, cutoff + 1));
+  const common = { ...first, item_id: 'flat-outcome-error', item_kind: 'status' };
+  delete common.snapshot;
+  delete common.initial;
+  const started = { ...common, event_id: 'flat-error-start', seq: first.seq + 1,
+    event_type: 'item.started', initial: { parts: [] } };
+  const failed = { ...common, event_id: 'flat-error-failed', seq: first.seq + 2,
+    event_type: 'item.failed', error: { code: 'A2A_SEND_OUTCOME_UNKNOWN',
+      message: 'Remote result is unknown; do not resend the call.' } };
+  ingress.apply(started);
+  ingress.apply(failed);
+
+  const state = ingress.snapshot();
+  const presentation = projectConversationItems(state, { profile: 'flat-v1' });
+  const hosted = projectConversationStreamForHostedUi({
+    state,
+    presentation,
+    cursor: first.seq + 2,
+    runId: String(first.run_id),
+  });
+
+  expect(presentation.timeline.some(entry => entry.item.kind === 'error')).toBe(true);
+  expect(hosted.messages.some(message => (
+    message.status === 'failed'
+    && message.content.includes('Remote result is unknown; do not resend the call.')
+  ))).toBe(true);
+
+  const history = rebuildPersistedSessionHistory(
+    [],
+    [...events.slice(0, cutoff + 1), started, failed].map(frame => ({
+      SeqId: frame.seq,
+      EventType: 'runtime_event',
+      Content: { runtime_event: frame },
+    })),
+    'session',
+    'flat-v1',
+  );
+  expect(history.messages.some(message => (
+    message.status === 'failed'
+    && message.content.includes('Remote result is unknown; do not resend the call.')
+  ))).toBe(true);
+});

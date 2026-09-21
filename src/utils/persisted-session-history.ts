@@ -347,14 +347,28 @@ export function rebuildPersistedSessionHistory(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );
 
-  // Remote hierarchy uses exactly the same canonical ingress as live SSE.
-  // Older unscoped histories keep the established compatibility translator.
+  // Fully observed RuntimeEvent/v2 runs use exactly the same canonical ingress
+  // as live SSE. This is not limited to remote hierarchy: ordinary root runs
+  // also need the reducer's stable item identity when a terminal snapshot
+  // reveals a tool call_id that was absent from item.started. Older and partial
+  // histories keep the established compatibility translator.
   const remoteRuns = new Set(orderedRecords.flatMap(persisted => {
     const frame = persistedRuntimeFrame(persisted);
     return frame?.schema_version === 2 && [record(frame.initial),record(frame.snapshot)].some(holder => Array.isArray(holder?.parts) && holder.parts.some(part => record(record(part)?.data)?.schema === 'execution.scope/v1'))
       ? [String(frame.run_id)] : [];
   }));
-  for (const runId of remoteRuns) {
+  const failedRuns = new Set(orderedRecords.flatMap(persisted => {
+    const frame = persistedRuntimeFrame(persisted);
+    return frame?.schema_version === 2
+      && ['item.failed', 'run.failed'].includes(String(frame.event_type || ''))
+      ? [String(frame.run_id)] : [];
+  }));
+  const canonicalIngressRuns = new Set([
+    ...remoteRuns,
+    ...completeCanonicalRunIds,
+    ...failedRuns,
+  ]);
+  for (const runId of canonicalIngressRuns) {
     const ingress = new RuntimeConversationIngress(sessionId, undefined, profile);
     let cursor = 0;
     let timestamp = 0;
@@ -372,9 +386,13 @@ export function rebuildPersistedSessionHistory(
     if (projectedRemote.length && fullyObservedRunIds.has(runId)) {
       const index = messages.findIndex(message => message.invocationId === runId || message.runId === runId);
       const belongsToRun = (message: Message) => message.invocationId === runId || message.runId === runId;
-      const input = messages.find(message => belongsToRun(message) && message.role === 'user');
-      const replacement = input && !projectedRemote.some(message => message.role === 'user')
-        ? [input, ...projectedRemote] : projectedRemote;
+      const fallback = messages.filter(belongsToRun);
+      const input = fallback.find(message => message.role === 'user');
+      const replacement = remoteRuns.has(runId)
+        ? input && !projectedRemote.some(message => message.role === 'user')
+          ? [input, ...projectedRemote]
+          : projectedRemote
+        : enrichCanonicalRun(projectedRemote, fallback);
       const retained = messages.filter(message => !belongsToRun(message));
       messages = [...retained.slice(0,index < 0 ? retained.length : index), ...replacement, ...retained.slice(index < 0 ? retained.length : index)];
       completeCanonicalRunIds.add(runId);
