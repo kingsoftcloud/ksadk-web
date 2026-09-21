@@ -62,7 +62,7 @@ describe('InteractionTray contract', () => {
   it('submits non-empty custom feedback with Enter outside IME composition', () => {
     const source = readSource('components/chat/InteractionTray.tsx');
     expect(source).toContain("event.key !== 'Enter'");
-    expect(source).toContain('event.nativeEvent.isComposing');
+    expect(source).toContain('isImeComposing(event)');
     expect(source).toContain("respond('cancel', { feedback: comment.trim() })");
     expect(source).toContain("respond('submit', { value: comment.trim() })");
   });

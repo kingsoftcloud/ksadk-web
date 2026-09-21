@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { InteractionRequestSchemaField } from './schema-fields.js';
 import { schemaFields } from './schema-fields.js';
+import { useImeComposition } from '../../hooks/useImeComposition.js';
 
 /**
  * Canonical JSON-schema form fallback. Renders only when the A2UI
@@ -24,13 +25,14 @@ export function InteractionSchemaForm({
 }) {
   const fields: InteractionRequestSchemaField[] = schemaFields(schema);
   const [validationError, setValidationError] = useState('');
+  const isImeComposing = useImeComposition();
 
   return (
     <form
       className="mt-3"
       data-testid="interaction-schema-form"
       onKeyDown={(event) => {
-        if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault();
+        if (event.key === 'Enter' && isImeComposing(event)) event.preventDefault();
       }}
       onSubmit={(event) => {
         event.preventDefault();

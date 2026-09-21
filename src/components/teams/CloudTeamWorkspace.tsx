@@ -12,6 +12,7 @@ import { schemaFields } from '../chat/schema-fields.js';
 import { InteractionSchemaForm } from '../chat/InteractionSchemaForm.js';
 import { InteractionMessage } from './InteractionMessage.js';
 import { CloudEffectsPanel } from './CloudEffectsPanel.js';
+import { useImeComposition } from '../../hooks/useImeComposition.js';
 import { TaskDetail, TeamStatusLabel } from './TeamWorkspace.js';
 import type { TeamTask } from '../../core/teams/types.js';
 
@@ -233,6 +234,7 @@ export function CloudTeamWorkspaceView(props: CloudTeamWorkspaceViewProps) {
 function CloudComposer({ scope, product, observation, newGoal, pendingMessage, value, onChange, canWrite, onSubmit, onCancelNew }: { scope: WorkspaceClientScope; product: HttpCloudTeamsProductClient; observation: WorkspaceObservation; newGoal: boolean; pendingMessage: boolean; value: string; onChange: (value: string) => void; canWrite: boolean; onSubmit: (payload: TeamsOperationPayload) => Promise<void>; onCancelNew: () => void }) {
   const id = useId();
   const fileInput = useRef<HTMLInputElement>(null);
+  const isImeComposing = useImeComposition();
   const [upload] = useState(() => new CloudMaterialUpload(product, scope));
   const material = useSyncExternalStore(upload.subscribe, upload.getSnapshot, upload.getSnapshot);
   useEffect(() => () => upload.dispose(), [upload]);
@@ -258,7 +260,7 @@ function CloudComposer({ scope, product, observation, newGoal, pendingMessage, v
     {error && <p className="team-inline-error" role="alert">{error}</p>}
     <div className="team-composer">
       <label className="team-sr-only" htmlFor={id}>{starting ? '团队协作目标' : '给团队的消息'}</label>
-      <textarea id={id} rows={3} value={value} onChange={event => onChange(event.target.value)} disabled={busy} placeholder={starting ? '描述目标、预期成果和约束…' : run && !isTeamRunActive(run.status) ? '此任务已结束，可新建任务继续协作' : !canWrite ? '可先整理草稿，恢复连接后再发送…' : '补充要求，或向成员提问…'} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
+      <textarea id={id} rows={3} value={value} onChange={event => onChange(event.target.value)} disabled={busy} placeholder={starting ? '描述目标、预期成果和约束…' : run && !isTeamRunActive(run.status) ? '此任务已结束，可新建任务继续协作' : !canWrite ? '可先整理草稿，恢复连接后再发送…' : '补充要求，或向成员提问…'} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !isImeComposing(event)) { event.preventDefault(); void send(); } }} />
       {starting && material.files.length > 0 && <section className="team-cloud-materials" aria-label="任务材料">
         <div className="team-cloud-material-status"><span role="status">{uploadStatus[material.state]}{uploading ? ` · ${material.completed}/${material.files.length}` : ''}</span><span>{material.files.length} 个文件</span></div>
         <ul>{material.files.map((file, index) => <li key={`${index}:${file.name}`}><span>{file.name}</span><span>{file.size.toLocaleString()} 字节</span></li>)}</ul>

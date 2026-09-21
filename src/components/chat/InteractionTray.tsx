@@ -8,6 +8,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useImeComposition } from '../../hooks/useImeComposition.js';
 import type {
   Interaction,
   InteractionAction,
@@ -146,6 +147,7 @@ export function InteractionTray({
 }: InteractionTrayProps) {
   const [comment, setComment] = useState('');
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
+  const isImeComposing = useImeComposition();
 
   const active = interactions[Math.min(activeIndex, Math.max(interactions.length - 1, 0))];
   if (!active) return null;
@@ -353,7 +355,7 @@ export function InteractionTray({
                 onKeyDown={(event) => {
                   if (
                     event.key !== 'Enter'
-                    || event.nativeEvent.isComposing
+                    || isImeComposing(event)
                     || !comment.trim()
                   ) return;
                   event.preventDefault();
@@ -385,7 +387,7 @@ export function InteractionTray({
               onKeyDown={(event) => {
                 if (
                   event.key !== 'Enter'
-                  || event.nativeEvent.isComposing
+                  || isImeComposing(event)
                   || !comment.trim()
                 ) return;
                 event.preventDefault();
