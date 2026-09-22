@@ -1,3 +1,5 @@
+import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
+import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useRef, useCallback, useEffect, useMemo } from 'react';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useUIStore } from '../stores/ui.js';
@@ -76,7 +78,7 @@ export function useRunAgent(ctx: RunAgentContext) {
   }, []);
   // Same-origin canonical transport for Hosted UI. It resolves fetch lazily
   // so importing the library stays Node/SSR safe.
-  const defaultConversationClient = useMemo(() => new HttpConversationClient(), []);
+  const defaultConversationClient = useMemo(() => new HttpConversationClient({rendererCatalog:agentBlockRendererCatalog}), []);
   const conversationClient = ctx.conversationClient === undefined
     ? defaultConversationClient
     : ctx.conversationClient;
@@ -106,6 +108,8 @@ export function useRunAgent(ctx: RunAgentContext) {
       requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),
     }),
     checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
+    kernelSessionEventsEnabled: uiCapabilities.KernelSessionEvents === true,
+    presentationProfile: bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog),
     conversationClient: conversationClient || undefined,
   }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
 
@@ -285,7 +289,8 @@ export function useRunAgent(ctx: RunAgentContext) {
         onSettled: (sessionId, outcome = 'unknown') => {
           if (outboxEntry) outboxRequestsRef.current.delete(outboxEntry.requestId);
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, {
-            status: outcome === 'completed' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
+            // The outbox tracks delivery: an actionable approval proves the input was accepted.
+            status: outcome === 'completed' || outcome === 'awaiting-input' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
           });
           onRunSettled?.(sessionId, owner.agentId, outcome);
           if (outcome === 'completed') drainQueue(owner);
@@ -324,9 +329,9 @@ export function useRunAgent(ctx: RunAgentContext) {
 
       const accepted = engine.resumeCheckpoint({
         ...params,
-        onSettled: (sessionId) => {
-          onRunSettled?.(sessionId, owner.agentId);
-          drainQueue(owner);
+        onSettled: (sessionId, outcome) => {
+          onRunSettled?.(sessionId, owner.agentId, outcome);
+          if (outcome === 'completed') drainQueue(owner);
         },
       });
       if (!accepted) {

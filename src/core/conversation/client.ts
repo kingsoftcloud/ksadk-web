@@ -1,3 +1,5 @@
+import { agentBlockProfile } from './agent.js';
+import { RuntimeConversationIngress } from './runtime-ingress.js';
 import {
   decodeConversationItem,
   decodeConversationSurface,
@@ -97,17 +99,22 @@ function createResult(
   reducer: ConversationItemReducer,
   cursor: number,
   runId: string,
+  profile?: 'flat-v1' | 'agent-block-v1',
+  runtime?: RuntimeConversationIngress,
 ): ConversationStreamResult {
-  const state = reducer.snapshot();
+  const state = runtime ? runtime.snapshot() : reducer.snapshot();
   return {
     cursor,
     runId,
     state,
-    presentation: projectConversationItems(state),
+    presentation: projectConversationItems(state, {profile}),
   };
 }
 
 type StreamContext = {
+  profile: 'flat-v1' | 'agent-block-v1';
+  lane: 'native' | 'runtime';
+  runtime: RuntimeConversationIngress;
   cursor: number;
   runId: string;
   reducer: ConversationItemReducer;
@@ -151,7 +158,8 @@ function processFrame(frame: string, context: StreamContext): void {
     );
   }
   const raw = object(payload);
-  if (!raw || raw.conversationItem === undefined) {
+  const runtimeFrame = object(raw?.runtimeEvent) || object(raw?.runtime_event) || (raw?.schema_version === 2 ? raw : null);
+  if (!raw || (raw.conversationItem === undefined && !runtimeFrame)) {
     if (id !== undefined) context.cursor = Math.max(context.cursor, id);
     return;
   }
@@ -161,7 +169,18 @@ function processFrame(frame: string, context: StreamContext): void {
       'Canonical conversation items require an SSE replay cursor.',
     );
   }
-  const item = decodeConversationItem(raw.conversationItem);
+  const lane = raw.conversationItem !== undefined ? 'native' : 'runtime';
+  if (context.lane && context.lane !== lane) {
+    context.cursor = Math.max(context.cursor, id);
+    return;
+  }
+  let item: ConversationItem | null;
+  try {
+    item = lane === 'native' ? decodeConversationItem(raw.conversationItem) : context.runtime.apply(runtimeFrame!);
+  } catch (cause) {
+    throw new ConversationClientError('conversation_contract_mismatch', 'Runtime conversation identity or lifecycle invariant failed.', {cause});
+  }
+  if (lane === 'runtime' && !item) { context.cursor = Math.max(context.cursor, id); return; }
   if (!item) {
     throw new ConversationClientError(
       'conversation_contract_mismatch',
@@ -176,13 +195,23 @@ function processFrame(frame: string, context: StreamContext): void {
     );
   }
   context.runId = item.runId;
-  const changed = context.reducer.apply(item);
+  let changed: boolean;
+  try { changed = lane === 'runtime' ? true : context.reducer.apply(item); } catch (cause) {
+    throw new ConversationClientError('conversation_contract_mismatch', 'Conversation identity or lifecycle invariant failed.', {cause});
+  }
   context.cursor = Math.max(context.cursor, id);
-  if (changed) context.options.onItem?.(item);
+  if (
+    changed
+    && !(context.profile === 'flat-v1' && item.nativeRef.parentScopeId)
+  ) {
+    context.options.onItem?.(item);
+  }
   context.options.onUpdate?.(createResult(
     context.reducer,
     context.cursor,
     context.runId,
+    context.profile,
+    context.lane === 'runtime' ? context.runtime : undefined,
   ));
 }
 
@@ -242,6 +271,8 @@ function terminal(result: ConversationStreamResult): boolean {
  */
 export class HttpConversationClient {
   private readonly fetcher?: ConversationFetch;
+  private readonly ingressLane?: 'native' | 'runtime';
+  private readonly rendererCatalog?: ConversationClientOptions['rendererCatalog'];
 
   private readonly baseUrl: string;
 
@@ -261,6 +292,8 @@ export class HttpConversationClient {
       );
     }
     this.fetcher = options.fetch;
+    this.rendererCatalog = options.rendererCatalog;
+    this.ingressLane = options.ingressLane;
     this.baseUrl = normalizeBaseUrl(options.baseUrl || '');
     this.maxReconnects = options.maxReconnects ?? DEFAULT_MAX_RECONNECTS;
     this.sleep = options.sleep || defaultSleep;
@@ -352,11 +385,21 @@ export class HttpConversationClient {
 
   async streamTurn(options: ConversationStreamTurnOptions): Promise<ConversationStreamResult> {
     aborted(options.signal);
-    preflightConversationInput(options.bootstrap.surface, options.input);
+    const profile = agentBlockProfile(options.bootstrap.surface, this.rendererCatalog);
+    const input = {...options.input, ...((profile === 'agent-block-v1' || options.input.extensions?.['ksadk.presentation']) ? {extensions:{...options.input.extensions, 'ksadk.presentation':{profile}}} : {})};
+    preflightConversationInput(options.bootstrap.surface, input);
+    const agentCapability = options.bootstrap.surface.outputs.find(capability => capability.name === 'agent.block');
+    const declaredLane = agentCapability?.mode === 'native' ? 'native' : agentCapability?.mode === 'translated' ? 'runtime' : undefined;
+    if (declaredLane && this.ingressLane && declaredLane !== this.ingressLane) throw new ConversationClientError('conversation_contract_mismatch', 'Configured ingress lane disagrees with the conversation surface.');
+    const lane = declaredLane || this.ingressLane || 'native';
+    const reducer = new ConversationItemReducer();
     const context: StreamContext = {
+      profile,
+      lane,
+      runtime: new RuntimeConversationIngress(input.sessionId, reducer, profile),
       cursor: 0,
       runId: '',
-      reducer: new ConversationItemReducer(),
+      reducer,
       options,
     };
     const postInit: RequestInit = {
@@ -365,7 +408,7 @@ export class HttpConversationClient {
         'Content-Type': 'application/json',
         'Idempotency-Key': options.input.idempotencyKey,
       },
-      body: JSON.stringify({ input: options.input }),
+      body: JSON.stringify({ input }),
       ...(options.signal ? { signal: options.signal } : {}),
     };
     const initial = await this.request(this.url(
@@ -382,7 +425,13 @@ export class HttpConversationClient {
       }
     }
 
-    let result = createResult(context.reducer, context.cursor, context.runId);
+    let result = createResult(
+      context.reducer,
+      context.cursor,
+      context.runId,
+      context.profile,
+      context.lane === 'runtime' ? context.runtime : undefined,
+    );
     if (terminal(result)) return result;
     if (!context.runId) {
       throw new ConversationClientError(
@@ -402,7 +451,7 @@ export class HttpConversationClient {
       let replay: Response;
       try {
         replay = await this.request(this.url(
-          `/api/v1/runs/${encodeURIComponent(context.runId)}/events?after=${context.cursor}`,
+          `/api/v1/runs/${encodeURIComponent(context.runId)}/events?after=${context.cursor}${context.profile === 'agent-block-v1' ? '&presentationProfile=agent-block-v1' : ''}`,
         ), {
           method: 'GET',
           headers: { 'Last-Event-ID': String(context.cursor) },
@@ -427,7 +476,13 @@ export class HttpConversationClient {
         }
         continue;
       }
-      result = createResult(context.reducer, context.cursor, context.runId);
+      result = createResult(
+        context.reducer,
+        context.cursor,
+        context.runId,
+        context.profile,
+        context.lane === 'runtime' ? context.runtime : undefined,
+      );
       if (terminal(result)) return result;
     }
     throw new ConversationClientError(

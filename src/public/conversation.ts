@@ -18,6 +18,7 @@ export {
   projectConversationItems,
   reduceConversationItem,
   createTrustedRendererCatalog,
+  agentBlockRendererCatalog,
   surfacePermitsInput,
 } from '../core/conversation/index.js';
 export {
@@ -67,6 +68,8 @@ export type {
   TrustedConversationRenderer,
   TrustedRendererCatalog,
 } from '../core/conversation/index.js';
+export { RuntimeConversationIngress, runtimeConversationIdentity, agentBlockProfile } from '../core/conversation/index.js';
+export type { AgentBlockActions, AgentScopeAction, AgentExecutionStatus, ExecutionScopeDescriptor } from '../core/conversation/index.js';
 export {
   createConversationId,
   createNavigationEpoch,

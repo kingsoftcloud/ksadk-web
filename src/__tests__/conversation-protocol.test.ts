@@ -233,7 +233,7 @@ describe('ConversationItem/v1 renderer projection', () => {
     const presentation = projectConversationItems(state);
     expect(presentation.timeline.map((entry) => entry.key)).toEqual([
       'item:reasoning-1',
-      'tool:call-1',
+      'tool:["run-1","","call-1"]',
       'item:answer-1',
     ]);
     expect(presentation.timeline[1]).toMatchObject({

@@ -1,3 +1,6 @@
+import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
+import { projectConversationItems } from '../core/conversation/presentation.js';
+import { projectConversationStreamForHostedUi } from '../core/conversation/hosted.js';
 import type { Message } from '../components/chat/types.js';
 import { buildBlocksFromHistory } from '../core/run/blocks.js';
 import {
@@ -244,6 +247,7 @@ export function rebuildPersistedSessionHistory(
   fallbackMessages: Message[],
   records: PersistedSessionEventRecord[],
   sessionId: string,
+  profile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
 ): {
   messages: Message[];
   canonicalRunIds: string[];
@@ -339,9 +343,61 @@ export function rebuildPersistedSessionHistory(
       || !completeCanonicalRunIds.has(message.invocationId)
     )
   )).map((message) => partialFallbackMessageById.get(message.id) || message);
-  const messages = [...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages].sort(
+  let messages = [...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );
+
+  // Fully observed RuntimeEvent/v2 runs use exactly the same canonical ingress
+  // as live SSE. This is not limited to remote hierarchy: ordinary root runs
+  // also need the reducer's stable item identity when a terminal snapshot
+  // reveals a tool call_id that was absent from item.started. Older and partial
+  // histories keep the established compatibility translator.
+  const remoteRuns = new Set(orderedRecords.flatMap(persisted => {
+    const frame = persistedRuntimeFrame(persisted);
+    return frame?.schema_version === 2 && [record(frame.initial),record(frame.snapshot)].some(holder => Array.isArray(holder?.parts) && holder.parts.some(part => record(record(part)?.data)?.schema === 'execution.scope/v1'))
+      ? [String(frame.run_id)] : [];
+  }));
+  const failedRuns = new Set(orderedRecords.flatMap(persisted => {
+    const frame = persistedRuntimeFrame(persisted);
+    return frame?.schema_version === 2
+      && ['item.failed', 'run.failed'].includes(String(frame.event_type || ''))
+      ? [String(frame.run_id)] : [];
+  }));
+  const canonicalIngressRuns = new Set([
+    ...remoteRuns,
+    ...completeCanonicalRunIds,
+    ...failedRuns,
+  ]);
+  for (const runId of canonicalIngressRuns) {
+    const ingress = new RuntimeConversationIngress(sessionId, undefined, profile);
+    let cursor = 0;
+    let timestamp = 0;
+    for (const persisted of orderedRecords) {
+      const frame = persistedRuntimeFrame(persisted);
+      if (frame?.run_id !== runId) continue;
+      ingress.apply(frame);
+      cursor = Math.max(cursor, Number(frame.seq || 0));
+      if (!timestamp) timestamp = eventTimestamp(frame.timestamp);
+    }
+    const state = ingress.snapshot();
+    const presentation = projectConversationItems(state, { profile });
+    const projectedRemote = projectConversationStreamForHostedUi({state,presentation,runId,cursor}).messages
+      .map((message, index) => ({...message, invocationId:runId, timestamp:timestamp + index}));
+    if (projectedRemote.length && fullyObservedRunIds.has(runId)) {
+      const index = messages.findIndex(message => message.invocationId === runId || message.runId === runId);
+      const belongsToRun = (message: Message) => message.invocationId === runId || message.runId === runId;
+      const fallback = messages.filter(belongsToRun);
+      const input = fallback.find(message => message.role === 'user');
+      const replacement = remoteRuns.has(runId)
+        ? input && !projectedRemote.some(message => message.role === 'user')
+          ? [input, ...projectedRemote]
+          : projectedRemote
+        : enrichCanonicalRun(projectedRemote, fallback);
+      const retained = messages.filter(message => !belongsToRun(message));
+      messages = [...retained.slice(0,index < 0 ? retained.length : index), ...replacement, ...retained.slice(index < 0 ? retained.length : index)];
+      completeCanonicalRunIds.add(runId);
+    }
+  }
 
   return {
     messages,

@@ -52,3 +52,7 @@ export function createTrustedRendererCatalog(
     },
   });
 }
+
+export const agentBlockRendererCatalog = createTrustedRendererCatalog([{
+  id:'ksadk.agent-block', schemaRef:'conversation.item.agent/v1', kinds:['agent'],
+}]);

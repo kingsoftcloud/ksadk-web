@@ -16,6 +16,7 @@ export {
 export { projectConversationItems } from './presentation.js';
 export {
   createTrustedRendererCatalog,
+  agentBlockRendererCatalog,
   type TrustedConversationRenderer,
   type TrustedRendererCatalog,
 } from './renderer-registry.js';
@@ -50,4 +51,7 @@ export type {
   ConversationTimelineEntry,
   ConversationTextPresentation,
 } from './types.js';
+export { RuntimeConversationIngress, runtimeConversationIdentity } from './runtime-ingress.js';
+export { agentBlockProfile } from './agent.js';
+export type { AgentBlockActions, AgentScopeAction, AgentExecutionStatus, ExecutionScopeDescriptor } from './agent.js';
 export * from './studio-controller.js';

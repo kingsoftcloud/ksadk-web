@@ -4,6 +4,7 @@ import { LoaderCircle, RefreshCw, WifiOff, ZapOff } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useStreamingStore } from '@/stores/streaming.js';
+import { useSessionStore } from '@/stores/session.js';
 
 /**
  * wework 风格错误/限流/重连内联状态条。
@@ -18,7 +19,8 @@ type StatusBannerProps = {
 
 export function StatusBanner({ onRetry }: StatusBannerProps) {
   const banner = useStreamingStore((s) => s.banner);
-  if (!banner) return null;
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  if (!banner || (banner.sessionId && banner.sessionId !== currentSessionId)) return null;
 
   const rateLimitedLabel = banner.kind === 'rate_limited' ? (
     <RateLimitLabel

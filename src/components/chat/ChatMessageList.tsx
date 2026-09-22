@@ -27,6 +27,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import { MessageMarkdown } from '../MessageMarkdown';
+import { AgentBlockView } from './AgentBlockView';
 import { ProcessingBlocksView } from './ProcessingBlocksView';
 import { StatusBanner } from './StatusBanner';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
@@ -745,7 +746,7 @@ function ChatMessage({
         />
       ) : null}
 
-      {message.blocks?.length ? (
+      {message.agentBlock ? <AgentBlockView block={message.agentBlock} /> : message.blocks?.length ? (
         <ProcessingBlocksView
           message={message}
           isStreaming={isStreaming}

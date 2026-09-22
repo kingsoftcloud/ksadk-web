@@ -29,6 +29,8 @@ import {
   buildConversationInput,
   preflightConversationInput,
   surfacePermitsInput,
+  RuntimeConversationIngress,
+  projectConversationItems,
 } from '../conversation/index.js';
 import type {
   ConversationInput,
@@ -36,7 +38,7 @@ import type {
   ConversationSurfaceBootstrap,
 } from '../conversation/types.js';
 
-type StreamConsumeResult = { terminalStatus?: string };
+type StreamConsumeResult = { terminalStatus?: string; awaitingInput?: boolean };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -450,6 +452,8 @@ export class RunEngineImpl implements RunEngine {
           invocationId,
         );
 
+        const requestedProfile = this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
+          ? 'agent-block-v1' : 'flat-v1';
         const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
         this.setStage('streaming');
         this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
@@ -463,14 +467,22 @@ export class RunEngineImpl implements RunEngine {
         if (peeked.receipt) {
           streamResult = await this.consumeKernelRunEvents(
             sessionId,
-            invocationId,
             peeked.receipt,
-            assistantMessageId,
+            draft.onInvocationCreated,
+            requestedProfile,
           );
         } else {
           streamResult = await this.consumeStream(peeked.stream, protocol, protocolState, assistantMessageId, invocationId);
         }
         if (this.operationEpoch !== operationEpoch) return;
+
+        if (streamResult.awaitingInput) {
+          settlement = 'awaiting-input';
+          this.setStage('completing');
+          this.emit({ type: 'activity', phase: '等待人工确认', status: 'waiting', countEvent: false });
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
 
         if (streamResult.terminalStatus === 'cancelled') {
           settlement = 'cancelled';
@@ -777,6 +789,13 @@ export class RunEngineImpl implements RunEngine {
           assistantMessageId,
           invocationId,
         );
+        if (streamResult.awaitingInput) {
+          settlement = 'awaiting-input';
+          this.setStage('completing');
+          this.emit({ type: 'activity', source: 'restore', phase: '等待人工确认', status: 'waiting', countEvent: false });
+          this.emit({ type: 'stream_ended' });
+          return;
+        }
         if (streamResult.terminalStatus && streamResult.terminalStatus !== 'completed') {
           if (streamResult.terminalStatus === 'cancelled') {
             settlement = 'cancelled';
@@ -1119,6 +1138,9 @@ export class RunEngineImpl implements RunEngine {
       SessionId: sessionId,
       InvocationId: invocationId,
       Stream: true,
+      ...(this.config.kernelSessionEventsEnabled ? { Background: true } : {}),
+      ...(this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
+        ? { Extensions: { 'ksadk.presentation': { profile: 'agent-block-v1' } } } : {}),
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,
       ModelMetadata: this.config.selectedModelMetadata || undefined,
@@ -1173,9 +1195,9 @@ export class RunEngineImpl implements RunEngine {
    */
   private async consumeKernelRunEvents(
     sessionId: string,
-    invocationId: string,
     receipt: import('../stream/kernel-events.js').KernelRunReceipt,
-    assistantMessageId: string,
+    onInvocationCreated?: (runId: string) => void,
+    requestedProfile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
   ): Promise<StreamConsumeResult> {
     if (receipt.status === 'rejected' || receipt.status === 'unsupported') {
       this.setStage('error');
@@ -1199,10 +1221,20 @@ export class RunEngineImpl implements RunEngine {
       });
     }
 
-    this.emit({ type: 'assistant_message_created', messageId: assistantMessageId, invocationId });
     this.emit({ type: 'activity', phase: '已提交运行，订阅事件流', status: 'running', countEvent: false });
 
     const translator = new KernelRunEventTranslator(sessionId);
+    const profile = requestedProfile === 'agent-block-v1' && receipt.presentationProfile === 'agent-block-v1'
+      ? 'agent-block-v1' : 'flat-v1';
+    const canonical = new RuntimeConversationIngress(sessionId, undefined, profile);
+    // Inbox acceptedSeq is not a SessionEvent cursor. Scope replay to the
+    // admitted command before considering any older run's terminal facts.
+    let commandSeen = !receipt.commandId;
+    let kernelRunId = receipt.runId || '';
+    if (kernelRunId) {
+      this.publishInvocation(kernelRunId);
+      onInvocationCreated?.(kernelRunId);
+    }
     let terminalStatus: string | undefined;
     let consecutiveErrors = 0;
     const maxConsecutiveErrors = 6;
@@ -1230,11 +1262,34 @@ export class RunEngineImpl implements RunEngine {
             for (const transportEvent of parseSseChunk(chunk)) {
               const frame = transportEvent.data as Record<string, unknown> | undefined;
               if (!frame || typeof frame !== 'object') continue;
-              const record = translator.translate(frame);
               const seq = Number(frame.seq);
               if (Number.isFinite(seq) && seq > 0) {
                 this.recordCursor(seq);
               }
+              if (!commandSeen) {
+                commandSeen = frame.event_type === 'control.command_accepted'
+                  && frame.command_id === receipt.commandId;
+                continue;
+              }
+              const frameRunId = String(frame.run_id || '');
+              if (!kernelRunId && frameRunId) {
+                kernelRunId = frameRunId;
+                this.publishInvocation(kernelRunId);
+                onInvocationCreated?.(kernelRunId);
+              }
+              if (frameRunId && kernelRunId !== frameRunId) continue;
+              if (frame.schema_version === 2 && frame.family === 'runtime') {
+                const item = canonical.apply(frame);
+                if (item) {
+                  const state = canonical.snapshot();
+                  this.emit({
+                    type: 'conversation_snapshot', sessionId,
+                    result: { state, presentation: projectConversationItems(state, { profile }),
+                      runId: kernelRunId, cursor: this.lastSeqId },
+                  });
+                }
+              }
+              const record = translator.translate(frame);
               if (!record) continue;
               this.emit({ type: 'stream_event', event: record as SessionEventRecord, sessionId });
               if (record.EventType === 'run_status') {
@@ -1282,6 +1337,11 @@ export class RunEngineImpl implements RunEngine {
     let messageCreated = false;
     let receivedByteCount = 0;
     let terminalStatus: string | undefined;
+    const pendingApprovals = new Set<string>();
+    const result = (): StreamConsumeResult => ({
+      terminalStatus,
+      awaitingInput: pendingApprovals.size > 0 && (!terminalStatus || terminalStatus === 'incomplete'),
+    });
 
     {
       while (true) {
@@ -1320,12 +1380,15 @@ export class RunEngineImpl implements RunEngine {
             }
 
             const activity = activityForTransportEvent(event.eventName, event.data);
-            if (activity) {
+            if (activity && !(pendingApprovals.size > 0 && (event.eventName === 'response.incomplete'
+              || (event.data as { type?: string })?.type === 'response.incomplete'))) {
               this.emit({ type: 'activity', ...activity });
             }
 
             const actions = protocol.parse(event, protocolState);
             for (const action of actions) {
+              if (action.type === 'approval_request') pendingApprovals.add(action.approvalRequestId);
+              if (action.type === 'approval_resolved') pendingApprovals.delete(action.approvalRequestId);
               this.dispatchAction(action, messageId);
               if (action.type === 'terminal') terminalStatus = action.status;
             }
@@ -1341,7 +1404,7 @@ export class RunEngineImpl implements RunEngine {
 
           if (shouldStop) {
             reader.cancel().catch(() => {});
-            return { terminalStatus };
+            return result();
           }
         }
       }
@@ -1351,7 +1414,7 @@ export class RunEngineImpl implements RunEngine {
       throw new Error('运行时返回了空响应流，请稍后重试；若问题持续，请检查运行时状态。');
     }
 
-    if (terminalStatus) return { terminalStatus };
+    if (terminalStatus || pendingApprovals.size > 0) return result();
     throw new TypeError('运行时连接已结束，但尚未收到执行终态；请查询原任务状态。');
   }
 

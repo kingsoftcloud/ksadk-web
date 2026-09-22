@@ -162,7 +162,9 @@ function ToolRow({
 
   // Approval is an audit trail. The execution result is the primary state,
   // otherwise an earlier “approved” label can hide a later tool failure.
-  const prefix = errored
+  const prefix = status === 'unknown'
+    ? '状态未知'
+    : errored
     ? '执行失败'
     : approvalStatus === 'pending'
       ? '等待确认'

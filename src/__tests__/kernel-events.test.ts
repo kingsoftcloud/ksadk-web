@@ -480,3 +480,13 @@ describe('peekKernelReceipt', () => {
     expect(receipt?.error?.message).toBe('nope');
   });
 });
+
+it('preserves execution rejection for correlation with an interaction receipt', () => {
+  const translator = new KernelRunEventTranslator('session-1');
+  expect(translator.translate({ seq: 3, family: 'control',
+    event_type: 'control.command_rejected', command_id: 'cmd-1',
+    reason: 'runtime_interaction_unavailable' })).toMatchObject({
+      SessionId: 'session-1', EventType: 'control.command_rejected',
+      Content: { command_id: 'cmd-1', reason: 'runtime_interaction_unavailable' },
+    });
+});

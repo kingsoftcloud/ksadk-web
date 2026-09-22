@@ -389,4 +389,95 @@ describe('rebuildPersistedSessionHistory', () => {
     });
     expect(rebuilt.messages.some((message) => message.content === '找到一条记忆。')).toBe(true);
   });
+
+  it('coalesces an identity-less tool start with the terminal call identity', () => {
+    const fallback: Message[] = [
+      {
+        id: 'user-late-tool-identity',
+        role: 'user',
+        content: '查询答案',
+        timestamp: 1_700_000_000_000,
+        invocationId: 'run-late-tool-identity',
+      },
+      {
+        id: 'assistant-late-tool-identity',
+        role: 'model',
+        content: '答案是 42。',
+        timestamp: 1_700_000_004_000,
+        invocationId: 'run-late-tool-identity',
+      },
+    ];
+    const runtimeRecord = (
+      seq: number,
+      eventId: string,
+      runtimeEvent: Record<string, unknown>,
+    ): PersistedSessionEventRecord => ({
+      SeqId: seq,
+      EventId: eventId,
+      EventType: String(runtimeEvent.event_type || ''),
+      InvocationId: 'run-late-tool-identity',
+      Timestamp: String(1_700_000_000 + seq),
+      Content: {
+        runtime_event: {
+          schema_version: 2,
+          family: 'runtime',
+          run_id: 'run-late-tool-identity',
+          scope_id: 'scope-late-tool-identity',
+          event_id: eventId,
+          seq,
+          source: { framework: 'adk', metadata: {} },
+          ...runtimeEvent,
+        },
+      },
+    });
+    const records = [
+      runtimeRecord(1, 'run-started', { event_type: 'run.started' }),
+      runtimeRecord(2, 'tool-started', {
+        event_type: 'item.started',
+        item_id: 'runtime-tool-item',
+        item_kind: 'tool_call',
+        initial: { parts: [] },
+      }),
+      runtimeRecord(3, 'tool-completed', {
+        event_type: 'item.completed',
+        item_id: 'runtime-tool-item',
+        item_kind: 'tool_call',
+        snapshot: {
+          parts: [{
+            content_type: 'tool_call',
+            part_id: 'tool-call',
+            call_id: 'lookup-1',
+            name: 'lookup',
+            arguments: { question: 'life' },
+          }, {
+            content_type: 'tool_result',
+            part_id: 'tool-result',
+            call_id: 'lookup-1',
+            result: 42,
+          }],
+        },
+      }),
+      runtimeRecord(4, 'assistant-completed', {
+        event_type: 'item.completed',
+        item_id: 'assistant-item',
+        item_kind: 'message',
+        snapshot: {
+          parts: [{ content_type: 'text', part_id: 'text', text: '答案是 42。' }],
+        },
+      }),
+      runtimeRecord(5, 'run-completed', { event_type: 'run.completed' }),
+    ];
+
+    const rebuilt = rebuildPersistedSessionHistory(fallback, records, 'session-late-tool');
+    const tools = rebuilt.messages.flatMap((message) => Object.values(message.tools || {}));
+
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      name: 'lookup',
+      callId: 'lookup-1',
+      status: 'completed',
+    });
+    expect(tools[0]?.output).toBe('42');
+    expect(tools.some((tool) => tool.name === 'tool' && tool.status === 'running')).toBe(false);
+  });
 });
