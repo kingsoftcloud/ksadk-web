@@ -30,6 +30,18 @@ export class ResponsesProtocol implements StreamProtocol {
   }
 
   parse(event: TransportEvent, state: Record<string, unknown>): StreamAction[] {
+    const frame = event.data as Record<string, unknown> | null;
+    if (event.eventName === 'interaction.requested' && frame?.family === 'interaction') {
+      const payload = frame.payload as Record<string, unknown> | undefined;
+      const interactionId = String(payload?.interaction_id || '');
+      if (interactionId && frame.session_id && frame.run_id) {
+        return [{ type: 'canonical_interaction', interactionId, event: {
+          EventType: 'interaction.requested', SessionId: String(frame.session_id),
+          InvocationId: String(frame.run_id), SeqId: Number(frame.seq || 0),
+          Content: { session_event: frame },
+        } }];
+      }
+    }
     const actions = normalizeResponsesStreamEvent({
       eventName: event.eventName,
       data: event.data,

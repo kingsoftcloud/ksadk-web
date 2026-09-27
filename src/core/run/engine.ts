@@ -1388,6 +1388,7 @@ export class RunEngineImpl implements RunEngine {
             const actions = protocol.parse(event, protocolState);
             for (const action of actions) {
               if (action.type === 'approval_request') pendingApprovals.add(action.approvalRequestId);
+              if (action.type === 'canonical_interaction') pendingApprovals.add(action.interactionId);
               if (action.type === 'approval_resolved') pendingApprovals.delete(action.approvalRequestId);
               this.dispatchAction(action, messageId);
               if (action.type === 'terminal') terminalStatus = action.status;
@@ -1424,6 +1425,9 @@ export class RunEngineImpl implements RunEngine {
 
   private dispatchAction(action: StreamAction, messageId: string) {
     switch (action.type) {
+      case 'canonical_interaction':
+        this.emit({ type: 'stream_event', event: action.event, sessionId: action.event.SessionId });
+        break;
       case 'text_delta':
         this.emit({ type: 'text_delta', messageId, delta: action.text });
         break;

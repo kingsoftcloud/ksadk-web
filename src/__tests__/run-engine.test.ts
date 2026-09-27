@@ -612,6 +612,36 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('keeps canonical structured input actionable when its Responses stream becomes incomplete', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const frame = { family: 'interaction', event_type: 'interaction.requested', seq: 25,
+      session_id: 'session-input', run_id: 'durable-run', payload: {
+        interaction_id: 'input-1', kind: 'structured_input', revision: 1,
+        request: { kind: 'structured_input', request_schema: {
+          type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'] } },
+      } };
+    const engine = createRunEngine({ ...createApiFacade(calls), async runAgent() {
+      calls.push({ stream: 'canonical-input' });
+      return new ReadableStream<Uint8Array>({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: interaction.requested\ndata: '
+          + JSON.stringify(frame) + '\n\nevent: response.incomplete\ndata: {}\n\n'));
+        controller.close();
+      } });
+    } });
+    engine.updateConfig({ agentId: 'agent-live', apiFormats: ['responses'],
+      agentFramework: '', selectedModel: '', thinkingMode: 'auto' });
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-input');
+    expect(engine.start({ text: 'request input', attachments: [], sessionId: 'session-input' })).toBe(true);
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+    expect(sharedInteractionStore.get('session-input', 'input-1')).toMatchObject({
+      source: 'interaction_v1', sessionId: 'session-input', runId: 'durable-run',
+      kind: 'structured_input', status: 'pending', requestSchema: frame.payload.request.request_schema,
+    });
+    expect(useMessageStore.getState().messages.some(message => message.role === 'system')).toBe(false);
+  });
+
   it('keeps a Responses approval in tool history and mirrors it into the composer interaction queue', async () => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine({
