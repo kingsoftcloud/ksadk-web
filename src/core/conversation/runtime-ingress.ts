@@ -65,16 +65,21 @@ export class RuntimeConversationIngress {
       throw new Error('RuntimeEvent run identity changed');
     if (this.seen.has(event)) return null;
     const parent = String(frame.parent_scope_id ?? this.descriptors.get(scope)?.parent_scope_id ?? this.parents.get(scope) ?? '');
+    const source = record(frame.source);
+    // Native graph/node scopes are not remote AgentBlock scopes. Only the
+    // latter require execution.scope/v1 descriptors before child content.
+    const nativeScope = ['adk', 'langgraph', 'codex'].includes(String(source.framework))
+      && !this.descriptors.has(scope);
+    if (nativeScope && parent && type === 'run.progress') return null;
     if (
       type.startsWith('run.') &&
-      (parent || (this.rootScope && scope !== this.rootScope))
+      (parent || (!nativeScope && this.rootScope && scope !== this.rootScope))
     )
       throw new Error('Child scope cannot transition root run');
     if (this.parents.has(scope) && this.parents.get(scope) !== parent)
       throw new Error('Scope parent changed');
     const nativeItem = String(frame.item_id || '');
     const id = this.identity(run, scope, nativeItem || event, Boolean(parent));
-    const source = record(frame.source);
     const nativeRef = Object.fromEntries(
       Object.entries({
         framework: source.framework,
@@ -161,7 +166,7 @@ export class RuntimeConversationIngress {
       const descriptor = rawParts
         .map((p) => record(record(p).data))
         .find((p) => p.schema === 'execution.scope/v1');
-      if (parent && !descriptor) {
+      if (parent && !descriptor && !nativeScope) {
         const descriptorItemId = this.descriptorItemIds.get(scope);
         if (!descriptorItemId)
           throw new Error('Child content requires its scope descriptor first');
