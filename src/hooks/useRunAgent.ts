@@ -76,11 +76,12 @@ export function useRunAgent(ctx: RunAgentContext) {
       owners.delete(key);
     }
   }, []);
-  // Same-origin canonical transport for Hosted UI. It resolves fetch lazily
-  // so importing the library stays Node/SSR safe.
+  // Only an advertised ConversationSurface selects the same-origin canonical
+  // transport. Older hosted Agents (for example Hermes) expose the legacy
+  // action transport, while their local Studio routes require a local session.
   const defaultConversationClient = useMemo(() => new HttpConversationClient({rendererCatalog:agentBlockRendererCatalog}), []);
   const conversationClient = ctx.conversationClient === undefined
-    ? defaultConversationClient
+    ? (ctx.uiCapabilities.ConversationSurface == null ? null : defaultConversationClient)
     : ctx.conversationClient;
 
   const {
