@@ -8,7 +8,7 @@ import {
   type KernelSessionEventFrame,
 } from '../core/stream/kernel-events.js';
 import type { SessionEventRecord } from '../types/session-events.js';
-import { buildMessagesFromSessionEvents } from './session-events.js';
+import { buildMessageFromSessionEvent, buildMessagesFromSessionEvents } from './session-events.js';
 
 export type PersistedSessionEventRecord = SessionEventRecord & {
   Content?: SessionEventRecord['Content'] & {
@@ -73,6 +73,57 @@ export function persistedRuntimeFrame(
     seq: Number(raw.SeqId || envelope.seq || payload.seq || 0),
     timestamp: raw.Timestamp || envelope.timestamp || payload.timestamp,
   };
+}
+
+/** Legacy terminal receipts supplement Messages without re-projecting its text or tools. */
+function applyLegacyTerminalReceipts(
+  messages: Message[],
+  records: PersistedSessionEventRecord[],
+  authoritativeRunIds: Set<string>,
+): Message[] {
+  const latestStatuses = new Map<string, PersistedSessionEventRecord>();
+  for (const persisted of records) {
+    if (persisted.EventType !== 'run_status' || persistedRuntimeFrame(persisted)) continue;
+    const runId = String(persisted.InvocationId || persisted.Metadata?.run_id || '').trim();
+    // An actual canonical root terminal owns its terminal facts. Partial history may
+    // lack that boundary and still needs a durable compatibility receipt.
+    if (runId && !authoritativeRunIds.has(runId)) latestStatuses.set(runId, persisted);
+  }
+  let result = messages;
+  for (const [runId, persisted] of latestStatuses) {
+    const receipt = buildMessageFromSessionEvent({
+      ...persisted,
+      EventId: persisted.EventId || `legacy-terminal:${runId}:${persisted.SeqId || 0}`,
+      Timestamp: eventTimestamp(persisted.Timestamp),
+    }) as Message | null;
+    if (!receipt) continue;
+    const belongsToRun = (message: Message) => (message.invocationId || message.runId) === runId;
+    result = result.filter(message => !(belongsToRun(message)
+      && message.role === 'system' && message.eventType === 'run_status'))
+      .map(message => {
+        if (!belongsToRun(message) || message.role !== 'model') return message;
+        const pending = (status: string) => status === 'running' || status === 'paused';
+        const summary = '运行已结束，未记录此工具的最终结果。';
+        return {
+          ...message,
+          tools: message.tools && Object.fromEntries(Object.entries(message.tools).map(([key, tool]) => [
+            key, pending(tool.status) ? { ...tool, status: 'unknown' as const, summary: tool.summary || summary } : tool,
+          ])),
+          blocks: message.blocks?.map(block => {
+            if (block.type === 'thinking' && block.status === 'streaming') return { ...block, status: 'done' as const };
+            if (block.type !== 'tool' || !pending(block.status)) return block;
+            return {
+              ...block, status: 'unknown' as const, summary: block.summary || summary,
+              extra: { ...block.extra, persistedToolStatus: block.status, terminalRunStatus: receipt.status },
+            };
+          }),
+        };
+      });
+    result.push({ ...receipt, invocationId: runId, eventId: persisted.EventId });
+  }
+  return result === messages ? messages : [...result].sort(
+    (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
+  );
 }
 
 function withHistoryBlocks(message: Message): Message {
@@ -256,6 +307,7 @@ export function rebuildPersistedSessionHistory(
   const translator = new KernelRunEventTranslator(sessionId);
   const translatedEvents: SessionEventRecord[] = [];
   const canonicalRunIds = new Set<string>();
+  const canonicalTerminalRunIds = new Set<string>();
   const fullyObservedRunIds = new Set<string>();
 
   const orderedRecords = [...(records || [])].sort(
@@ -268,6 +320,9 @@ export function rebuildPersistedSessionHistory(
     const runId = String(frame.run_id || '').trim();
     if (runId) {
       canonicalRunIds.add(runId);
+      if (!frame.parent_scope_id && ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(String(frame.event_type))) {
+        canonicalTerminalRunIds.add(runId);
+      }
       const source = record(frame.source);
       const sourceMetadata = record(source?.metadata);
       const containsRunStart = String(frame.event_type || '') === 'run.started';
@@ -416,7 +471,7 @@ export function rebuildPersistedSessionHistory(
   }
 
   return {
-    messages,
+    messages: applyLegacyTerminalReceipts(messages, orderedRecords, canonicalTerminalRunIds),
     canonicalRunIds: [...completeCanonicalRunIds],
     translatedEvents,
   };

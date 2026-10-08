@@ -2,6 +2,138 @@ import { describe, expect, it } from 'vitest';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
 import type { Message } from '../components/chat/types.js';
 import type { PersistedSessionEventRecord } from '../utils/persisted-session-history.js';
+import { mapBackendMessages } from '../utils/messages.js';
+import legacyFailedHistory from './fixtures/legacy-failed-session-history.json';
+import { readFileSync } from 'node:fs';
+
+describe('legacy terminal receipts observed in control fallback history', () => {
+  const records = legacyFailedHistory.Events as unknown as PersistedSessionEventRecord[];
+  const fallback = () => mapBackendMessages(legacyFailedHistory.Messages) as Message[];
+  const rebuild = (messages = fallback(), events = records) => rebuildPersistedSessionHistory(
+    messages, events, legacyFailedHistory.SessionId, 'agent-block-v1',
+  );
+
+  it('retains the complete observed transcript and tool identities while presenting the failed receipt', () => {
+    const original = fallback();
+    const inputSnapshot = JSON.stringify(original);
+    const output = rebuild(original);
+    const assistant = output.messages.find(message => message.role === 'model')!;
+    const originalAssistant = original.find(message => message.role === 'model')!;
+    const receipt = output.messages.find(message => message.role === 'system')!;
+    expect(records).toHaveLength(18);
+    expect(new Set(records.map(event => event.EventId)).size).toBe(18);
+    expect(output.messages).toHaveLength(3);
+    expect(receipt).toMatchObject({
+      id: records.at(-1)!.EventId, eventId: records.at(-1)!.EventId,
+      invocationId: originalAssistant.invocationId, eventType: 'run_status', status: 'failed',
+      content: '本轮运行失败。', timestamp: Date.parse(String(records.at(-1)!.Timestamp)),
+    });
+    expect(output.messages[0]).toEqual(original[0]);
+    expect(assistant.reasoning).toBe(originalAssistant.reasoning);
+    expect(assistant.reasoning).toHaveLength(2287);
+    expect(assistant.content).toBe(originalAssistant.content);
+    expect(assistant.blocks?.filter(block => block.type === 'thinking')).toHaveLength(1);
+    expect(assistant.blocks?.filter(block => block.type === 'tool')).toHaveLength(8);
+    expect(Object.keys(assistant.tools!)).toEqual(Object.keys(originalAssistant.tools!));
+    Object.entries(assistant.tools!).forEach(([key, tool]) => {
+      const before = originalAssistant.tools![key];
+      expect(tool).toMatchObject({ name: before.name, args: before.args });
+      expect(tool.previousResponseId).toBe(before.previousResponseId);
+      if (before.status === 'completed') expect(tool).toEqual(before);
+      else if (before.status === 'running') expect(tool.status).toBe('unknown');
+    });
+    expect(Object.values(assistant.tools!).filter(tool => tool.name === 'commandExecution').map(tool => tool.status))
+      .toEqual(['completed', 'completed']);
+    expect(Object.values(assistant.tools!).filter(tool => tool.name === 'dynamicToolCall')).toHaveLength(1);
+    expect(assistant.blocks?.filter(block => block.type === 'tool' && block.status === 'unknown')
+      .map(block => block.type === 'tool' && block.extra?.persistedToolStatus)).toEqual(Array(5).fill('running'));
+    expect(JSON.stringify(original)).toBe(inputSnapshot);
+    expect(output.canonicalRunIds).toEqual([]);
+    expect(output.translatedEvents).toEqual([]);
+    expect(rebuild(output.messages).messages).toEqual(output.messages);
+  });
+
+  it('adds a receipt from a newest-only page without changing a different active run', () => {
+    const active: Message = {
+      id: 'other-model', role: 'model', invocationId: 'other-run', content: 'An independent run.', timestamp: 1_800_000_000_000,
+      tools: { independent: { name: 'independent', args: '{}', status: 'running' } },
+    };
+    const output = rebuild([...fallback(), active], [records.at(-1)!]);
+    expect(output.messages.find(message => message.id === active.id)).toEqual(active);
+    expect(output.messages.filter(message => message.status === 'failed')).toHaveLength(1);
+  });
+
+  it('honours the last status and does not fabricate successful tool results from completed roots', () => {
+    for (const status of ['in_progress', 'completed']) {
+      const latest = { ...records.at(-1)!, SeqId: 586, Content: { status } };
+      const original = fallback();
+      expect(rebuild(original, [...records, latest]).messages).toEqual(original);
+    }
+  });
+
+  it('presents cancellation as cancellation with pending results unknown', () => {
+    const cancelled = { ...records.at(-1)!, Content: { status: 'cancelled' } };
+    const output = rebuild(fallback(), [cancelled]);
+    expect(output.messages.find(message => message.role === 'system')?.status).toBe('cancelled');
+    expect(Object.values(output.messages.find(message => message.role === 'model')!.tools!)
+      .filter(tool => tool.name === 'dynamicToolCall')[0].status).toBe('unknown');
+  });
+
+  it('supplements partial canonical history when its terminal boundary is missing', () => {
+    const canonical: PersistedSessionEventRecord = {
+      ...records.at(-1)!, EventId: 'canonical-start', SeqId: 587, EventType: 'runtime.run.started',
+      Content: { runtime_event: { event_type: 'run.started', run_id: records.at(-1)!.InvocationId } },
+    };
+    const original = fallback();
+    const output = rebuild(original, [...records, canonical]);
+    expect(output.messages.find(message => message.role === 'system')?.status).toBe('failed');
+    expect(output.messages.find(message => message.role === 'model')?.reasoning).toBe(original[1].reasoning);
+    expect(Object.values(output.messages.find(message => message.role === 'model')!.tools!)
+      .filter(tool => tool.name === 'commandExecution').map(tool => tool.status)).toEqual(['completed', 'completed']);
+    expect(output.canonicalRunIds).toEqual([]);
+  });
+
+  it('does not override an actual canonical root terminal with a legacy mirror', () => {
+    const canonical: PersistedSessionEventRecord = {
+      ...records.at(-1)!, EventId: 'canonical-answer', SeqId: 1, EventType: 'runtime.item.completed',
+      Content: { runtime_event: {
+        event_type: 'item.completed', run_id: records.at(-1)!.InvocationId,
+        scope_id: records.at(-1)!.InvocationId, item_id: 'canonical-answer', item_kind: 'message',
+        snapshot: { parts: [{ part_id: 'answer-text', text: 'Canonical reply.' }] },
+        source: { metadata: { native_item_kind: 'agentMessage' } },
+      } },
+    };
+    const original = fallback();
+    for (const eventType of ['run.completed', 'run.failed']) {
+      const terminal: PersistedSessionEventRecord = {
+        ...canonical, EventId: 'root-terminal', SeqId: 586,
+        Content: { runtime_event: { event_type: eventType, run_id: records.at(-1)!.InvocationId } },
+      };
+      const withoutMirror = rebuild(original, [canonical, terminal]);
+      const withMirror = rebuild(original, [canonical, ...records, terminal]);
+      const comparable = (messages: Message[]) => messages.map(message => ({
+        ...message, blocks: message.blocks?.map(block => ({ ...block, id: undefined })),
+      }));
+      expect(comparable(withMirror.messages)).toEqual(comparable(withoutMirror.messages));
+      expect(withMirror.canonicalRunIds).toEqual(withoutMirror.canonicalRunIds);
+      expect(withMirror.messages.some(message => message.id === records.at(-1)!.EventId)).toBe(false);
+    }
+  });
+
+  it('keeps the compatibility failure visible after strict replay of a still-open remote run', () => {
+    const frames = readFileSync(new URL('./fixtures/a2a_remote_agent/v1/a2a_stream_tool_terminal.jsonl', import.meta.url), 'utf8')
+      .trim().split('\n').map(line => JSON.parse(line)).filter(row => row.kind === 'runtime_event').map(row => row.payload)
+      .filter(frame => !['run.completed', 'run.failed'].includes(frame.event_type));
+    const canonical = frames.map((frame, index) => ({
+      EventId: frame.event_id, SeqId: index + 1, EventType: 'runtime_event', Content: { runtime_event: frame },
+    }));
+    const legacy = { ...records.at(-1)!, InvocationId: 'root-run-1', Metadata: { run_id: 'root-run-1' } };
+    const output = rebuild([], [...canonical, legacy]);
+    expect(output.canonicalRunIds).toContain('root-run-1');
+    expect(output.messages.some(message => message.agentBlock)).toBe(true);
+    expect(output.messages.find(message => message.id === legacy.EventId)).toMatchObject({ status: 'failed', invocationId: 'root-run-1' });
+  });
+});
 
 describe('rebuildPersistedSessionHistory', () => {
   it('normalises RuntimeEvent Unix seconds before ordering with millisecond message rows', () => {
