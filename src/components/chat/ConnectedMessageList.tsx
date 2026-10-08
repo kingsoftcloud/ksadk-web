@@ -1,3 +1,4 @@
+import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useUIStore } from '../../stores/ui.js';
 import { useStreamingStore } from '../../stores/streaming.js';
@@ -28,6 +29,7 @@ export type ConnectedMessageListProps = {
   onSubmitAguiAction?: (message: A2UIClientEventMessage) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  agentBlockActions?: AgentBlockActions;
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
@@ -47,6 +49,7 @@ export function ConnectedMessageList({
   onSubmitAguiAction,
   onStopGeneration,
   onCancelRemote,
+  agentBlockActions,
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
@@ -401,6 +404,7 @@ export function ConnectedMessageList({
         onSubmitAguiAction={onSubmitAguiAction}
         onStopGeneration={onStopGeneration}
         onCancelRemote={onCancelRemote}
+        agentBlockActions={agentBlockActions}
         checkpoints={checkpointResumeEnabled ? checkpoints : []}
         onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}

@@ -99,6 +99,7 @@ function bootstrap() {
     Agent: { AgentId: AGENT_ID, Name: 'Canonical Fixture', Framework: 'codex' },
     ApiFormats: ['responses'],
     Capabilities: {
+      ConversationSurface: surface(),
       Attachments: true,
       WorkspaceFiles: false,
       Approval: true,
@@ -452,6 +453,20 @@ async function handleAgentApi(request, response, requestUrl) {
     return;
   }
 
+  if (action === 'CancelRun') {
+    state.scopedCancels ||= [];
+    state.scopedCancelKeys ||= new Set();
+    state.scopedCancels.push(body);
+    if (body.AgentId !== 'remote-fixture-agent' || body.SessionId !== 'session'
+      || body.InvocationId !== 'root-run-1' || body.ScopeId !== 'child-scope-1' || !body.ClientToken) {
+      sendJson(response, { Code: 403, Message: 'Unknown scoped target' });
+      return;
+    }
+    state.scopedCancelKeys.add(body.ClientToken);
+    sendJson(response, envelope({ ScopeId: body.ScopeId, CancelRequestState: 'cancel_requested' }));
+    return;
+  }
+
   if (action === 'RunAgent') {
     state.legacyRunAgentCalls += 1;
   }
@@ -520,6 +535,8 @@ const server = createServer(async (request, response) => {
         reconnects: state.reconnects,
         submits: state.submits,
         winner: state.winner,
+        scopedCancels: state.scopedCancels || [],
+        scopedCancelCommands: state.scopedCancelKeys?.size || 0,
       });
       return;
     }

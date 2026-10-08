@@ -133,3 +133,15 @@ it('does not invent duration from missing or reversed terminal timestamps', () =
     expect(html).not.toContain('agent-block-elapsed');
   }
 });
+
+it.each([
+  ['cancel_requested', '取消请求处理中'], ['confirmed', '远程取消已确认'],
+  ['unknown', '取消结果未知'], ['unsupported', '不支持远程取消'],
+])('shows cancellation request %s independently from execution status', (request_state, label) => {
+  const html = renderToStaticMarkup(<AgentBlockView block={{ item: {
+    ...item, payload: { ...item.payload, status: 'working', cancel: { capability: 'supported', request_state } },
+  }, messages: [] }} />);
+  expect(html).toContain(label);
+  expect(html).toContain('正在处理');
+  expect(html).not.toContain('已取消');
+});

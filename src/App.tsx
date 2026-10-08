@@ -1,5 +1,7 @@
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { AgentAuthorizationBoundary, AgentAuthorizationLoading } from './components/AgentAuthorizationBoundary.js';
+import { createScopedAgentBlockActions } from './core/conversation/scoped-cancel.js';
+import { useMessageStore } from './stores/message.js';
 import { useUIStore } from './stores/ui.js';
 import { useBootstrapStore } from './stores/bootstrap.js';
 import { useModelStore } from './stores/model.js';
@@ -211,6 +213,15 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     useStreamingStore.getState().stopSessionActivity(sessionId);
     stopGeneration();
   }, [currentSessionIdRef, runSubscriptionAbortRef, stopGeneration]);
+
+  const agentBlockActions = useMemo(() => createScopedAgentBlockActions({
+    api, agentId,
+    getContext: () => ({
+      sessionId: currentSessionIdRef.current || '',
+      supported: useBootstrapStore.getState().capabilities.scoped_cancel?.supported === true,
+      items: useMessageStore.getState().messages.flatMap(message => message.agentBlock ? [message.agentBlock.item] : []),
+    }),
+  }), [api, agentId, currentSessionIdRef]);
 
   const handleCancelRemote = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
@@ -487,6 +498,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
               onSubmitAguiAction={submitAguiAction}
               onStopGeneration={handleStopGeneration}
               onCancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
+              agentBlockActions={uiCapabilities.scoped_cancel?.supported === true ? agentBlockActions : undefined}
               checkpointResumeEnabled={
                 uiCapabilities.RunLifecycle.Enabled &&
                 uiCapabilities.RunLifecycle.Checkpoints &&

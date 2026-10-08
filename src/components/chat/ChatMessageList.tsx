@@ -1,3 +1,4 @@
+import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import {
   useCallback,
   useEffect,
@@ -74,6 +75,7 @@ export type ChatMessageListProps = {
   onDeleteFeedback: (message: Message) => void;
   onStopGeneration?: () => void;
   onCancelRemote?: () => void;
+  agentBlockActions?: AgentBlockActions;
   onScrollToBottom?: () => void;
   checkpoints?: SessionCheckpoint[];
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
@@ -684,6 +686,7 @@ function ChatMessage({
   onSubmitFeedback,
   onSubmitAguiAction,
   interactionRecords,
+  agentBlockActions,
 }: {
   agentName: string;
   isMobile: boolean;
@@ -693,6 +696,7 @@ function ChatMessage({
   showAgentHeader: boolean;
   message: Message;
   interactionRecords?: readonly Interaction[];
+  agentBlockActions?: AgentBlockActions;
   onDeleteFeedback: (message: Message) => void;
   onOpenAttachmentPreview: (attachment: MessageAttachment) => void;
   onRespondToApproval: ChatMessageListProps['onRespondToApproval'];
@@ -746,7 +750,7 @@ function ChatMessage({
         />
       ) : null}
 
-      {message.agentBlock ? <AgentBlockView block={message.agentBlock} /> : message.blocks?.length ? (
+      {message.agentBlock ? <AgentBlockView key={message.agentBlock.item.itemId} block={message.agentBlock} actions={agentBlockActions} /> : message.blocks?.length ? (
         <ProcessingBlocksView
           message={message}
           isStreaming={isStreaming}
@@ -1006,6 +1010,7 @@ export function ChatMessageList({
   onSubmitAguiAction,
   onStopGeneration,
   onCancelRemote,
+  agentBlockActions,
   onScrollToBottom,
   checkpoints = [],
   onResumeCheckpoint,
@@ -1181,6 +1186,7 @@ export function ChatMessageList({
                     isLastMessage={entry.index === messages.length - 1}
                     showAgentHeader={!continuesAssistantTurn(messages[entry.index - 1], entry.item)}
                     message={entry.item}
+                    agentBlockActions={agentBlockActions}
                     onDeleteFeedback={onDeleteFeedback}
                     onOpenAttachmentPreview={onOpenAttachmentPreview}
                     onRespondToApproval={onRespondToApproval}

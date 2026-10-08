@@ -1,4 +1,4 @@
-import type { ApiFacade } from './types.js';
+import type { ApiFacade, CancelRunOptions } from './types.js';
 import {
   AgentEngineClient,
   type AgentEngineClientOptions,
@@ -231,11 +231,16 @@ export class ApiFacadeImpl implements ApiFacade {
     }, opts);
   }
 
-  async cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }) {
+  async cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: CancelRunOptions) {
+    if (opts?.scopeId !== undefined && (!opts.scopeId.trim() || !sessionId || !opts.clientToken?.trim())) {
+      throw new Error('Scoped cancellation requires session, scope and client token');
+    }
     return this.client.postJsonAction('CancelRun', {
       AgentId: agentId,
       SessionId: sessionId,
       InvocationId: invocationId,
+      ...(opts?.scopeId !== undefined ? { ScopeId: opts.scopeId } : {}),
+      ...(opts?.clientToken ? { ClientToken: opts.clientToken } : {}),
     }, opts);
   }
 

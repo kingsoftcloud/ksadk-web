@@ -128,3 +128,9 @@ describe('agent-kernel/v1 capability matrix', () => {
     expect(() => decodeCapabilityMatrix({ schema_version: 1 })).toThrow();
   });
 });
+
+it('does not infer scoped cancellation from root stop or lifecycle abort', () => {
+  expect(normalizeCapabilities({ Capabilities: { StopRun: true, RunLifecycle: { Enabled: true, Abort: true } } }).scoped_cancel?.supported).not.toBe(true);
+  expect(normalizeCapabilities({ Capabilities: { scoped_cancel: { supported: false } } }).scoped_cancel?.supported).toBe(false);
+  expect(normalizeCapabilities({ Capabilities: { scoped_cancel: { supported: true } } }).scoped_cancel?.supported).toBe(true);
+});

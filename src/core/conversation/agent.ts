@@ -42,8 +42,10 @@ export type AgentScopeAction = {
   parentItemId: string;
 };
 /** Host-owned surface action. Interaction responses use the existing Interaction/v1 revision-CAS client. */
+export type AgentCancelRequestState = 'none' | 'processing' | 'unknown' | 'unsupported';
 export type AgentBlockActions = {
-  cancel?: (action: AgentScopeAction) => void | Promise<void>;
+  cancel?: (action: AgentScopeAction) => void | AgentCancelRequestState | Promise<void | AgentCancelRequestState>;
+  getCancelRequestState?: (action: AgentScopeAction) => AgentCancelRequestState;
 };
 
 /** Select only from a producer-declared, versioned surface and host renderer. */

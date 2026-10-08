@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { Message } from './types.js';
 import type {
   AgentBlockActions,
+  AgentCancelRequestState,
   AgentScopeAction,
 } from '../../core/conversation/agent.js';
 import { ProcessingBlocksView } from './ProcessingBlocksView.js';
@@ -39,6 +40,8 @@ function elapsedLabel(start: unknown, end: unknown): string | undefined {
 /** One remote level. Children reuse trusted local renderers; nested delegation stays passive. */
 export function AgentBlockView({ block, actions }: AgentBlockViewProps) {
   const [open, setOpen] = useState(false);
+  const [localCancelState, setLocalCancelState] = useState<AgentCancelRequestState>('none');
+  const cancelPending = useRef(false);
   const d = block.item.payload;
   const agent = d.agent as { name?: string } | undefined;
   const cancel = d.cancel as
@@ -63,6 +66,26 @@ export function AgentBlockView({ block, actions }: AgentBlockViewProps) {
     runId: block.item.runId,
     scopeId: String(d.scope_id),
     parentItemId: block.item.parentItemId || '',
+  };
+  const requestState = cancel?.request_state && cancel.request_state !== 'none'
+    ? cancel.request_state : localCancelState !== 'none' ? localCancelState : actions?.getCancelRequestState?.(action) || 'none';
+  const cancelLabels: Record<string, string> = {
+    processing: '取消请求处理中', cancel_requested: '取消请求处理中',
+    confirmed: '远程取消已确认', local_confirmed: '已取消',
+    unknown: '取消结果未知', unsupported: '不支持远程取消',
+  };
+  const requestCancel = async () => {
+    if (cancelPending.current) return;
+    cancelPending.current = true;
+    setLocalCancelState('processing');
+    try {
+      const state = await actions?.cancel?.(action);
+      setLocalCancelState(state || 'processing');
+    } catch {
+      setLocalCancelState('unknown');
+    } finally {
+      cancelPending.current = false;
+    }
   };
   return (
     <section
@@ -98,6 +121,7 @@ export function AgentBlockView({ block, actions }: AgentBlockViewProps) {
           {block.summary}
         </p>
       )}
+      {cancelLabels[requestState] && <p role="status" data-testid="agent-block-cancel-state" className="mt-1 text-xs text-slate-500">{cancelLabels[requestState]}</p>}
       {open && (
         <div className="mt-3 space-y-2" data-testid="agent-block-detail">
           {block.messages.map((message) => (
@@ -117,10 +141,10 @@ export function AgentBlockView({ block, actions }: AgentBlockViewProps) {
           {active &&
             actions?.cancel &&
             cancel?.capability === 'supported' &&
-            cancel.request_state === 'none' && (
+            ['none', 'unknown'].includes(requestState) && (
               <button
                 type="button"
-                onClick={() => void actions.cancel?.(action)}
+                onClick={() => void requestCancel()}
               >
                 取消远程智能体
               </button>

@@ -34,6 +34,8 @@ export type UiCapabilities = {
   Thinking?: boolean;
   ContextCompaction?: boolean;
   StopRun?: boolean;
+  /** Explicit runtime support; absence never permits falling back to root cancellation. */
+  scoped_cancel?: { supported: boolean };
   ResumeRun?: boolean;
   MCP?: boolean;
   HostedRuntime?: boolean;
