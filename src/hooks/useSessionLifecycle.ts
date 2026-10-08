@@ -552,6 +552,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           });
           if (eventHistory.events.length > 0) {
             latestEventSeqId = maxSeqIdFromEvents(eventHistory.events);
+            for (const record of eventHistory.events) {
+              ingestSessionEventRecord(record, sessionId);
+            }
             const rebuilt = rebuildPersistedSessionHistory(
               fallbackHistory,
               eventHistory.events,
@@ -560,9 +563,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             );
             canonicalRunIds = rebuilt.canonicalRunIds;
             history = rebuilt.messages;
-            for (const record of eventHistory.events) {
-              ingestSessionEventRecord(record, sessionId);
-            }
           }
         } catch (error) {
           if (isStillCurrentSession()) historyReadFailureRef.current = {

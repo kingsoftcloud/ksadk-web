@@ -300,6 +300,58 @@ export function rebuildPersistedSessionHistory(
   const completeCanonicalRunIds = new Set(
     [...completedCanonicalRunIds(projected)].filter((runId) => fullyObservedRunIds.has(runId)),
   );
+  // Strict replay is authoritative only after the actual root start and
+  // descriptor item starts have been loaded. Newest-first pages commonly
+  // begin inside a child scope, even when its terminal descriptor is present.
+  const framesByRun = new Map<string, KernelSessionEventFrame[]>();
+  for (const persisted of orderedRecords) {
+    const frame = persistedRuntimeFrame(persisted);
+    if (frame?.schema_version !== 2 || !frame.run_id) continue;
+    const runId = String(frame.run_id);
+    const frames = framesByRun.get(runId) || [];
+    frames.push(frame);
+    framesByRun.set(runId, frames);
+  }
+  const hasDescriptor = (frame: KernelSessionEventFrame) =>
+    [record(frame.initial), record(frame.snapshot), record(frame.update)].some(holder =>
+      record(holder?.data)?.schema === 'execution.scope/v1'
+      || Array.isArray(holder?.parts) && holder.parts.some(part =>
+        record(record(part)?.data)?.schema === 'execution.scope/v1'));
+  const remoteRuns = new Set([...framesByRun].filter(([, frames]) =>
+    frames.some(hasDescriptor)).map(([runId]) => runId));
+  const replayedRuns = new Map<string, Message[]>();
+  const failedStrictRuns = new Set<string>();
+  for (const [runId, frames] of framesByRun) {
+    if (!remoteRuns.has(runId) && !completeCanonicalRunIds.has(runId)
+      && !frames.some(frame => ['item.failed', 'run.failed'].includes(String(frame.event_type)))) continue;
+    const hasRootStart = frames.some(frame => frame.event_type === 'run.started' && !frame.parent_scope_id);
+    const starts = new Set<string>();
+    const descriptorStartsLoaded = frames.every(frame => {
+      const key = JSON.stringify([frame.scope_id, frame.item_id]);
+      if (frame.event_type === 'item.started') starts.add(key);
+      return !hasDescriptor(frame) || starts.has(key);
+    });
+    if (!hasRootStart || !descriptorStartsLoaded) continue;
+    // One malformed run must not prevent other runs or independent
+    // Interaction/v1 records on this page from being hydrated.
+    try {
+      const ingress = new RuntimeConversationIngress(sessionId, undefined, profile);
+      frames.forEach(frame => ingress.apply(frame));
+      const state = ingress.snapshot();
+      const presentation = projectConversationItems(state, { profile });
+      const timestamp = eventTimestamp(frames[0].timestamp);
+      replayedRuns.set(runId, projectConversationStreamForHostedUi({
+        state, presentation, runId,
+        cursor: Math.max(...frames.map(frame => Number(frame.seq || 0))),
+      }).messages.map((message, index) => ({ ...message, invocationId: runId, timestamp: timestamp + index })));
+    } catch (error) {
+      failedStrictRuns.add(runId);
+      console.warn(`[SessionHistory] strict replay skipped for run ${runId}:`, error instanceof Error ? error.message : 'invalid runtime history');
+    }
+  }
+  for (const runId of new Set([...remoteRuns, ...failedStrictRuns])) {
+    if (!replayedRuns.has(runId)) completeCanonicalRunIds.delete(runId);
+  }
   const cancelledRunIds = cancelledInteractionRunIds(orderedRecords);
   const canonicalMessages = [...completeCanonicalRunIds].flatMap((runId) => enrichCanonicalRun(
     projected.filter((message) => message.invocationId === runId),
@@ -347,56 +399,20 @@ export function rebuildPersistedSessionHistory(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );
 
-  // Fully observed RuntimeEvent/v2 runs use exactly the same canonical ingress
-  // as live SSE. This is not limited to remote hierarchy: ordinary root runs
-  // also need the reducer's stable item identity when a terminal snapshot
-  // reveals a tool call_id that was absent from item.started. Older and partial
-  // histories keep the established compatibility translator.
-  const remoteRuns = new Set(orderedRecords.flatMap(persisted => {
-    const frame = persistedRuntimeFrame(persisted);
-    return frame?.schema_version === 2 && [record(frame.initial),record(frame.snapshot)].some(holder => Array.isArray(holder?.parts) && holder.parts.some(part => record(record(part)?.data)?.schema === 'execution.scope/v1'))
-      ? [String(frame.run_id)] : [];
-  }));
-  const failedRuns = new Set(orderedRecords.flatMap(persisted => {
-    const frame = persistedRuntimeFrame(persisted);
-    return frame?.schema_version === 2
-      && ['item.failed', 'run.failed'].includes(String(frame.event_type || ''))
-      ? [String(frame.run_id)] : [];
-  }));
-  const canonicalIngressRuns = new Set([
-    ...remoteRuns,
-    ...completeCanonicalRunIds,
-    ...failedRuns,
-  ]);
-  for (const runId of canonicalIngressRuns) {
-    const ingress = new RuntimeConversationIngress(sessionId, undefined, profile);
-    let cursor = 0;
-    let timestamp = 0;
-    for (const persisted of orderedRecords) {
-      const frame = persistedRuntimeFrame(persisted);
-      if (frame?.run_id !== runId) continue;
-      ingress.apply(frame);
-      cursor = Math.max(cursor, Number(frame.seq || 0));
-      if (!timestamp) timestamp = eventTimestamp(frame.timestamp);
-    }
-    const state = ingress.snapshot();
-    const presentation = projectConversationItems(state, { profile });
-    const projectedRemote = projectConversationStreamForHostedUi({state,presentation,runId,cursor}).messages
-      .map((message, index) => ({...message, invocationId:runId, timestamp:timestamp + index}));
-    if (projectedRemote.length && fullyObservedRunIds.has(runId)) {
-      const index = messages.findIndex(message => message.invocationId === runId || message.runId === runId);
-      const belongsToRun = (message: Message) => message.invocationId === runId || message.runId === runId;
-      const fallback = messages.filter(belongsToRun);
-      const input = fallback.find(message => message.role === 'user');
-      const replacement = remoteRuns.has(runId)
-        ? input && !projectedRemote.some(message => message.role === 'user')
-          ? [input, ...projectedRemote]
-          : projectedRemote
-        : enrichCanonicalRun(projectedRemote, fallback);
-      const retained = messages.filter(message => !belongsToRun(message));
-      messages = [...retained.slice(0,index < 0 ? retained.length : index), ...replacement, ...retained.slice(index < 0 ? retained.length : index)];
-      completeCanonicalRunIds.add(runId);
-    }
+  for (const [runId, projectedRemote] of replayedRuns) {
+    if (!projectedRemote.length) continue;
+    const belongsToRun = (message: Message) => message.invocationId === runId || message.runId === runId;
+    const index = messages.findIndex(belongsToRun);
+    const fallback = messages.filter(belongsToRun);
+    const input = fallback.find(message => message.role === 'user');
+    const replacement = remoteRuns.has(runId)
+      ? input && !projectedRemote.some(message => message.role === 'user')
+        ? [input, ...projectedRemote] : projectedRemote
+      : enrichCanonicalRun(projectedRemote, fallback);
+    const retained = messages.filter(message => !belongsToRun(message));
+    const insertion = index < 0 ? retained.length : index;
+    messages = [...retained.slice(0, insertion), ...replacement, ...retained.slice(insertion)];
+    completeCanonicalRunIds.add(runId);
   }
 
   return {

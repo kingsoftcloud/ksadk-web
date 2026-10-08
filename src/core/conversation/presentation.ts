@@ -230,19 +230,21 @@ export function projectConversationItems(
     item.visibility === 'public'
     || (options.includeInternal === true && item.visibility === 'internal')
   ));
-  if (options.profile === 'flat-v1' && visible.some(item => item.kind === 'agent' || item.nativeRef.parentScopeId || item.nativeRef.parent_scope_id)) {
+  if (options.profile === 'flat-v1' && visible.some(item => item.kind === 'agent')) {
     const agents = visible.filter(item => item.kind === 'agent');
     const triggers = new Set(agents.flatMap(agent => triggerFamily(agent, visible).map(item => item.itemId)));
-    const agentIds = new Set(agents.map(item => item.itemId));
+    const isRemoteChild = (item: ConversationItem) => agents.some(agent => agent.runId === item.runId && (
+      item.parentItemId === agent.itemId
+      || (typeof agent.payload.scope_id === 'string' && agent.payload.scope_id.length > 0
+        && agent.payload.scope_id === (item.nativeRef.scopeId || item.nativeRef.scope_id))
+    ));
     const rootTerminal = visible.find(item => conversationTerminalStatus(item));
     // A flat client cannot render the child AgentBlock hierarchy, but a public
     // child failure is still an actionable safety fact. Keep it in the flat
     // timeline instead of silently dropping an unknown-outcome warning.
     let root = visible.filter(item => item.kind !== 'agent' && (
       item.kind === 'error'
-      || (!agentIds.has(item.parentItemId || '')
-        && !item.nativeRef.parentScopeId
-        && !item.nativeRef.parent_scope_id
+      || (!isRemoteChild(item)
         && !triggers.has(item.itemId))
     ));
     const refs = rootTerminal?.payload.outputRefs || rootTerminal?.payload.output_refs;
