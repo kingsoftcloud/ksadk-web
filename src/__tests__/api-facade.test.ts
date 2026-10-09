@@ -379,3 +379,15 @@ describe('workspace preview request contract', () => {
     }
   });
 });
+
+it('sends scope and stable client token on CancelRun without changing root-only callers', async () => {
+  const calls: unknown[] = [];
+  const facade = new ApiFacadeImpl({ fetch: async (_url, init) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ Code: 0, Data: { ScopeId: 'child', CancelRequestState: 'cancel_requested' } }));
+  } });
+  await facade.cancelRun('agent', 'session', 'run', { scopeId: 'child', clientToken: 'stable-token' });
+  expect(calls).toEqual([{ AgentId: 'agent', SessionId: 'session', InvocationId: 'run', ScopeId: 'child', ClientToken: 'stable-token' }]);
+  await expect(facade.cancelRun('agent', 'session', 'run', { scopeId: '', clientToken: 'stable-token' })).rejects.toThrow('Scoped cancellation requires');
+  expect(calls).toHaveLength(1);
+});

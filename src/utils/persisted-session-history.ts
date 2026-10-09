@@ -1,3 +1,6 @@
+import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
+import { projectConversationItems } from '../core/conversation/presentation.js';
+import { projectConversationStreamForHostedUi } from '../core/conversation/hosted.js';
 import type { Message } from '../components/chat/types.js';
 import { buildBlocksFromHistory } from '../core/run/blocks.js';
 import {
@@ -5,7 +8,7 @@ import {
   type KernelSessionEventFrame,
 } from '../core/stream/kernel-events.js';
 import type { SessionEventRecord } from '../types/session-events.js';
-import { buildMessagesFromSessionEvents } from './session-events.js';
+import { buildMessageFromSessionEvent, buildMessagesFromSessionEvents } from './session-events.js';
 
 export type PersistedSessionEventRecord = SessionEventRecord & {
   Content?: SessionEventRecord['Content'] & {
@@ -70,6 +73,57 @@ export function persistedRuntimeFrame(
     seq: Number(raw.SeqId || envelope.seq || payload.seq || 0),
     timestamp: raw.Timestamp || envelope.timestamp || payload.timestamp,
   };
+}
+
+/** Legacy terminal receipts supplement Messages without re-projecting its text or tools. */
+function applyLegacyTerminalReceipts(
+  messages: Message[],
+  records: PersistedSessionEventRecord[],
+  authoritativeRunIds: Set<string>,
+): Message[] {
+  const latestStatuses = new Map<string, PersistedSessionEventRecord>();
+  for (const persisted of records) {
+    if (persisted.EventType !== 'run_status' || persistedRuntimeFrame(persisted)) continue;
+    const runId = String(persisted.InvocationId || persisted.Metadata?.run_id || '').trim();
+    // An actual canonical root terminal owns its terminal facts. Partial history may
+    // lack that boundary and still needs a durable compatibility receipt.
+    if (runId && !authoritativeRunIds.has(runId)) latestStatuses.set(runId, persisted);
+  }
+  let result = messages;
+  for (const [runId, persisted] of latestStatuses) {
+    const receipt = buildMessageFromSessionEvent({
+      ...persisted,
+      EventId: persisted.EventId || `legacy-terminal:${runId}:${persisted.SeqId || 0}`,
+      Timestamp: eventTimestamp(persisted.Timestamp),
+    }) as Message | null;
+    if (!receipt) continue;
+    const belongsToRun = (message: Message) => (message.invocationId || message.runId) === runId;
+    result = result.filter(message => !(belongsToRun(message)
+      && message.role === 'system' && message.eventType === 'run_status'))
+      .map(message => {
+        if (!belongsToRun(message) || message.role !== 'model') return message;
+        const pending = (status: string) => status === 'running' || status === 'paused';
+        const summary = '运行已结束，未记录此工具的最终结果。';
+        return {
+          ...message,
+          tools: message.tools && Object.fromEntries(Object.entries(message.tools).map(([key, tool]) => [
+            key, pending(tool.status) ? { ...tool, status: 'unknown' as const, summary: tool.summary || summary } : tool,
+          ])),
+          blocks: message.blocks?.map(block => {
+            if (block.type === 'thinking' && block.status === 'streaming') return { ...block, status: 'done' as const };
+            if (block.type !== 'tool' || !pending(block.status)) return block;
+            return {
+              ...block, status: 'unknown' as const, summary: block.summary || summary,
+              extra: { ...block.extra, persistedToolStatus: block.status, terminalRunStatus: receipt.status },
+            };
+          }),
+        };
+      });
+    result.push({ ...receipt, invocationId: runId, eventId: persisted.EventId });
+  }
+  return result === messages ? messages : [...result].sort(
+    (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
+  );
 }
 
 function withHistoryBlocks(message: Message): Message {
@@ -244,6 +298,7 @@ export function rebuildPersistedSessionHistory(
   fallbackMessages: Message[],
   records: PersistedSessionEventRecord[],
   sessionId: string,
+  profile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
 ): {
   messages: Message[];
   canonicalRunIds: string[];
@@ -252,6 +307,7 @@ export function rebuildPersistedSessionHistory(
   const translator = new KernelRunEventTranslator(sessionId);
   const translatedEvents: SessionEventRecord[] = [];
   const canonicalRunIds = new Set<string>();
+  const canonicalTerminalRunIds = new Set<string>();
   const fullyObservedRunIds = new Set<string>();
 
   const orderedRecords = [...(records || [])].sort(
@@ -264,6 +320,9 @@ export function rebuildPersistedSessionHistory(
     const runId = String(frame.run_id || '').trim();
     if (runId) {
       canonicalRunIds.add(runId);
+      if (!frame.parent_scope_id && ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(String(frame.event_type))) {
+        canonicalTerminalRunIds.add(runId);
+      }
       const source = record(frame.source);
       const sourceMetadata = record(source?.metadata);
       const containsRunStart = String(frame.event_type || '') === 'run.started';
@@ -296,6 +355,58 @@ export function rebuildPersistedSessionHistory(
   const completeCanonicalRunIds = new Set(
     [...completedCanonicalRunIds(projected)].filter((runId) => fullyObservedRunIds.has(runId)),
   );
+  // Strict replay is authoritative only after the actual root start and
+  // descriptor item starts have been loaded. Newest-first pages commonly
+  // begin inside a child scope, even when its terminal descriptor is present.
+  const framesByRun = new Map<string, KernelSessionEventFrame[]>();
+  for (const persisted of orderedRecords) {
+    const frame = persistedRuntimeFrame(persisted);
+    if (frame?.schema_version !== 2 || !frame.run_id) continue;
+    const runId = String(frame.run_id);
+    const frames = framesByRun.get(runId) || [];
+    frames.push(frame);
+    framesByRun.set(runId, frames);
+  }
+  const hasDescriptor = (frame: KernelSessionEventFrame) =>
+    [record(frame.initial), record(frame.snapshot), record(frame.update)].some(holder =>
+      record(holder?.data)?.schema === 'execution.scope/v1'
+      || Array.isArray(holder?.parts) && holder.parts.some(part =>
+        record(record(part)?.data)?.schema === 'execution.scope/v1'));
+  const remoteRuns = new Set([...framesByRun].filter(([, frames]) =>
+    frames.some(hasDescriptor)).map(([runId]) => runId));
+  const replayedRuns = new Map<string, Message[]>();
+  const failedStrictRuns = new Set<string>();
+  for (const [runId, frames] of framesByRun) {
+    if (!remoteRuns.has(runId) && !completeCanonicalRunIds.has(runId)
+      && !frames.some(frame => ['item.failed', 'run.failed'].includes(String(frame.event_type)))) continue;
+    const hasRootStart = frames.some(frame => frame.event_type === 'run.started' && !frame.parent_scope_id);
+    const starts = new Set<string>();
+    const descriptorStartsLoaded = frames.every(frame => {
+      const key = JSON.stringify([frame.scope_id, frame.item_id]);
+      if (frame.event_type === 'item.started') starts.add(key);
+      return !hasDescriptor(frame) || starts.has(key);
+    });
+    if (!hasRootStart || !descriptorStartsLoaded) continue;
+    // One malformed run must not prevent other runs or independent
+    // Interaction/v1 records on this page from being hydrated.
+    try {
+      const ingress = new RuntimeConversationIngress(sessionId, undefined, profile);
+      frames.forEach(frame => ingress.apply(frame));
+      const state = ingress.snapshot();
+      const presentation = projectConversationItems(state, { profile });
+      const timestamp = eventTimestamp(frames[0].timestamp);
+      replayedRuns.set(runId, projectConversationStreamForHostedUi({
+        state, presentation, runId,
+        cursor: Math.max(...frames.map(frame => Number(frame.seq || 0))),
+      }).messages.map((message, index) => ({ ...message, invocationId: runId, timestamp: timestamp + index })));
+    } catch (error) {
+      failedStrictRuns.add(runId);
+      console.warn(`[SessionHistory] strict replay skipped for run ${runId}:`, error instanceof Error ? error.message : 'invalid runtime history');
+    }
+  }
+  for (const runId of new Set([...remoteRuns, ...failedStrictRuns])) {
+    if (!replayedRuns.has(runId)) completeCanonicalRunIds.delete(runId);
+  }
   const cancelledRunIds = cancelledInteractionRunIds(orderedRecords);
   const canonicalMessages = [...completeCanonicalRunIds].flatMap((runId) => enrichCanonicalRun(
     projected.filter((message) => message.invocationId === runId),
@@ -339,12 +450,28 @@ export function rebuildPersistedSessionHistory(
       || !completeCanonicalRunIds.has(message.invocationId)
     )
   )).map((message) => partialFallbackMessageById.get(message.id) || message);
-  const messages = [...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages].sort(
+  let messages = [...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages].sort(
     (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
   );
 
+  for (const [runId, projectedRemote] of replayedRuns) {
+    if (!projectedRemote.length) continue;
+    const belongsToRun = (message: Message) => message.invocationId === runId || message.runId === runId;
+    const index = messages.findIndex(belongsToRun);
+    const fallback = messages.filter(belongsToRun);
+    const input = fallback.find(message => message.role === 'user');
+    const replacement = remoteRuns.has(runId)
+      ? input && !projectedRemote.some(message => message.role === 'user')
+        ? [input, ...projectedRemote] : projectedRemote
+      : enrichCanonicalRun(projectedRemote, fallback);
+    const retained = messages.filter(message => !belongsToRun(message));
+    const insertion = index < 0 ? retained.length : index;
+    messages = [...retained.slice(0, insertion), ...replacement, ...retained.slice(insertion)];
+    completeCanonicalRunIds.add(runId);
+  }
+
   return {
-    messages,
+    messages: applyLegacyTerminalReceipts(messages, orderedRecords, canonicalTerminalRunIds),
     canonicalRunIds: [...completeCanonicalRunIds],
     translatedEvents,
   };

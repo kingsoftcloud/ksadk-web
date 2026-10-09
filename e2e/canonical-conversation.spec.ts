@@ -363,3 +363,77 @@ test('context hover shows model metadata without inventing usage and supports pi
   await trigger.hover();
   await expect(popup).toContainText('模型窗口：200,000 tokens');
 });
+
+test('remote AgentBlock expands live tool observations without ending its root',async({page})=>{
+  await page.clock.install({time:new Date(1010000)});
+  await page.clock.pauseAt(new Date(1011000));
+  await page.goto('/e2e/fixtures/remote-agent-block.html');
+  const block=page.getByTestId('agent-block');
+  await expect(block).toHaveCount(1);
+  await expect(block.getByRole('button',{name:'finance',exact:true})).toHaveAttribute('aria-expanded','false');
+  await expect(block.getByTestId('agent-block-detail')).not.toBeVisible();
+  await expect(block.getByTestId('agent-block-summary')).toHaveText('first answer');
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('7 秒');
+  await page.clock.runFor(2000);
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('9 秒');
+  await block.getByRole('button',{name:'finance',exact:true}).click();
+  await expect(block.getByTestId('agent-block-detail').getByText('first answer',{exact:true})).toBeVisible();
+  await expect(block.getByText('query_metrics',{exact:false})).toHaveCount(1);
+  await expect(block.getByText('正在运行',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Sequence 13'}).click();
+  await expect(block.getByText('已完成',{exact:true})).toBeVisible();
+  await expect(block).toHaveCount(1);
+  await page.getByRole('button',{name:'Sequence 19'}).click();
+  await expect(block.getByRole('status')).toHaveText('已完成');
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('15 秒');
+  await page.clock.runFor(30000);
+  await expect(block.getByTestId('agent-block-elapsed')).toHaveText('15 秒');
+  await expect(block.getByTestId('agent-block-summary')).toHaveText('second answer');
+  await expect(page.getByTestId('root-status')).toHaveText('running');
+  await expect(block.getByTestId('agent-block-detail').getByText('second answer',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Sequence 22'}).click();
+  await expect(page.getByTestId('root-status')).toHaveText('completed');
+  await expect(page.getByText('Root final answer',{exact:true})).toBeVisible();
+  await expect(block).toHaveCount(1);
+});
+
+
+test('scoped cancellation deduplicates clicks and refresh races without ending root', async ({ page, context, request }) => {
+  await page.goto('/e2e/fixtures/remote-agent-block.html');
+  const block = page.getByTestId('agent-block');
+  await block.getByRole('button', { name: 'finance', exact: true }).click();
+  const cancel = block.getByRole('button', { name: '取消远程智能体', exact: true });
+  // Dispatch both clicks in one event turn before React can replace the button.
+  await cancel.evaluate(element => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });
+  await expect(block.getByTestId('agent-block-cancel-state')).toHaveText('取消请求处理中');
+  const read = async () => (await request.get(`${FIXTURE_ORIGIN}/__fixture/state`)).json();
+  await expect.poll(async () => (await read()).scopedCancels.length).toBe(1);
+  await expect(page.getByTestId('root-status')).toHaveText('running');
+  await expect(block.getByRole('status').first()).toHaveText('正在处理');
+  const another = await context.newPage();
+  await another.goto('/e2e/fixtures/remote-agent-block.html');
+  await another.getByTestId('agent-block').getByRole('button', { name: 'finance', exact: true }).click();
+  await another.getByRole('button', { name: '取消远程智能体', exact: true }).click();
+  await expect.poll(async () => (await read()).scopedCancels.length).toBe(2);
+  const ledger = await read();
+  expect(ledger.scopedCancels[0]).toMatchObject({ AgentId: 'remote-fixture-agent', SessionId: 'session', InvocationId: 'root-run-1', ScopeId: 'child-scope-1' });
+  expect(ledger.scopedCancels[0].ClientToken).toBe(ledger.scopedCancels[1].ClientToken);
+  expect(ledger.scopedCancelCommands).toBe(1);
+  await page.getByRole('button', { name: 'Confirm child cancellation' }).click();
+  await expect(block.getByTestId('agent-block-cancel-state')).toHaveText('远程取消已确认');
+  await expect(block.getByRole('status').first()).toHaveText('正在处理');
+  await expect(page.getByTestId('root-status')).toHaveText('running');
+  await another.close();
+});
+
+test('scoped cancellation stays honest about unknown results and hides controls for old runtimes', async ({ page, request }) => {
+  await page.goto('/e2e/fixtures/remote-agent-block.html?scoped=false');
+  await page.getByTestId('agent-block').getByRole('button', { name: 'finance', exact: true }).click();
+  await expect(page.getByRole('button', { name: '取消远程智能体', exact: true })).toHaveCount(0);
+  await page.goto('/e2e/fixtures/remote-agent-block.html');
+  await page.getByRole('button', { name: 'Unknown child cancellation' }).click();
+  await expect(page.getByTestId('agent-block-cancel-state')).toHaveText('取消结果未知');
+  await expect(page.getByTestId('root-status')).toHaveText('running');
+  const state = await (await request.get(`${FIXTURE_ORIGIN}/__fixture/state`)).json();
+  expect(state.scopedCancels).toEqual([]);
+});

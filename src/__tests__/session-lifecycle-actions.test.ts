@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -84,4 +85,23 @@ describe('shared session lifecycle actions', () => {
     expect(useMessageStore.getState().messages).toEqual([]);
     expect(listSessionMessages).not.toHaveBeenCalled();
   });
+});
+
+
+it('restores with the completed bootstrap when the list callback captured initial capabilities', async () => {
+  useBootstrapStore.getState().setAgentId('agent-a');
+  const frames = readFileSync(new URL('./fixtures/a2a_remote_agent/v1/a2a_stream_tool_terminal.jsonl', import.meta.url), 'utf8')
+    .trim().split('\n').map(line => JSON.parse(line)).filter(row => row.kind === 'runtime_event').map(row => row.payload);
+  const actions = lifecycle({
+    listSessionMessages: vi.fn().mockResolvedValue({Messages:[], LatestSeqId:22, HasMore:false, NextCursor:null}),
+    listSessionEvents: vi.fn().mockResolvedValue({Events:frames.map(e=>({SeqId:e.seq, EventType:'runtime_event', Content:{runtime_event:e}})), Total:frames.length}),
+    getResponseFeedback: vi.fn().mockResolvedValue(null),
+  });
+  useBootstrapStore.getState().setCapabilities({RunLifecycle:{Enabled:false}, ConversationSurface:{
+    apiVersion:'conversation.ksadk.io/v1', kind:'ConversationSurface', surfaceId:'runtime:agent-a',
+    sessionId:'new-session', providerRef:'adk', inputs:[{name:'ksadk.presentation',mode:'native'}],
+    outputs:[{name:'agent.block',mode:'native'}],
+  }} as UiCapabilities);
+  await actions.loadSession('profile-session');
+  expect(useMessageStore.getState().messages.filter(message=>message.agentBlock)).toHaveLength(1);
 });

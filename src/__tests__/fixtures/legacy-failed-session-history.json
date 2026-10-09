@@ -1,0 +1,414 @@
+{
+  "provenance": "Anonymized observed control_fallback legacy history: 18 unique events, 2 Messages rows. Id relationships, sequence, native tool statuses, null args/results and four reasoning lengths are retained; prose, identities, author and timestamps are replaced. No canonical frame was present.",
+  "SessionId": "session-legacy-failed",
+  "Events": [
+    {
+      "EventId": "identity-1",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "run_status",
+      "Content": {
+        "status": "in_progress"
+      },
+      "StateDelta": {},
+      "SeqId": 6,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:13:26Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-3",
+      "SessionId": "session-legacy-failed",
+      "Author": "user",
+      "EventType": "user_message",
+      "Content": {
+        "parts": [
+          {
+            "text": "Review the local fixture."
+          }
+        ]
+      },
+      "StateDelta": {},
+      "SeqId": 9,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:13:29Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-5",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 10,
+      "Metadata": {
+        "call_id": "identity-4",
+        "tool_name": "reasoning",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:13:30Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-6",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "reasoning",
+      "Content": {
+        "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "StateDelta": {},
+      "SeqId": 102,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:15:02Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-8",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 104,
+      "Metadata": {
+        "call_id": "identity-7",
+        "tool_name": "reasoning",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:15:04Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-9",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "reasoning",
+      "Content": {
+        "text": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "StateDelta": {},
+      "SeqId": 258,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:17:38Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-11",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 260,
+      "Metadata": {
+        "call_id": "identity-10",
+        "tool_name": "reasoning",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:17:40Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-12",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "reasoning",
+      "Content": {
+        "text": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "StateDelta": {},
+      "SeqId": 317,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:18:37Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-14",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 318,
+      "Metadata": {
+        "call_id": "identity-13",
+        "tool_name": "commandExecution",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:18:38Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-15",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_result",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 323,
+      "Metadata": {
+        "call_id": "identity-13",
+        "tool_name": "commandExecution",
+        "run_id": "identity-2",
+        "tool_output": null
+      },
+      "Timestamp": "2023-11-14T22:18:43Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-17",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 325,
+      "Metadata": {
+        "call_id": "identity-16",
+        "tool_name": "commandExecution",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:18:45Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-18",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_result",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 330,
+      "Metadata": {
+        "call_id": "identity-16",
+        "tool_name": "commandExecution",
+        "run_id": "identity-2",
+        "tool_output": null
+      },
+      "Timestamp": "2023-11-14T22:18:50Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-20",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 332,
+      "Metadata": {
+        "call_id": "identity-19",
+        "tool_name": "reasoning",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:18:52Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-21",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "reasoning",
+      "Content": {
+        "text": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+      },
+      "StateDelta": {},
+      "SeqId": 571,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:22:51Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-23",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "tool_call",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 572,
+      "Metadata": {
+        "call_id": "identity-22",
+        "tool_name": "dynamicToolCall",
+        "run_id": "identity-2",
+        "tool_args": null
+      },
+      "Timestamp": "2023-11-14T22:22:52Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-25",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "approval_request",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 574,
+      "Metadata": {
+        "interrupt_info": {
+          "approval_request_id": "identity-24",
+          "tool_name": "fixture_expert"
+        },
+        "run_id": "identity-2"
+      },
+      "Timestamp": "2023-11-14T22:22:54Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-26",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "approval_response",
+      "Content": {},
+      "StateDelta": {},
+      "SeqId": 578,
+      "Metadata": {
+        "resume_input": {
+          "approval_request_id": "identity-24",
+          "approve": true,
+          "reason": "Fixture approval."
+        },
+        "run_id": "identity-2"
+      },
+      "Timestamp": "2023-11-14T22:22:58Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "EventId": "identity-27",
+      "SessionId": "session-legacy-failed",
+      "Author": "assistant",
+      "EventType": "run_status",
+      "Content": {
+        "status": "failed"
+      },
+      "StateDelta": {},
+      "SeqId": 585,
+      "Metadata": {},
+      "Timestamp": "2023-11-14T22:23:05Z",
+      "InvocationId": "identity-2"
+    }
+  ],
+  "Messages": [
+    {
+      "Role": "user",
+      "SeqId": 9,
+      "StartSeqId": 6,
+      "MessageId": "identity-3",
+      "Content": {
+        "text": "Review the local fixture."
+      },
+      "Timestamp": "2023-11-14T22:13:29Z",
+      "InvocationId": "identity-2"
+    },
+    {
+      "Role": "assistant",
+      "SeqId": 574,
+      "StartSeqId": 6,
+      "MessageId": "identity-25",
+      "Content": {
+        "text": ""
+      },
+      "Timestamp": "2023-11-14T22:22:54Z",
+      "InvocationId": "identity-2",
+      "Reasoning": [
+        {
+          "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "SeqId": 102
+        },
+        {
+          "text": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "SeqId": 258
+        },
+        {
+          "text": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+          "SeqId": 317
+        },
+        {
+          "text": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+          "SeqId": 571
+        }
+      ],
+      "ToolEvents": [
+        {
+          "SeqId": 10,
+          "Type": "tool_call",
+          "Name": "reasoning",
+          "Args": null,
+          "Status": "running",
+          "ToolCallId": "identity-4"
+        },
+        {
+          "SeqId": 104,
+          "Type": "tool_call",
+          "Name": "reasoning",
+          "Args": null,
+          "Status": "running",
+          "ToolCallId": "identity-7"
+        },
+        {
+          "SeqId": 260,
+          "Type": "tool_call",
+          "Name": "reasoning",
+          "Args": null,
+          "Status": "running",
+          "ToolCallId": "identity-10"
+        },
+        {
+          "SeqId": 318,
+          "Type": "tool_call",
+          "Name": "commandExecution",
+          "Args": null,
+          "Status": "completed",
+          "ToolCallId": "identity-13",
+          "Result": null,
+          "ResultSeqId": 323
+        },
+        {
+          "SeqId": 325,
+          "Type": "tool_call",
+          "Name": "commandExecution",
+          "Args": null,
+          "Status": "completed",
+          "ToolCallId": "identity-16",
+          "Result": null,
+          "ResultSeqId": 330
+        },
+        {
+          "SeqId": 332,
+          "Type": "tool_call",
+          "Name": "reasoning",
+          "Args": null,
+          "Status": "running",
+          "ToolCallId": "identity-19"
+        },
+        {
+          "SeqId": 572,
+          "Type": "tool_call",
+          "Name": "dynamicToolCall",
+          "Args": null,
+          "Status": "running",
+          "ToolCallId": "identity-22"
+        },
+        {
+          "SeqId": 574,
+          "Type": "approval",
+          "Name": "approval",
+          "Status": "approved",
+          "ApprovalRequestId": "identity-24",
+          "ResponseSeqId": 578,
+          "Reason": "Fixture approval."
+        }
+      ]
+    }
+  ],
+  "DataSource": "control_fallback",
+  "CursorSource": "control",
+  "CursorCompatibleWithRuntime": false
+}

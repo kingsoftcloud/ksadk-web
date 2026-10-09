@@ -83,6 +83,27 @@ beforeEach(() => {
 });
 
 describe('submitted conversation ownership', () => {
+  it.each([true, false])('settles an approval wait without a retryable failure (approval=%s)', async approval => {
+    const stream = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(
+        (approval ? 'event: response.output_item.done\ndata: {"item":{"id":"approval-legacy","type":"mcp_approval_request","name":"lookup","arguments":"{}"}}\n\n' : '')
+        + 'event: response.incomplete\ndata: {"type":"response.incomplete"}\n\n',
+      ));
+      controller.close();
+    } });
+    const p = probe({ createSession: vi.fn().mockResolvedValue({ SessionId: 'native-a' }),
+      runAgent: vi.fn().mockResolvedValue(stream) });
+    const owner = p.conversationIdRef.current as ConversationId;
+    await p.actions.submitDraft('one approved operation', []);
+    await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledWith(
+      'native-a', 'agent-a', approval ? 'awaiting-input' : 'failed',
+    ));
+    expect(p.controller.outbox.list(owner).map(entry => entry.status)).toEqual(
+      [approval ? 'completed' : 'failed'],
+    );
+    if (approval) expect(sharedInteractionStore.get('native-a', 'approval-legacy')?.status).toBe('pending');
+  });
+
   it('keeps two pre-native drafts independent when CreateSession returns in reverse order', async () => {
     const a = deferred<{ SessionId: string }>();
     const b = deferred<{ SessionId: string }>();

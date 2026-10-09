@@ -155,8 +155,12 @@ export class InteractionClientImpl implements InteractionClient {
       return syntheticReceipt('duplicate', input.interactionId);
     }
 
-    const idempotencyKey = input.idempotencyKey
+    const baseKey = input.idempotencyKey
       || interactionIdempotencyKey(input.interactionId, input.expectedRevision);
+    // A definitively rejected Inbox command cannot be retried under its old key.
+    // Transport uncertainty still reuses the same key.
+    const rejectedCommand = record.extensions.rejected_command_id;
+    const idempotencyKey = rejectedCommand ? `${baseKey}:retry-${rejectedCommand}` : baseKey;
 
     // Double-click / concurrent submit guard: same idempotency key in
     // flight means this exact submit already happened.
@@ -216,6 +220,7 @@ export class InteractionClientImpl implements InteractionClient {
         // authoritative interaction.resolved/cancelled/expired
         // SessionEvent arrives via the dispatcher or replay. Record the
         // idempotency key for replay correlation.
+        this.store.recordCommand(record.sessionId, input.interactionId, receipt.command_id);
         this.store.recordIdempotencyKey(
           record.sessionId,
           input.interactionId,

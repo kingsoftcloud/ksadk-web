@@ -46,14 +46,26 @@ export function interactionFromSessionEvent(
   raw: unknown,
   fallbackSessionId?: string,
 ): Interaction | null {
-  const envelope = asRecord(raw);
-  if (!envelope) return null;
+  const outer = asRecord(raw);
+  if (!outer) return null;
+  const content = asRecord(outer.Content ?? outer.content);
+  const persisted = asRecord(content?.session_event ?? content?.sessionEvent);
+  const translated = asRecord(outer.payload);
+  // ListSessionEvents retains the canonical envelope inside Content, while
+  // KernelRunEventTranslator carries the same envelope in payload. Keep the
+  // parent session/run identity instead of treating either wrapper as a fact.
+  const canonical = persisted
+    ?? (translated?.family === 'interaction' ? translated : null)
+    ?? (outer.family === 'interaction' ? outer : null);
+  if (canonical && canonical.family !== 'interaction') return null;
+  const envelope = canonical ?? outer;
   const eventType = String(
     envelope.event_type || envelope.EventType || '',
   ).trim();
   if (!eventType) return null;
 
-  const payload = asRecord(envelope.payload ?? envelope.Content) || {};
+  const payload = asRecord(envelope.payload ?? envelope.Content)
+    ?? (canonical ? canonical : {});
   const body =
     asRecord(payload.interaction) ||
     asRecord(payload.Interaction) ||
@@ -80,6 +92,8 @@ export function interactionFromSessionEvent(
   if (!sessionId) return null;
 
   if (REQUESTED_EVENT_TYPES.has(eventType)) {
+    const request = asRecord(body.request) || {};
+    const presentation = asRecord(body.presentation ?? request.presentation);
     const extensions = {
       ...(asRecord(body.extensions) || {}),
       ...(body.detail !== undefined ? { detail: body.detail } : {}),
@@ -91,15 +105,15 @@ export function interactionFromSessionEvent(
       interactionId,
       sessionId,
       runId: body.run_id ?? body.runId ?? envelope.run_id ?? envelope.InvocationId,
-      kind: eventType === 'approval.requested' ? 'approval' : body.kind ?? 'approval',
-      title: body.title,
-      message: body.message ?? body.description ?? asRecord(body.detail)?.command,
-      requestSchema: body.request_schema ?? body.requestSchema ?? body.input_schema ?? body.inputSchema ?? body.RequestSchema,
-      presentation: body.presentation,
+      kind: eventType === 'approval.requested' ? 'approval' : body.kind ?? request.kind ?? 'approval',
+      title: body.title ?? presentation?.title,
+      message: body.message ?? body.description ?? asRecord(body.detail)?.command ?? presentation?.description,
+      requestSchema: body.request_schema ?? body.requestSchema ?? body.input_schema ?? body.inputSchema ?? body.RequestSchema ?? request.request_schema,
+      presentation,
       status: 'pending',
       revision: body.revision ?? 1,
       createdAt: body.created_at ?? body.createdAt ?? envelope.timestamp ?? envelope.Timestamp,
-      expiresAt: body.expires_at,
+      expiresAt: body.expires_at ?? request.expires_at,
       source: 'interaction_v1',
       extensions,
     });

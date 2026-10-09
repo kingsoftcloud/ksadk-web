@@ -17,6 +17,12 @@ export type PreviewImageSize = {
 };
 
 export type Message = {
+  agentBlock?: {
+    /** Sanitized excerpt of an explicitly public child text item, prepared by the shared projector. */
+    summary?: string;
+    item: import('../../core/conversation/types.js').ConversationItem;
+    messages: Message[];
+  };
   id: string;
   role: 'user' | 'model' | 'tool' | 'system' | 'a2ui';
   content: string;
@@ -73,7 +79,7 @@ export type Message = {
       output?: string;
       summary?: string;
       durationMs?: number;
-      status: 'running' | 'completed' | 'error' | 'paused';
+      status: 'running' | 'completed' | 'error' | 'paused' | 'unknown';
       approvalRequestId?: string;
       previousResponseId?: string;
       serverLabel?: string;

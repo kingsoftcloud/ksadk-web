@@ -24,7 +24,7 @@ export interface ToolBlock {
   output?: string;
   summary?: string;
   durationMs?: number;
-  status: 'running' | 'completed' | 'error' | 'paused';
+  status: 'running' | 'completed' | 'error' | 'paused' | 'unknown';
   /** 透传现有 Message.tools 的附加字段(approval 等),渲染层按需取。 */
   extra?: Record<string, unknown>;
 }

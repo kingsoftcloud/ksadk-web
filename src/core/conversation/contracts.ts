@@ -26,6 +26,7 @@ const ITEM_KINDS: ReadonlySet<ConversationItemKind> = new Set([
   'user_message',
   'assistant_text',
   'reasoning',
+  'agent',
   'tool_call',
   'approval',
   'progress',
@@ -133,6 +134,11 @@ function decodeExtensions(value: unknown): Record<string, unknown> | null {
     !CAPABILITY_NAME.test(key) || !key.includes('.')
   ))) {
     return null;
+  }
+  const presentation = extensions['ksadk.presentation'];
+  if (presentation !== undefined) {
+    const p = record(presentation);
+    if (!p || Object.keys(p).some(k => k !== 'profile') || !['agent-block-v1', 'flat-v1'].includes(String(p.profile))) return null;
   }
   const approval = extensions[APPROVAL_MODE_EXTENSION];
   const collaboration = extensions[COLLABORATION_MODE_EXTENSION];

@@ -1,9 +1,9 @@
-import type { ApiFacade } from './types.js';
+import type { ApiFacade, CancelRunOptions } from './types.js';
 import {
   AgentEngineClient,
   type AgentEngineClientOptions,
 } from '../../api/client.js';
-import { decodeReceipt } from '../../types/agent-control.js';
+import { decodeActionReceipt } from '../../types/agent-control.js';
 
 type ListSessionsData = {
   Sessions?: unknown[];
@@ -201,7 +201,7 @@ export class ApiFacadeImpl implements ApiFacade {
       IdempotencyKey: command.idempotency_key,
       Payload: command.payload,
     }, opts);
-    return decodeReceipt(data);
+    return decodeActionReceipt(data);
   }
 
   async submitInteraction(
@@ -217,7 +217,7 @@ export class ApiFacadeImpl implements ApiFacade {
     },
     opts?: { signal?: AbortSignal },
   ) {
-    return decodeReceipt(await this.client.postJsonAction<unknown>('SubmitInteraction', { ...params }, opts));
+    return decodeActionReceipt(await this.client.postJsonAction<unknown>('SubmitInteraction', { ...params }, opts));
   }
 
   async getAgentStatus(opts?: { signal?: AbortSignal }) {
@@ -231,11 +231,16 @@ export class ApiFacadeImpl implements ApiFacade {
     }, opts);
   }
 
-  async cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }) {
+  async cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: CancelRunOptions) {
+    if (opts?.scopeId !== undefined && (!opts.scopeId.trim() || !sessionId || !opts.clientToken?.trim())) {
+      throw new Error('Scoped cancellation requires session, scope and client token');
+    }
     return this.client.postJsonAction('CancelRun', {
       AgentId: agentId,
       SessionId: sessionId,
       InvocationId: invocationId,
+      ...(opts?.scopeId !== undefined ? { ScopeId: opts.scopeId } : {}),
+      ...(opts?.clientToken ? { ClientToken: opts.clientToken } : {}),
     }, opts);
   }
 

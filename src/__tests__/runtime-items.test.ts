@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import adkTwoLlmFixture from './fixtures/adk_two_llm_outputs.json';
+
 import {
   RuntimeItemReducer,
   legacyAssistantIdentity,
@@ -147,6 +149,54 @@ describe('RuntimeItemReducer', () => {
     expect(replayed.snapshot()).toEqual(live.snapshot());
     expect(live.snapshot().items[0].parts[0].text).toBe('hello');
     expect(live.snapshot().status).toBe('completed');
+  });
+
+  it('keeps two ADK LLM responses equal across live, replay, and cursor recovery', () => {
+    let seq = 0;
+    const log: RuntimeItemOperation[] = [
+      { type: 'run_started', runId: adkTwoLlmFixture.run_id, eventId: `e${seq}`, seq: seq++ },
+    ];
+    for (const response of adkTwoLlmFixture.responses) {
+      log.push({
+        ...start(response.item_id, adkTwoLlmFixture.scope_id),
+        eventId: `e${seq}`,
+        seq: seq++,
+      });
+      for (const partial of response.partials) {
+        log.push({
+          ...append(response.item_id, partial, adkTwoLlmFixture.scope_id),
+          eventId: `e${seq}`,
+          seq: seq++,
+        });
+      }
+      log.push({
+        ...complete(response.item_id, response.terminal, adkTwoLlmFixture.scope_id),
+        eventId: `e${seq}`,
+        seq: seq++,
+      });
+    }
+    log.push({
+      type: 'run_completed',
+      runId: adkTwoLlmFixture.run_id,
+      eventId: `e${seq}`,
+      seq,
+    });
+    const live = new RuntimeItemReducer();
+    live.applyAll(log);
+
+    const fullReplay = new RuntimeItemReducer();
+    fullReplay.applyAll(log);
+
+    const cursorReplay = new RuntimeItemReducer();
+    const reconnectIndex = log.findIndex(
+      (operation) => operation.seq === adkTwoLlmFixture.cursor_break_after_seq,
+    );
+    cursorReplay.applyAll(log.slice(0, reconnectIndex + 1));
+    cursorReplay.applyAll(log.slice(reconnectIndex));
+
+    expect(fullReplay.snapshot()).toEqual(live.snapshot());
+    expect(cursorReplay.snapshot()).toEqual(live.snapshot());
+    expect(project(live).map((item) => item.text).join('')).toBe(adkTwoLlmFixture.expected_text);
   });
 });
 
@@ -328,5 +378,35 @@ describe('responsesEventToItemOperations', () => {
     const snapshot = reducer.snapshot();
     expect(snapshot.items.map((item) => item.itemId)).toEqual(['msg_1', 'msg_2']);
     expect(projectRuntimeItems(snapshot).map((item) => item.text)).toEqual(['same', 'same']);
+  });
+
+  it('honors an explicit Responses output replacement instead of appending it', () => {
+    const reducer = new RuntimeItemReducer();
+    reducer.applyAll(
+      responsesEventToItemOperations(
+        'response.output_item.added',
+        { item: { id: 'msg_1', type: 'message' } },
+        RUN,
+        SCOPE,
+      ),
+    );
+    reducer.applyAll(
+      responsesEventToItemOperations(
+        'response.output_text.delta',
+        { item_id: 'msg_1', delta: 'old' },
+        RUN,
+        SCOPE,
+      ),
+    );
+    reducer.applyAll(
+      responsesEventToItemOperations(
+        'response.output_text.delta',
+        { item_id: 'msg_1', delta: 'new', replace: true },
+        RUN,
+        SCOPE,
+      ),
+    );
+
+    expect(project(reducer).map((item) => item.text)).toEqual(['new']);
   });
 });

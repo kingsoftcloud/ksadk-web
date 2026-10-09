@@ -4,6 +4,7 @@ import {
   decodeAgentStatusSnapshot,
   decodeCapabilityMatrix,
   decodeReceipt,
+  decodeActionReceipt,
   decodeSessionEventEnvelope,
 } from '../types/agent-control.js';
 import {
@@ -231,5 +232,19 @@ describe('agent-kernel/v1 contract decoders', () => {
     expect(() => cursor.accept({ ...RUNTIME_EVENT, payload: { text: 'tampered' } })).toThrow(
       SessionEventConflictError,
     );
+  });
+});
+
+
+describe('public Action receipt boundary', () => {
+  it('normalizes the Server Data field names without relaxing the receipt contract', () => {
+    expect(decodeActionReceipt({ SchemaVersion: 1, CommandId: 'cmd-1', Status: 'accepted',
+      ReceiptStatus: 'accepted', MessageId: 'msg-1', RunId: null, AcceptedSeq: 3,
+    })).toMatchObject({ schema_version: 1, command_id: 'cmd-1', status: 'accepted', accepted_seq: 3 });
+    expect(decodeActionReceipt(ACCEPTED_RECEIPT)).toEqual(decodeReceipt(ACCEPTED_RECEIPT));
+    expect(() => decodeActionReceipt({ SchemaVersion: 2, CommandId: 'cmd-1', Status: 'accepted' }))
+      .toThrow(ContractMismatchError);
+    expect(() => decodeActionReceipt({ SchemaVersion: 1, CommandId: 'cmd-1', Status: 'mystery' }))
+      .toThrow(ContractMismatchError);
   });
 });

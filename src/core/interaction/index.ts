@@ -80,6 +80,14 @@ export function ingestSessionEventRecord(
   const envelope = typeof raw === 'object' && raw !== null
     ? raw as Record<string, unknown>
     : null;
+  if (envelope?.EventType === 'control.command_rejected') {
+    const content = envelope.Content as Record<string, unknown> | undefined;
+    sharedInteractionStore.rejectCommand(
+      String(envelope.SessionId || fallbackSessionId || ''),
+      String(content?.command_id || ''),
+      String(content?.reason || 'command_rejected'),
+    );
+  }
   const terminalStatus = envelope
     ? sessionEventRunStatus(envelope as never)
     : null;

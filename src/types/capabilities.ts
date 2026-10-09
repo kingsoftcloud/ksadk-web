@@ -34,6 +34,8 @@ export type UiCapabilities = {
   Thinking?: boolean;
   ContextCompaction?: boolean;
   StopRun?: boolean;
+  /** Explicit runtime support; absence never permits falling back to root cancellation. */
+  scoped_cancel?: { supported: boolean };
   ResumeRun?: boolean;
   MCP?: boolean;
   HostedRuntime?: boolean;
@@ -66,6 +68,8 @@ export type UiCapabilities = {
   BuiltinTools: BuiltinToolCapability[];
   /** agent-kernel/v1 Interaction capability (bootstrap `interaction_v1`). */
   InteractionV1?: boolean;
+  KernelSessionEvents?: boolean;
+  ConversationSurface?: unknown;
   /** Canonical agent-kernel/v1 projection. Absent means no execution-mode UI. */
   RuntimeCapabilityMatrix?: RuntimeCapabilityMatrix;
 };

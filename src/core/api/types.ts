@@ -1,3 +1,9 @@
+export type CancelRunOptions = {
+  signal?: AbortSignal;
+  scopeId?: string;
+  clientToken?: string;
+};
+
 export interface ApiFacade {
   compactSession?(agentId: string, sessionId: string): Promise<{ Status: string }>;
   // Session
@@ -61,7 +67,7 @@ export interface ApiFacade {
   runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   resumeRun(params: { agentId: string; sessionId: string; runId: string; checkpointId: string; resumeAttemptId?: string; invocationId?: string }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
   subscribeRunEvents(params: { sessionId: string; invocationId: string; afterSeqId: number }, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
-  cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: { signal?: AbortSignal }): Promise<unknown>;
+  cancelRun(agentId: string, sessionId: string, invocationId: string, opts?: CancelRunOptions): Promise<unknown>;
   // agent-kernel/v1 control surface
   submitControl(command: {
     command_type: 'enqueue' | 'steer' | 'inject' | 'interrupt' | 'pause' | 'resume' | 'submit_interaction';
