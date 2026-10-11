@@ -383,6 +383,16 @@ export function ConnectedMessageList({
 
   return (
     <>
+      {currentMessageHistory?.persistenceDegraded && (
+        <div role="status" data-testid="history-persistence-warning" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-amber-700 dark:text-amber-300">
+          当前会话历史尚未持久化。刷新或切换设备后，部分消息可能无法恢复。
+        </div>
+      )}
+      {currentMessageHistory?.error && (
+        <div role="alert" data-testid="history-reload-error" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-red-700 dark:text-red-300">
+          {currentMessageHistory.error}
+        </div>
+      )}
       <ChatMessageList
         revealMessage={revealMessage}
         emptyState={emptyState}

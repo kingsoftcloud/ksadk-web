@@ -6,7 +6,7 @@ import { useMessageStore } from '../stores/message.js';
 import { useUIStore } from '../stores/ui.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { useBootstrapStore } from '../stores/bootstrap.js';
-import { CancelledError } from '../api/client.js';
+import { ApiError, CancelledError } from '../api/client.js';
 import {
   eventHasTerminalRunStatus,
   maxSeqIdFromEvents,
@@ -27,6 +27,7 @@ import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
+import type { ListSessionMessagesResponse } from '../api/messages.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
@@ -50,7 +51,70 @@ type SessionEventHistoryCache = {
   events: SessionEventRecord[];
   loadedCount: number;
   total: number;
+  cursorSource?: string;
+  historyEpoch?: string;
+  snapshotSeqId?: number;
 };
+
+type HistorySource = {
+  CursorSource?: string;
+  HistoryEpoch?: string;
+  SnapshotSeqId?: number;
+  CursorCompatibleWithRuntime?: boolean;
+};
+
+function compatibleHistorySource(left: HistorySource, right: HistorySource): boolean {
+  // Missing provenance is compatible only with another legacy, untagged page.
+  // A tagged control fallback must never absorb an untagged runtime page.
+  if (left.CursorSource !== right.CursorSource) return false;
+  if (left.HistoryEpoch !== right.HistoryEpoch) return false;
+  if (left.SnapshotSeqId !== undefined && right.SnapshotSeqId !== undefined
+    && left.SnapshotSeqId !== right.SnapshotSeqId) return false;
+  if (!left.CursorSource && (left.CursorCompatibleWithRuntime === false
+    || right.CursorCompatibleWithRuntime === false)) return false;
+  return true;
+}
+
+function eventCacheSource(cache: SessionEventHistoryCache): HistorySource {
+  return { CursorSource: cache.cursorSource, HistoryEpoch: cache.historyEpoch,
+    SnapshotSeqId: cache.snapshotSeqId };
+}
+
+function historyErrorReason(error: unknown): string | undefined {
+  if (!(error instanceof ApiError) || !error.detail || typeof error.detail !== 'object') return undefined;
+  const detail = error.detail as { ReasonCode?: unknown };
+  return typeof detail.ReasonCode === 'string' ? detail.ReasonCode : undefined;
+}
+
+function isHistoryReloadRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 409
+    && historyErrorReason(error) === 'HISTORY_RELOAD_REQUIRED';
+}
+
+function isHistoryProjectionBudgetExceeded(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 422
+    && historyErrorReason(error) === 'HISTORY_PROJECTION_BUDGET_EXCEEDED';
+}
+
+function reloadRequiredError(): ApiError {
+  return new ApiError(409, '历史来源已变化', {
+    Code: 409, ReasonCode: 'HISTORY_RELOAD_REQUIRED', Data: null,
+  });
+}
+
+function historyPageMetadata(page: ListSessionMessagesResponse) {
+  return {
+    dataSource: page.DataSource,
+    degraded: page.Degraded,
+    cursorSource: page.CursorSource,
+    cursorCompatibleWithRuntime: page.CursorCompatibleWithRuntime,
+    sessionContractVersion: page.SessionContractVersion,
+    historyEpoch: page.HistoryEpoch,
+    persistenceDegraded: page.PersistenceDegraded,
+    snapshotSeqId: page.SnapshotSeqId,
+    error: undefined,
+  };
+}
 
 /** Keep per-session read caches bounded while retaining the currently visible session. */
 function rememberSessionCache<T>(
@@ -169,7 +233,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   // refresh cannot evict the active transcript in that short window.
   const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
   const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
-  const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
+  const loadSessionRef = useRef<((sessionId: string, historyReload?: boolean, signal?: AbortSignal) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
       targetAgentId?: string,
@@ -428,7 +492,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [agentId, subscribeRunEvents, uiCapabilities.RunLifecycle.Enabled]);
 
   const loadSession = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
+      if (signal?.aborted) return;
       // Bootstrap can invoke the initial list callback before React replaces
       // its closure. Read the committed capabilities for this Agent, then
       // freeze the selected profile for this history read and its pages.
@@ -465,6 +530,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const isStillCurrentSession = () => (
         currentSessionIdRef.current === sessionId
         && loadSessionGenerationRef.current === generation
+        && !signal?.aborted
       );
       useSessionStore.getState().setCurrentSessionId(sessionId);
       useSessionStore
@@ -482,12 +548,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
+          signal,
         };
         let messagesData;
         try {
           messagesData = await api.listSessionMessages(sessionId, messageOptions);
         } catch (error) {
-          if (error instanceof CancelledError) throw error;
+          if (historyReload || error instanceof CancelledError || isHistoryReloadRequired(error)
+            || isHistoryProjectionBudgetExceeded(error)) throw error;
           // Cloud history reads can briefly race a deployment proxy refresh.
           // Retry one small idempotent read before turning a cold switch into
           // an empty conversation. Warm switches continue showing the LRU
@@ -523,6 +591,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
           nextCursor: messagesData.NextCursor,
           hasMore: messagesData.HasMore,
+          ...historyPageMetadata(messagesData),
         });
         useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, false);
 
@@ -533,12 +602,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           const eventPage = await api.listSessionEvents(sessionId, {
             offset: 0,
             limit: SESSION_EVENTS_PAGE_SIZE,
+            signal,
+            // A control message page can coexist with a recovered Runtime.
+            // Probe events independently and merge only after their returned
+            // source/epoch agrees; a control epoch must not constrain Runtime.
+            historyEpoch: messagesData.CursorSource === 'runtime' ? messagesData.HistoryEpoch : undefined,
+            snapshotSeqId: messagesData.CursorSource === 'runtime' ? messagesData.SnapshotSeqId : undefined,
           });
           if (!isStillCurrentSession()) return;
+          const compatible = compatibleHistorySource(messagesData, eventPage);
           const eventHistory = {
-            events: (eventPage.Events || []) as SessionEventRecord[],
-            loadedCount: eventPage.Events?.length || 0,
-            total: Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0),
+            events: compatible ? (eventPage.Events || []) as SessionEventRecord[] : [],
+            loadedCount: compatible ? eventPage.Events?.length || 0 : 0,
+            total: compatible ? Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0) : 0,
+            cursorSource: compatible ? eventPage.CursorSource : undefined,
+            historyEpoch: compatible ? eventPage.HistoryEpoch : undefined,
+            snapshotSeqId: compatible ? eventPage.SnapshotSeqId : undefined,
           };
           rememberSessionCache(
             eventHistoryBySessionRef.current,
@@ -565,6 +644,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             history = rebuilt.messages;
           }
         } catch (error) {
+          if (isHistoryReloadRequired(error)) throw error;
           if (isStillCurrentSession()) historyReadFailureRef.current = {
             generation, message: '完整事件历史读取失败，请刷新会话后重新查找。当前结果只包含已读取的正文。',
           };
@@ -643,10 +723,38 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           }
         }
       } catch (error) {
-        if (isStillCurrentSession()) historyReadFailureRef.current = {
-          generation, message: '会话历史读取失败，请刷新会话后重新查找。',
-        };
-        console.error('Failed to load session messages:', error);
+        if (isHistoryReloadRequired(error) && !historyReload && isStillCurrentSession()) {
+          useSessionStore.getState().setSessionMessageHistory(sessionId, {
+            nextCursor: null, hasMore: false, cursorSource: undefined,
+            historyEpoch: undefined, snapshotSeqId: undefined,
+            dataSource: undefined, degraded: undefined,
+            cursorCompatibleWithRuntime: undefined,
+            sessionContractVersion: undefined,
+          });
+          queueMicrotask(() => {
+            if (isStillCurrentSession()) void loadSessionRef.current?.(sessionId, true);
+          });
+          return;
+        }
+        if (isStillCurrentSession()) {
+          const message = historyReload
+            ? '历史来源已变化，重新加载失败。原有消息已保留，请手动刷新会话。'
+            : '会话历史读取失败，请刷新会话后重新查找。';
+          historyReadFailureRef.current = { generation, message };
+          if (historyReload) {
+            const previous = useSessionStore.getState().messageHistory[sessionId];
+            useSessionStore.getState().setSessionMessageHistory(sessionId, {
+              ...previous,
+              nextCursor: null, hasMore: false,
+              cursorSource: undefined,
+              historyEpoch: undefined,
+              snapshotSeqId: undefined,
+              error: message,
+            });
+            useUIStore.getState().pushToast(message, 'error');
+          }
+        }
+        if (!(error instanceof CancelledError)) console.error('Failed to load session messages:', error);
       } finally {
         if (historyHydrationGenerationRef.current === generation) historyHydrationGenerationRef.current = null;
         if (isStillCurrentSession()) {
@@ -921,6 +1029,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           ? api.listSessionMessages(sessionId, {
               signal,
               beforeSeqId: historyState.nextCursor ?? undefined,
+              cursorSource: historyState.cursorSource,
+              historyEpoch: historyState.historyEpoch,
+              snapshotSeqId: historyState.snapshotSeqId,
               limit: SESSION_MESSAGES_PAGE_SIZE,
               includeReasoning: true,
               includeToolEvents: true,
@@ -932,6 +1043,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               signal,
               offset: cachedEvents.loadedCount,
               limit: SESSION_EVENTS_PAGE_SIZE,
+              cursorSource: cachedEvents.cursorSource,
+              historyEpoch: cachedEvents.historyEpoch,
+              snapshotSeqId: cachedEvents.snapshotSeqId,
             })
           : Promise.resolve(null),
       ]);
@@ -942,6 +1056,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         || olderMessageRequestRef.current.get(sessionId) !== requestToken
       ) {
         return;
+      }
+      if (messagePage && !compatibleHistorySource({
+        CursorSource: historyState.cursorSource,
+        HistoryEpoch: historyState.historyEpoch,
+        SnapshotSeqId: historyState.snapshotSeqId,
+        CursorCompatibleWithRuntime: historyState.cursorCompatibleWithRuntime,
+      }, messagePage)) throw reloadRequiredError();
+      if (eventPage && cachedEvents && !compatibleHistorySource(eventCacheSource(cachedEvents), eventPage)) {
+        throw reloadRequiredError();
       }
       const olderMessages = messagePage
         ? mapBackendMessages(messagePage.Messages) as Message[]
@@ -976,6 +1099,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             events: mergedEvents,
             loadedCount: loadedEventCount,
             total: totalEventCount,
+            cursorSource: eventPage.CursorSource ?? cachedEvents?.cursorSource,
+            historyEpoch: eventPage.HistoryEpoch ?? cachedEvents?.historyEpoch,
+            snapshotSeqId: eventPage.SnapshotSeqId ?? cachedEvents?.snapshotSeqId,
           },
           currentSessionIdRef.current,
         );
@@ -1007,9 +1133,43 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           (messagePage ? messagePage.HasMore : false)
           || loadedEventCount < totalEventCount
         ),
+        ...(messagePage ? historyPageMetadata(messagePage) : {}),
+        ...(messagePage ? {
+          dataSource: messagePage.DataSource ?? historyState.dataSource,
+          degraded: messagePage.Degraded ?? historyState.degraded,
+          cursorSource: messagePage.CursorSource ?? historyState.cursorSource,
+          cursorCompatibleWithRuntime: messagePage.CursorCompatibleWithRuntime ?? historyState.cursorCompatibleWithRuntime,
+          sessionContractVersion: messagePage.SessionContractVersion ?? historyState.sessionContractVersion,
+          historyEpoch: messagePage.HistoryEpoch ?? historyState.historyEpoch,
+          persistenceDegraded: messagePage.PersistenceDegraded ?? historyState.persistenceDegraded,
+          snapshotSeqId: messagePage.SnapshotSeqId ?? historyState.snapshotSeqId,
+        } : {}),
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {
+      if (isHistoryReloadRequired(error)
+        && currentSessionIdRef.current === sessionId
+        && loadSessionGenerationRef.current === generation
+        && olderMessageRequestRef.current.get(sessionId) === requestToken
+        && !signal?.aborted) {
+        // Invalidate every part of the old pagination contract before a single
+        // fresh first-page read. loadSession does not recursively reload 409s.
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          nextCursor: null,
+          hasMore: false,
+          cursorSource: undefined,
+          historyEpoch: undefined,
+          snapshotSeqId: undefined,
+          dataSource: undefined,
+          degraded: undefined,
+          cursorCompatibleWithRuntime: undefined,
+          sessionContractVersion: undefined,
+          persistenceDegraded: undefined,
+          error: undefined,
+        });
+        await loadSession(sessionId, true, signal);
+        return;
+      }
       if (signal) throw error;
       if (!(error instanceof CancelledError)) {
         console.error('Failed to load older session messages:', error);
@@ -1020,7 +1180,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, false);
       }
     }
-  }, [api, loadFeedbackForMessages]);
+  }, [api, loadFeedbackForMessages, loadSession]);
 
   const historySearchSnapshot = useCallback(() => {
     const sessionId = currentSessionIdRef.current || '';

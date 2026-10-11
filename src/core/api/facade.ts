@@ -4,19 +4,13 @@ import {
   type AgentEngineClientOptions,
 } from '../../api/client.js';
 import { decodeActionReceipt } from '../../types/agent-control.js';
+import { normalizeSessionMessagesResponse, type ListSessionMessagesResponse } from '../../api/messages.js';
 
 type ListSessionsData = {
   Sessions?: unknown[];
   Total?: number;
   Page?: number;
   PageSize?: number;
-};
-
-type ListMessagesData = {
-  Messages?: unknown[];
-  LatestSeqId?: number;
-  HasMore?: boolean;
-  NextCursor?: number | null;
 };
 
 /**
@@ -82,16 +76,27 @@ export class ApiFacadeImpl implements ApiFacade {
     return data.Session;
   }
 
-  async listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; signal?: AbortSignal }) {
+  async listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; cursorSource?: string; historyEpoch?: string; snapshotSeqId?: number; signal?: AbortSignal }) {
     const data = await this.client.postJsonAction<{
       Events?: unknown[];
       Total?: number;
       Offset?: number;
       Limit?: number;
+      DataSource?: string;
+      Degraded?: boolean;
+      CursorSource?: string;
+      CursorCompatibleWithRuntime?: boolean;
+      SessionContractVersion?: number;
+      HistoryEpoch?: string;
+      PersistenceDegraded?: boolean;
+      SnapshotSeqId?: number;
     }>('ListSessionEvents', {
       SessionId: sessionId,
       Offset: opts?.offset,
       Limit: opts?.limit,
+      CursorSource: opts?.cursorSource,
+      HistoryEpoch: opts?.historyEpoch,
+      SnapshotSeqId: opts?.snapshotSeqId,
     }, opts);
     const events = data.Events ?? [];
     return {
@@ -99,6 +104,14 @@ export class ApiFacadeImpl implements ApiFacade {
       Total: Number.isFinite(Number(data.Total)) ? Number(data.Total) : events.length,
       Offset: Number.isFinite(Number(data.Offset)) ? Number(data.Offset) : opts?.offset ?? 0,
       Limit: Number.isFinite(Number(data.Limit)) ? Number(data.Limit) : opts?.limit ?? events.length,
+      DataSource: data.DataSource,
+      Degraded: data.Degraded,
+      CursorSource: data.CursorSource,
+      CursorCompatibleWithRuntime: data.CursorCompatibleWithRuntime,
+      SessionContractVersion: data.SessionContractVersion,
+      HistoryEpoch: data.HistoryEpoch,
+      PersistenceDegraded: data.PersistenceDegraded,
+      SnapshotSeqId: data.SnapshotSeqId,
     };
   }
 
@@ -108,6 +121,9 @@ export class ApiFacadeImpl implements ApiFacade {
       agentId?: string;
       afterSeqId?: number;
       beforeSeqId?: number;
+      cursorSource?: string;
+      historyEpoch?: string;
+      snapshotSeqId?: number;
       limit?: number;
       includeReasoning?: boolean;
       includeToolEvents?: boolean;
@@ -115,24 +131,20 @@ export class ApiFacadeImpl implements ApiFacade {
       signal?: AbortSignal;
     },
   ) {
-    const data = await this.client.postJsonAction<ListMessagesData>('ListSessionMessages', {
+    const data = await this.client.postJsonAction<ListSessionMessagesResponse>('ListSessionMessages', {
       AgentId: opts?.agentId,
       SessionId: sessionId,
       AfterSeqId: opts?.afterSeqId,
       BeforeSeqId: opts?.beforeSeqId,
+      CursorSource: opts?.cursorSource,
+      HistoryEpoch: opts?.historyEpoch,
+      SnapshotSeqId: opts?.snapshotSeqId,
       Limit: opts?.limit,
       IncludeReasoning: opts?.includeReasoning,
       IncludeToolEvents: opts?.includeToolEvents,
       IncludeAttachments: opts?.includeAttachments,
     }, opts);
-    return {
-      Messages: data.Messages ?? [],
-      LatestSeqId: Number.isFinite(Number(data.LatestSeqId)) ? Number(data.LatestSeqId) : 0,
-      HasMore: Boolean(data.HasMore),
-      NextCursor: data.NextCursor === null || data.NextCursor === undefined
-        ? null
-        : Number.isFinite(Number(data.NextCursor)) ? Number(data.NextCursor) : null,
-    };
+    return normalizeSessionMessagesResponse(data);
   }
 
   async listSessionCheckpoints(params: { agentId: string; sessionId: string; runId?: string }, opts?: { signal?: AbortSignal }) {

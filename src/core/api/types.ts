@@ -37,11 +37,19 @@ export interface ApiFacade {
   }>;
 
   // Events & Run
-  listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; signal?: AbortSignal }): Promise<{
+  listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; cursorSource?: string; historyEpoch?: string; snapshotSeqId?: number; signal?: AbortSignal }): Promise<{
     Events: unknown[];
     Total?: number;
     Offset?: number;
     Limit?: number;
+    DataSource?: string;
+    Degraded?: boolean;
+    CursorSource?: string;
+    CursorCompatibleWithRuntime?: boolean;
+    SessionContractVersion?: number;
+    HistoryEpoch?: string;
+    PersistenceDegraded?: boolean;
+    SnapshotSeqId?: number;
   }>;
   listSessionMessages(
     sessionId: string,
@@ -49,6 +57,9 @@ export interface ApiFacade {
       agentId?: string;
       afterSeqId?: number;
       beforeSeqId?: number;
+      cursorSource?: string;
+      historyEpoch?: string;
+      snapshotSeqId?: number;
       limit?: number;
       includeReasoning?: boolean;
       includeToolEvents?: boolean;
@@ -60,6 +71,14 @@ export interface ApiFacade {
     LatestSeqId: number;
     HasMore: boolean;
     NextCursor: number | null;
+    DataSource?: string;
+    Degraded?: boolean;
+    CursorSource?: string;
+    CursorCompatibleWithRuntime?: boolean;
+    SessionContractVersion?: number;
+    HistoryEpoch?: string;
+    PersistenceDegraded?: boolean;
+    SnapshotSeqId?: number;
   }>;
   listSessionCheckpoints(params: { agentId: string; sessionId: string; runId?: string }, opts?: { signal?: AbortSignal }): Promise<{ Checkpoints: unknown[] }>;
   listToolReceipts(params: { agentId: string; sessionId: string; runId?: string; checkpointId?: string }, opts?: { signal?: AbortSignal }): Promise<{ ToolReceipts: unknown[] }>;
