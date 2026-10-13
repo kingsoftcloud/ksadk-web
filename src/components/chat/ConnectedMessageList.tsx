@@ -33,6 +33,7 @@ export type ConnectedMessageListProps = {
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
+  onRetryHistory?: (sessionId: string) => Promise<void>;
   interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
   className?: string;
   revealMessage?: { id: string; request: number } | null;
@@ -53,6 +54,7 @@ export function ConnectedMessageList({
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
+  onRetryHistory,
   interactionRecords,
   className,
   revealMessage,
@@ -391,11 +393,17 @@ export function ConnectedMessageList({
       {currentMessageHistory?.error && (
         <div role="alert" data-testid="history-reload-error" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-red-700 dark:text-red-300">
           {currentMessageHistory.error}
+          {onRetryHistory && currentSessionId && (
+            <button type="button" className="ml-3 underline" onClick={() => void onRetryHistory(currentSessionId)}>重试</button>
+          )}
         </div>
+      )}
+      {currentMessageHistory?.preparing && (
+        <div role="status" data-testid="history-preparing" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm">历史正在准备，请稍候。</div>
       )}
       <ChatMessageList
         revealMessage={revealMessage}
-        emptyState={emptyState}
+        emptyState={currentMessageHistory?.error || currentMessageHistory?.preparing ? null : emptyState}
         agentName={agentName}
         isMobile={isMobile}
         isStreaming={isStreaming}

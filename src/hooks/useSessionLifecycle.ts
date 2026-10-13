@@ -1,4 +1,5 @@
 import { mergeHistoryWithLive } from '../utils/transcript-order.js';
+import { isHistoryPreparing, readPreparedHistory } from '../utils/history-preparation.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useCallback, useEffect, useRef } from 'react';
@@ -92,11 +93,6 @@ function isHistoryReloadRequired(error: unknown): boolean {
     && historyErrorReason(error) === 'HISTORY_RELOAD_REQUIRED';
 }
 
-function isHistoryProjectionBudgetExceeded(error: unknown): boolean {
-  return error instanceof ApiError && error.code === 422
-    && historyErrorReason(error) === 'HISTORY_PROJECTION_BUDGET_EXCEEDED';
-}
-
 function reloadRequiredError(): ApiError {
   return new ApiError(409, '历史来源已变化', {
     Code: 409, ReasonCode: 'HISTORY_RELOAD_REQUIRED', Data: null,
@@ -114,6 +110,7 @@ function historyPageMetadata(page: ListSessionMessagesResponse) {
     persistenceDegraded: page.PersistenceDegraded,
     snapshotSeqId: page.SnapshotSeqId,
     error: undefined,
+    preparing: false,
   };
 }
 
@@ -553,20 +550,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           includeAttachments: true,
           signal,
         };
-        let messagesData;
-        try {
-          messagesData = await api.listSessionMessages(sessionId, messageOptions);
-        } catch (error) {
-          if (historyReload || error instanceof CancelledError || isHistoryReloadRequired(error)
-            || isHistoryProjectionBudgetExceeded(error)) throw error;
-          // Cloud history reads can briefly race a deployment proxy refresh.
-          // Retry one small idempotent read before turning a cold switch into
-          // an empty conversation. Warm switches continue showing the LRU
-          // transcript throughout this recovery window.
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 180));
-          if (!isStillCurrentSession()) return;
-          messagesData = await api.listSessionMessages(sessionId, messageOptions);
-        }
+        const messagesData = await readPreparedHistory(
+          () => api.listSessionMessages(sessionId, messageOptions),
+          { isCurrent: isStillCurrentSession, signal, onPreparing: () => {
+            const previous = useSessionStore.getState().messageHistory[sessionId];
+            useSessionStore.getState().setSessionMessageHistory(sessionId, {
+              nextCursor: null, hasMore: false, ...previous, preparing: true, error: undefined,
+            });
+            useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
+          } },
+        );
         if (!isStillCurrentSession()) {
           return;
         }
@@ -745,23 +738,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           });
           return;
         }
-        if (isStillCurrentSession()) {
+        if (isStillCurrentSession() && !(error instanceof CancelledError)) {
           const message = historyReload
             ? '历史来源已变化，重新加载失败。原有消息已保留，请手动刷新会话。'
-            : '会话历史读取失败，请刷新会话后重新查找。';
+            : isHistoryPreparing(error) ? '历史仍在准备，请稍后重试。'
+              : '会话历史读取失败，请重试。已有消息已保留。';
           historyReadFailureRef.current = { generation, message };
-          if (historyReload) {
             const previous = useSessionStore.getState().messageHistory[sessionId];
             useSessionStore.getState().setSessionMessageHistory(sessionId, {
-              ...previous,
               nextCursor: null, hasMore: false,
-              cursorSource: undefined,
-              historyEpoch: undefined,
-              snapshotSeqId: undefined,
+              ...previous,
+              ...(historyReload ? { nextCursor: null, hasMore: false,
+                cursorSource: undefined, historyEpoch: undefined, snapshotSeqId: undefined } : {}),
+              preparing: false,
               error: message,
             });
-            useUIStore.getState().pushToast(message, 'error');
-          }
+          if (historyReload) useUIStore.getState().pushToast(message, 'error');
         }
         if (!(error instanceof CancelledError)) console.error('Failed to load session messages:', error);
       } finally {
@@ -1043,11 +1035,20 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       || useMessageStore.getState().messages;
     const requestToken = Symbol(sessionId);
     olderMessageRequestRef.current.set(sessionId, requestToken);
+    const isCurrent = () => currentSessionIdRef.current === sessionId
+      && loadSessionGenerationRef.current === generation
+      && olderMessageRequestRef.current.get(sessionId) === requestToken
+      && !signal?.aborted;
+    const preparation = { isCurrent, signal, onPreparing: () => {
+      useSessionStore.getState().setSessionMessageHistory(sessionId, {
+        ...historyState, preparing: true, error: undefined,
+      });
+    } };
     try {
       useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
       const [messagePage, eventPage] = await Promise.all([
         canLoadOlderMessages
-          ? api.listSessionMessages(sessionId, {
+          ? readPreparedHistory(() => api.listSessionMessages(sessionId, {
               signal,
               beforeSeqId: historyState.nextCursor ?? undefined,
               cursorSource: historyState.cursorSource,
@@ -1057,17 +1058,17 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               includeReasoning: true,
               includeToolEvents: true,
               includeAttachments: true,
-            })
+            }), preparation)
           : Promise.resolve(null),
         canLoadOlderEvents && cachedEvents
-          ? api.listSessionEvents(sessionId, {
+          ? readPreparedHistory(() => api.listSessionEvents(sessionId, {
               signal,
               offset: cachedEvents.loadedCount,
               limit: SESSION_EVENTS_PAGE_SIZE,
               cursorSource: cachedEvents.cursorSource,
               historyEpoch: cachedEvents.historyEpoch,
               snapshotSeqId: cachedEvents.snapshotSeqId,
-            })
+            }), preparation)
           : Promise.resolve(null),
       ]);
       signal?.throwIfAborted();
@@ -1192,6 +1193,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         });
         await loadSession(sessionId, true, signal);
         return;
+      }
+      if (isCurrent() && !(error instanceof CancelledError)) {
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          ...historyState, preparing: false,
+          error: error instanceof Error ? error.message : '历史加载失败，请重试',
+        });
       }
       if (signal) throw error;
       if (!(error instanceof CancelledError)) {

@@ -507,6 +507,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
               }
               onResumeCheckpoint={resumeCheckpoint}
               onLoadOlderSessionMessages={loadOlderSessionMessages}
+              onRetryHistory={loadSession}
               interactionRecords={interactionRecords}
             />
         <ConnectedComposer

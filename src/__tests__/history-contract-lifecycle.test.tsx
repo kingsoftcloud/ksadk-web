@@ -39,6 +39,15 @@ describe('history continuation and recovery', () => {
     useMessageStore.getState().setMessages([]);
   });
 
+  it('records a cold history failure visibly without pretending the session is empty', async () => {
+    const read = vi.fn().mockRejectedValue(new ApiError(504, 'timeout'));
+    await mount({ listSessionMessages: read }).loadSession('s');
+    expect(read).toHaveBeenCalledOnce();
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({
+      isLoadingInitial: false, preparing: false, error: expect.stringContaining('读取失败'),
+    });
+  });
+
   it('carries source, epoch and zero snapshot through an empty visible continuation page', async () => {
     const listSessionMessages = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce({
       Messages: [], LatestSeqId: 12, HasMore: true, NextCursor: 4,
@@ -193,4 +202,40 @@ describe('history continuation and recovery', () => {
     expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['durable final answer']);
   });
 
+});
+
+describe('preparing older history', () => {
+  beforeEach(() => {
+    useBootstrapStore.getState().setAgentId('agent-a');
+    useSessionStore.getState().clearSessionMessageHistory();
+    useSessionStore.getState().setCurrentSessionId('s');
+    useMessageStore.getState().setMessages([]);
+  });
+  it('retains the current transcript and records pagination failure for retry', async () => {
+    const listSessionMessages = vi.fn().mockResolvedValueOnce(first).mockRejectedValueOnce(new ApiError(504, 'timeout'));
+    const actions = mount({ listSessionMessages, listSessionEvents: vi.fn().mockResolvedValue(events) });
+    await actions.loadSession('s');
+    await actions.loadOlderSessionMessages('s');
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({error: 'timeout', nextCursor: 8, preparing: false});
+    expect(useMessageStore.getState().messages.map(x => x.content)).toEqual(['Old history']);
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+  });
+  it('cancels pending preparation when another session is selected', async () => {
+    vi.useFakeTimers();
+    try {
+      const listSessionMessages = vi.fn().mockResolvedValueOnce(first).mockRejectedValue(new ApiError(503, 'preparing', {
+        ReasonCode: 'HISTORY_PREPARING', Code: 503,
+      }));
+      const actions = mount({ listSessionMessages, listSessionEvents: vi.fn().mockResolvedValue(events) });
+      await actions.loadSession('s');
+      const pending = actions.loadOlderSessionMessages('s');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useSessionStore.getState().messageHistory.s.preparing).toBe(true);
+      actions.startNewConversation();
+      await vi.advanceTimersByTimeAsync(2000);
+      await pending;
+      expect(listSessionMessages).toHaveBeenCalledTimes(2);
+      expect(useMessageStore.getState().messages).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
 });

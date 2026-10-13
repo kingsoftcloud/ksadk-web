@@ -17,6 +17,7 @@ export type SessionMessageHistory = {
   persistenceDegraded?: boolean;
   snapshotSeqId?: number;
   error?: string;
+  preparing?: boolean;
 };
 
 export type SessionState = {
