@@ -16,6 +16,19 @@ const rounds = () => mapBackendMessages([
 ]) as Message[];
 
 describe('transcript order independent of wall clocks', () => {
+  it('keeps interleaved legacy outputs with their turn across pages and live updates', () => {
+    const rows = mapBackendMessages([
+      { ...row('q2', 2, 'r2', 'user'), StartSeqId: 2 },
+      { ...row('a2', 8, 'r2'), StartSeqId: 2 },
+      { ...row('q1', 1, 'r1', 'user'), StartSeqId: 1 },
+      { ...row('a1', 7, 'r1'), StartSeqId: 1 },
+    ]) as Message[];
+    expect(ids(orderTranscript(rows))).toEqual(['q1', 'a1', 'q2', 'a2']);
+    const baseline = orderTranscript(rows);
+    const current = baseline.map(message => message.id === 'a1'
+      ? { ...message, content: 'live', historyOrder: { seq: 9 } } : message);
+    expect(ids(mergeHistoryWithLive(rows, baseline, current))).toEqual(['q1', 'a1', 'q2', 'a2']);
+  });
   it.each(['backwards', 'equal', 'missing'])('keeps multiple rounds for %s timestamps', mode => {
     const input = rounds().map(message => ({ ...message,
       timestamp: mode === 'backwards' ? message.timestamp : mode === 'equal' ? 10 : 0 }));

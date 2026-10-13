@@ -138,7 +138,9 @@ export function mapBackendMessage(msg) {
     role,
     content: extractContentText(msg.Content),
     timestamp: parseTimestamp(msg.Timestamp),
-    ...(Number.isSafeInteger(msg.SeqId) && msg.SeqId > 0 ? { historyOrder: { seq: msg.SeqId } } : {}),
+    ...(Number.isSafeInteger(msg.SeqId) && msg.SeqId > 0 ? { historyOrder: { seq: msg.SeqId,
+      ...(Number.isSafeInteger(msg.StartSeqId) && msg.StartSeqId > 0 ? { group: msg.StartSeqId } : {}),
+    } } : {}),
     eventType: role === 'user' ? 'user_message' : 'assistant_message',
     reasoning,
     tools,
@@ -189,7 +191,9 @@ function mapBackendActivities(msg) {
       role: 'a2ui',
       content: '',
       timestamp: parseTimestamp(msg.Timestamp),
-      ...(Number.isSafeInteger(msg.SeqId) && msg.SeqId > 0 ? { historyOrder: { seq: msg.SeqId, index: index + 1 } } : {}),
+      ...(Number.isSafeInteger(msg.SeqId) && msg.SeqId > 0 ? { historyOrder: { seq: msg.SeqId, index: index + 1,
+        ...(Number.isSafeInteger(msg.StartSeqId) && msg.StartSeqId > 0 ? { group: msg.StartSeqId } : {}),
+      } } : {}),
       aguiActivity: { surfaceId, messages: normalizeA2uiOperations(messages) },
     }];
   });

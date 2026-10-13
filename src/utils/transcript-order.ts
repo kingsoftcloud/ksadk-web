@@ -6,24 +6,32 @@ const runOf = (message: Message) => message.runId || message.invocationId;
  * lacking a sequence stay attached to their nearest received neighbour. When
  * no sequence is available, the endpoint's existing order is authoritative. */
 export function orderTranscript(messages: Message[]): Message[] {
+  const groups = new Map<string, number>();
+  for (const message of messages) {
+    const run = runOf(message), group = message.historyOrder?.group;
+    if (run && group !== undefined) groups.set(run, Math.min(group, groups.get(run) ?? group));
+  }
   const positions = messages.map((message, index) => ({ message, index,
-    seq: message.historyOrder?.seq, part: message.historyOrder?.index || 0 }));
+    seq: message.historyOrder?.seq,
+    group: message.historyOrder?.group ?? groups.get(runOf(message) || '') ?? message.historyOrder?.seq,
+    part: message.historyOrder?.index || 0 }));
   let next: number | undefined;
   const following = positions.map(() => undefined as number | undefined);
   for (let i = positions.length - 1; i >= 0; i--) {
     following[i] = next;
-    if (positions[i].seq !== undefined) next = positions[i].seq;
+    if (positions[i].group !== undefined) next = positions[i].group;
   }
   let previous: number | undefined;
   const keyed = positions.map(row => {
-    if (row.seq !== undefined) {
-      previous = row.seq;
-      return { ...row, anchor: row.seq, side: 0 };
+    if (row.group !== undefined) {
+      previous = row.group;
+      return { ...row, anchor: row.group, side: 0 };
     }
     return { ...row, anchor: previous ?? following[row.index] ?? 0,
       side: previous === undefined && following[row.index] !== undefined ? -1 : 1 };
   });
   return keyed.sort((a, b) => a.anchor - b.anchor || a.side - b.side
+    || (a.side === 0 ? (a.seq ?? a.anchor) - (b.seq ?? b.anchor) : 0)
     || (a.side === 0 ? a.part - b.part : 0) || a.index - b.index).map(row => row.message);
 }
 
