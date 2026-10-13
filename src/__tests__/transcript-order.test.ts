@@ -86,6 +86,14 @@ describe('history/live merge', () => {
     const current = baseline.map(m => m.id === 'a1' ? { ...m, content: 'updated', historyOrder: undefined } : m);
     expect(ids(mergeHistoryWithLive(baseline, baseline, current))).toEqual(['q1', 'a1', 'q2', 'a2']);
   });
+  it('keeps an unbound optimistic input before its streamed answer during paging', () => {
+    const history = rounds();
+    const current = [...history,
+      { id: 'optimistic', role: 'user' as const, content: 'Q3', timestamp: 99, eventType: 'optimistic_user_message' },
+      { id: 'stream', role: 'model' as const, content: 'A3', timestamp: 0, runId: 'r3' }];
+    expect(ids(mergeHistoryWithLive(history, history, current)))
+      .toEqual(['q1', 'a1', 'q2', 'a2', 'optimistic', 'stream']);
+  });
   it('does not mutate the input arrays', () => {
     const input = rounds().reverse(); const before = JSON.stringify(input);
     orderTranscript(input); expect(JSON.stringify(input)).toBe(before);

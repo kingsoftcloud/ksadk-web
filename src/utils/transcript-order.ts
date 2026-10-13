@@ -57,7 +57,17 @@ export function mergeHistoryWithLive(
   // Rows without a run identity (e.g. optimistic inputs) retain arrival order.
   for (const message of live.filter(message => !runOf(message))) {
     const index = result.findIndex(row => row.id === message.id);
-    if (index < 0) result = [...result, message];
+    if (index < 0) {
+      // A just-submitted user input may not have its invocation ID yet. Its
+      // live assistant already does; appending the input at the end would
+      // render the answer before the question when an older page resolves.
+      const position = current.indexOf(message);
+      const following = current.slice(position + 1).find(row => result.some(item => item.id === row.id));
+      const preceding = current.slice(0, position).findLast(row => result.some(item => item.id === row.id));
+      const insertion = following ? result.findIndex(row => row.id === following.id)
+        : preceding ? result.findIndex(row => row.id === preceding.id) + 1 : result.length;
+      result = [...result.slice(0, insertion), message, ...result.slice(insertion)];
+    }
     else result = result.map((row, i) => i === index
       ? { ...message, historyOrder: message.historyOrder || row.historyOrder } : row);
   }
