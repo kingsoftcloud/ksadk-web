@@ -1,3 +1,4 @@
+import { mergeHistoryWithLive } from '../utils/transcript-order.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useCallback, useEffect, useRef } from 'react';
@@ -224,6 +225,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const historyReadFailureRef = useRef<{ generation: number; message: string } | null>(null);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
+  const persistedTranscriptBySessionRef = useRef(new Map<string, Message[]>());
   const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
   const historyProfileBySessionRef = useRef(new Map<string, 'flat-v1' | 'agent-block-v1'>());
   const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
@@ -537,6 +539,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         .getState()
         .setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
       resetCompaction();
+      let visibleBaseline = useMessageStore.getState().messages;
       runSubscriptionAbortRef.current?.abort();
       if (isMobile) {
         useUIStore.getState().setMobileSidebarOpen(false);
@@ -585,8 +588,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // switch keeps the cached canonical transcript visible until the
         // background refresh is complete.
         if (!cachedHistory) {
-          useMessageStore.getState().setMessages(fallbackHistory);
-          cacheTranscript(sessionId, fallbackHistory);
+          const painted = historyReload ? fallbackHistory : mergeHistoryWithLive(
+            fallbackHistory, visibleBaseline, useMessageStore.getState().messages);
+          useMessageStore.getState().setMessages(painted);
+          visibleBaseline = fallbackHistory;
+          cacheTranscript(sessionId, painted);
         }
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
           nextCursor: messagesData.NextCursor,
@@ -657,6 +663,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           new Set(canonicalRunIds),
           currentSessionIdRef.current,
         );
+        rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, history, currentSessionIdRef.current);
+        history = historyReload ? history : mergeHistoryWithLive(
+          history, visibleBaseline, useMessageStore.getState().messages);
         useMessageStore.getState().setMessages(history);
         cacheTranscript(sessionId, history);
         historyHydrationGenerationRef.current = null;
@@ -984,6 +993,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         historyProfileBySessionRef.current.delete(sessionId);
         eventHistoryBySessionRef.current.delete(sessionId);
         canonicalRunIdsBySessionRef.current.delete(sessionId);
+        persistedTranscriptBySessionRef.current.delete(sessionId);
         pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
@@ -1020,6 +1030,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       return;
     }
     const generation = loadSessionGenerationRef.current;
+    const visibleBaseline = persistedTranscriptBySessionRef.current.get(sessionId)
+      || useMessageStore.getState().messages;
     const requestToken = Symbol(sessionId);
     olderMessageRequestRef.current.set(sessionId, requestToken);
     try {
@@ -1112,7 +1124,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
-      const mergedHistory = rebuilt.messages;
+      rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuilt.messages, currentSessionIdRef.current);
+      const mergedHistory = mergeHistoryWithLive(
+        rebuilt.messages, visibleBaseline, useMessageStore.getState().messages);
       rememberSessionCache(
         canonicalRunIdsBySessionRef.current,
         sessionId,

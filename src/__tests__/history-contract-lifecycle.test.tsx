@@ -141,4 +141,54 @@ describe('history continuation and recovery', () => {
     expect(useSessionStore.getState().currentSessionId).toBeNull();
     expect(useMessageStore.getState().messages).toEqual([]);
   });
+  it('keeps streaming updates and a new turn when a delayed older page arrives', async () => {
+    let finish!: (value: typeof first) => void;
+    const latest = { ...first, Messages: [
+      { MessageId: 'q2', Role: 'user' as const, Content: { text: 'Q2' }, SeqId: 8, InvocationId: 'r2', Timestamp: 10 },
+      { MessageId: 'a2', Role: 'assistant' as const, Content: { text: 'partial' }, SeqId: 9, InvocationId: 'r2', Timestamp: 1 },
+    ] };
+    const api = { listSessionMessages: vi.fn().mockResolvedValueOnce(latest)
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })),
+      listSessionEvents: vi.fn().mockResolvedValue(events) };
+    const actions = mount(api);
+    await actions.loadSession('s');
+    // A live update before the page request is also newer than the fixed history snapshot.
+    useMessageStore.getState().patchMessages(rows => rows.map(row => row.id === 'a2'
+      ? { ...row, content: 'stream before request' } : row));
+    const pending = actions.loadOlderSessionMessages('s');
+    useMessageStore.getState().patchMessages(rows => [...rows.map(row => row.id === 'a2'
+      ? { ...row, content: 'complete live answer' } : row),
+      { id: 'q3', role: 'user', content: 'Q3', timestamp: 0, invocationId: 'r3' }]);
+    finish({ ...first, HasMore: false, NextCursor: null, Messages: [
+      { MessageId: 'q1', Role: 'user', Content: { text: 'Q1' }, SeqId: 1, Timestamp: 200 },
+      { MessageId: 'a1', Role: 'assistant', Content: { text: 'A1' }, SeqId: 2, Timestamp: 300 },
+    ] } as typeof first);
+    await pending;
+    expect(useMessageStore.getState().messages.map(row => row.content))
+      .toEqual(['Q1', 'A1', 'Q2', 'complete live answer', 'Q3']);
+  });
+
+  it('keeps a live message arriving during the initial event-page read', async () => {
+    let finish!: (value: typeof events) => void;
+    const api = { listSessionMessages: vi.fn().mockResolvedValue(first),
+      listSessionEvents: vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve; })) };
+    const actions = mount(api);
+    const pending = actions.loadSession('s');
+    await vi.waitFor(() => expect(api.listSessionEvents).toHaveBeenCalled());
+    useMessageStore.getState().patchMessages(rows => [...rows,
+      { id: 'live', role: 'model', content: 'new live output', timestamp: 0, invocationId: 'live-run' }]);
+    finish(events); await pending;
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['Old history', 'new live output']);
+  });
+
+  it('lets a fresh session read replace a previously streamed stale snapshot', async () => {
+    const fresh = { ...first, Messages: [{ ...first.Messages[0], Content: { text: 'durable final answer' } }] };
+    const actions = mount({ listSessionMessages: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(fresh),
+      listSessionEvents: vi.fn().mockResolvedValue(events) });
+    await actions.loadSession('s');
+    useMessageStore.getState().patchMessages(rows => rows.map(row => ({ ...row, content: 'old stream prefix' })));
+    await actions.loadSession('s');
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['durable final answer']);
+  });
+
 });

@@ -653,6 +653,14 @@ export function buildCompactionMessage(options) {
  * @returns {Message | null}
  */
 export function buildMessageFromSessionEvent(event) {
+  const message = buildUnorderedMessageFromSessionEvent(event);
+  if (message && Number.isSafeInteger(event.SeqId) && event.SeqId > 0) {
+    message.historyOrder = { seq: event.SeqId };
+  }
+  return message;
+}
+
+function buildUnorderedMessageFromSessionEvent(event) {
   const eventType = event?.EventType || '';
   const runtimeIdentity = runtimeIdentityFromEvent(event);
   if (eventType === 'run_status') {

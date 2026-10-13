@@ -27,6 +27,8 @@ export type Message = {
   role: 'user' | 'model' | 'tool' | 'system' | 'a2ui';
   content: string;
   timestamp: number;
+  /** Session event sequence; never a wall-clock timestamp or a run-local cursor. */
+  historyOrder?: { seq: number; index?: number };
   responseId?: string;
   invocationId?: string;
   eventId?: string;
