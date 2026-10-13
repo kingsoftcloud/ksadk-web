@@ -156,6 +156,8 @@ describe('history continuation and recovery', () => {
     useMessageStore.getState().patchMessages(rows => rows.map(row => row.id === 'a2'
       ? { ...row, content: 'stream before request' } : row));
     const pending = actions.loadOlderSessionMessages('s');
+    actions.adoptCreatedSession('s', true);
+    expect(useSessionStore.getState().messageHistory.s.nextCursor).toBe(8);
     useMessageStore.getState().patchMessages(rows => [...rows.map(row => row.id === 'a2'
       ? { ...row, content: 'complete live answer' } : row),
       { id: 'q3', role: 'user', content: 'Q3', timestamp: 0, invocationId: 'r3' }]);

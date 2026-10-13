@@ -161,7 +161,8 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
         return;
       }
       const refresh = () => {
-        useSessionStore.getState().clearSessionMessageHistory(sessionId);
+        // Refresh directory metadata without discarding this session's fixed
+        // history cursor. The live run already owns its new transcript rows.
         void fetchSessions(agentIdRef.current, sessionId);
       };
       queueMicrotask(refresh);

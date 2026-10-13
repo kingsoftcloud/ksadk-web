@@ -300,7 +300,7 @@ describe('chat message list contracts', () => {
     // the header keeps the selected session while the transcript stays empty
     // until the user clicks the same session again.
     expect(appSource).not.toContain('currentSessionIdRef.current = currentSessionId;');
-    expect(appSource).toContain('clearSessionMessageHistory(sessionId)');
+    expect(appSource).not.toContain('clearSessionMessageHistory(sessionId)');
     expect(lifecycleSource).toContain('const isStillCurrentSession = () => (');
     expect(lifecycleSource).toContain('loadSessionGenerationRef.current === generation');
     expect(lifecycleSource).toContain('if (!isStillCurrentSession()) {');

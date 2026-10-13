@@ -891,6 +891,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [fetchSessions]);
 
   const adoptCreatedSession = useCallback((newId: string, preserveMessages = false) => {
+    // Responses can announce the existing session on every turn. That is an
+    // acknowledgement, not navigation: keep its fixed snapshot and in-flight
+    // older page so another turn cannot strand the remaining history.
+    if (preserveMessages && currentSessionIdRef.current === newId) {
+      useSessionStore.getState().upsertSessions([
+        { SessionId: newId, UpdatedAt: new Date().toISOString() } as unknown as Session,
+      ]);
+      return;
+    }
     loadSessionGenerationRef.current += 1;
     runSubscriptionAbortRef.current?.abort();
     pendingCreatedSessionAgentsRef.current.set(newId, agentIdRef.current);
