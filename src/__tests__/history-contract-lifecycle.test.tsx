@@ -39,6 +39,22 @@ describe('history continuation and recovery', () => {
     useMessageStore.getState().setMessages([]);
   });
 
+  it('keeps the original user input and reply when refreshing history fails', async () => {
+    const input = { MessageId: 'original-user', Role: 'user' as const,
+      Content: { text: 'Original user question' }, SeqId: 8, InvocationId: 'turn-1' };
+    const page = { ...first, HasMore: false, NextCursor: null,
+      Messages: [input, { ...first.Messages[0], InvocationId: 'turn-1' }] };
+    const read = vi.fn().mockResolvedValueOnce(page).mockRejectedValue(new ApiError(504, 'unavailable'));
+    const actions = mount({ listSessionMessages: read, listSessionEvents: vi.fn().mockResolvedValue(events) });
+    await actions.loadSession('s');
+    const original = structuredClone(useMessageStore.getState().messages);
+    await actions.loadSession('s');
+    expect(useMessageStore.getState().messages).toEqual(original);
+    expect(original.filter(message => message.role === 'user').map(message => message.content))
+      .toEqual(['Original user question']);
+    expect(useSessionStore.getState().messageHistory.s.error).toBeTruthy();
+  });
+
   it('loads bounded event detail pages through the exact total while retaining readable text', async () => {
     const page = { ...first, CursorSource: 'runtime', DataSource: 'runtime',
       HistoryEpoch: 'durable', SnapshotSeqId: 150, HasMore: false, NextCursor: null };

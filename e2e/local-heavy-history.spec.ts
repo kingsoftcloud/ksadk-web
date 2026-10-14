@@ -32,6 +32,10 @@ test('real Docker history renders, paginates and ignores an old session response
   await page.goto('/e2e/fixtures/local-heavy-history.html');
   await page.getByRole('button', { name: 'Open A', exact: true }).click();
   await expect(page.locator('main')).toContainText('REPORT_END LGHEAVY_new_A_R0024');
+  await expect.poll(() => page.evaluate(() => (window as any).localHistoryProbe().messages
+    .filter((m: any) => m.role === 'user').map((m: any) => m.content)))
+    .toContain('LGHEAVY_new_A_R0024');
+  await expect(page.getByText('LGHEAVY_new_A_R0024', { exact: true })).toBeAttached();
   await expect.poll(() => calls.some(c => c.action === 'ListSessionEvents' && c.request.SessionId === 'local-heavy-A')).toBe(true);
   await page.getByRole('button', { name: 'Older A', exact: true }).click();
   await expect.poll(() => calls.filter(c => c.action === 'ListSessionMessages').length).toBe(2);
@@ -52,6 +56,10 @@ test('real Docker history renders, paginates and ignores an old session response
   releaseOlder();
   await page.getByRole('button', { name: 'Open C', exact: true }).click();
   await expect(page.locator('main')).toContainText('REPORT_END LGHEAVY_new_C_R0024');
+  await expect.poll(() => page.evaluate(() => (window as any).localHistoryProbe().messages
+    .filter((m: any) => m.role === 'user').map((m: any) => m.content)))
+    .toContain('LGHEAVY_new_C_R0024');
+  await expect(page.getByText('LGHEAVY_new_C_R0024', { exact: true })).toBeAttached();
   await expect.poll(() => calls.some(c => c.action === 'ListSessionEvents' && c.request.SessionId === 'local-heavy-C')).toBe(true);
   // Tool details must retain the end marker past the former 8192-character cut.
   await page.getByRole('button', { name: '已完成 analyze_partition', exact: true }).first().click();
