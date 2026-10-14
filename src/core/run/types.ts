@@ -51,6 +51,7 @@ export type RunEvent =
       args: string;
       message?: string;
       approvalLevel?: string;
+      previousResponseId?: string;
       runId?: string;
       sessionId?: string | null;
     }

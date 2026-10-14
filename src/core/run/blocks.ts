@@ -208,6 +208,7 @@ export function buildBlocksFromHistory(input: {
   tools?: Record<string, {
     name: string;
     callId?: string;
+    approvalRequestId?: string;
     args?: string;
     output?: string;
     status?: string;
@@ -227,7 +228,10 @@ export function buildBlocksFromHistory(input: {
         args: tool.args ?? '',
         output: tool.output,
         status: (tool.status as ToolBlock['status']) ?? 'completed',
-        ...(tool.callId ? { extra: { callId: tool.callId } } : {}),
+        ...((tool.callId || tool.approvalRequestId) ? { extra: {
+          ...(tool.callId ? { callId: tool.callId } : {}),
+          ...(tool.approvalRequestId ? { approvalRequestId: tool.approvalRequestId } : {}),
+        } } : {}),
       });
     }
   }

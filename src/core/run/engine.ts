@@ -1472,6 +1472,7 @@ export class RunEngineImpl implements RunEngine {
           type: 'approval_requested',
           messageId,
           approvalRequestId: action.approvalRequestId,
+          previousResponseId: action.previousResponseId,
           protocol: 'responses',
           runId: action.runId,
           name: action.name || '人工确认',

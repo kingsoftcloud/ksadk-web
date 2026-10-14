@@ -10,6 +10,7 @@ import type { ApiFacade } from '../core/api/types.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { Session } from '../components/chat/types.js';
 import { CancelledError } from '../api/client.js';
+import { sharedInteractionStore } from '../core/interaction/index.js';
 
 function lifecycle(api: Partial<ApiFacade>, restoreSession = false) {
   let actions!: ReturnType<typeof useSessionLifecycle>;
@@ -25,10 +26,48 @@ function lifecycle(api: Partial<ApiFacade>, restoreSession = false) {
 
 describe('shared session lifecycle actions', () => {
   beforeEach(() => {
+    sharedInteractionStore.clearSession('history-session');
     useBootstrapStore.getState().setAgentId('agent-a');
     useSessionStore.getState().resetSessionPagination('agent-a');
     useSessionStore.getState().setCurrentSessionId('current');
     useMessageStore.getState().setMessages([{ id: 'old-message', role: 'user', content: '旧消息', timestamp: 1 }]);
+  });
+
+  it('waits for durable terminal facts before restoring a legacy pending snapshot', async () => {
+    let finish!: (value: unknown) => void;
+    const actions = lifecycle({
+      listSessionMessages: vi.fn().mockResolvedValue({ Messages: [{ MessageId: 'approval', Role: 'assistant',
+        ToolEvents: [{ Name: 'query', Status: 'paused', ApprovalRequestId: 'approval-1' }] }], HasMore: false }),
+      listSessionEvents: vi.fn(() => new Promise(resolve => { finish = resolve; })) as ApiFacade['listSessionEvents'],
+      getResponseFeedback: vi.fn().mockResolvedValue(null),
+    });
+    const loading = actions.loadSession('history-session');
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(sharedInteractionStore.listPending('history-session')).toHaveLength(0);
+    finish({ Events: [{ EventType: 'interaction.resolved', SessionId: 'history-session', SeqId: 2,
+      Content: { interaction_id: 'approval-1', outcome: 'approved', revision: 2 } }], Total: 1 });
+    await loading;
+    expect(sharedInteractionStore.listPending('history-session')).toHaveLength(0);
+    expect(sharedInteractionStore.get('history-session', 'approval-1')?.outcome).toBe('approved');
+  });
+
+  it('restores older legacy approvals without reviving already processed IDs', async () => {
+    const actions = lifecycle({
+      listSessionMessages: vi.fn()
+        .mockResolvedValueOnce({ Messages: [{ MessageId: 'recent', Role: 'assistant',
+          ToolEvents: [{ Name: 'query', Status: 'approved', ApprovalRequestId: 'done' }] }],
+          HasMore: true, NextCursor: 10 })
+        .mockResolvedValueOnce({ Messages: [{ MessageId: 'older', Role: 'assistant', ToolEvents: [
+          { Name: 'query', Status: 'paused', ApprovalRequestId: 'done' },
+          { Name: 'query', Status: 'paused', ApprovalRequestId: 'outstanding' },
+        ] }], HasMore: false, NextCursor: null }),
+      listSessionEvents: vi.fn().mockResolvedValue({ Events: [], Total: 0 }),
+      getResponseFeedback: vi.fn().mockResolvedValue(null),
+    });
+    await actions.loadSession('history-session');
+    await actions.loadOlderSessionMessages('history-session');
+    expect(sharedInteractionStore.listPending('history-session').map(record => record.interactionId)).toEqual(['outstanding']);
+    expect(sharedInteractionStore.get('history-session', 'done')?.outcome).toBe('approved');
   });
 
   it('ignores a late session list from an Agent that has already been switched away from', async () => {

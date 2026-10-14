@@ -82,6 +82,8 @@ export type InteractionEvent =
   | { type: 'interaction_removed'; interactionId: string };
 
 export type InteractionSubmitInput = {
+  /** Scope IDs to the active session; legacy callers may omit this when unambiguous. */
+  sessionId?: string;
   interactionId: string;
   expectedRevision: number;
   action: InteractionAction;

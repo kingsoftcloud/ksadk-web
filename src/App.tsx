@@ -278,8 +278,8 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     api,
     interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
     onAcceptedInteraction: followAcceptedInteraction,
-    legacyResponsesApproval: (approvalRequestId, approve) => {
-      return respondToApprovalRef.current({ approvalRequestId, approve });
+    legacyResponsesApproval: (approvalRequestId, approve, previousResponseId) => {
+      return respondToApprovalRef.current({ approvalRequestId, approve, previousResponseId });
     },
     legacyAguiResume: (interruptId, status, payload) => {
       const engineAccepted = respondToAguiApprovalRef.current({

@@ -51,6 +51,7 @@ export type InteractionClientDeps = {
   legacyResponsesApproval?: (
     interactionId: string,
     approve: boolean,
+    previousResponseId?: string,
   ) => boolean | void | Promise<boolean | void>;
   /** @deprecated 0.3.1 AG-UI `resumeAguiInterrupt` fallback. */
   legacyAguiResume?: (
@@ -86,7 +87,7 @@ function syntheticReceipt(
 export class InteractionClientImpl implements InteractionClient {
   readonly store: InteractionStore;
   private deps: InteractionClientDeps;
-  /** interactionId -> in-flight idempotency key (double-submit guard). */
+  /** Session-scoped interaction key -> in-flight idempotency key. */
   private inFlight = new Map<string, string>();
 
   constructor(deps: InteractionClientDeps) {
@@ -123,24 +124,26 @@ export class InteractionClientImpl implements InteractionClient {
     }
     // Any in-flight submit whose interaction is now terminal server-side
     // (another tab won first) is dropped.
-    for (const [interactionId] of this.inFlight) {
-      const record = this.findByInteractionId(interactionId);
+    for (const [key] of this.inFlight) {
+      const record = this.store.all().find(record => this.recordKey(record) === key);
       if (record && record.status !== 'pending' && record.status !== 'resolving') {
-        this.inFlight.delete(interactionId);
+        this.inFlight.delete(key);
       }
     }
   }
 
-  private findByInteractionId(interactionId: string): Interaction | null {
-    return (
-      this.store.all().find(
-        (interaction) => interaction.interactionId === interactionId,
-      ) || null
-    );
+  private recordKey(record: Interaction): string {
+    return JSON.stringify([record.sessionId, record.interactionId]);
+  }
+
+  private findByInteractionId(interactionId: string, sessionId?: string): Interaction | null {
+    if (sessionId) return this.store.get(sessionId, interactionId);
+    const matches = this.store.all().filter(record => record.interactionId === interactionId);
+    return matches.length === 1 ? matches[0] : null;
   }
 
   async respond(input: InteractionSubmitInput): Promise<InteractionReceipt> {
-    const record = this.findByInteractionId(input.interactionId);
+    const record = this.findByInteractionId(input.interactionId, input.sessionId);
     if (!record) {
       return syntheticReceipt('rejected', input.interactionId);
     }
@@ -168,7 +171,8 @@ export class InteractionClientImpl implements InteractionClient {
 
     // Double-click / concurrent submit guard: same idempotency key in
     // flight means this exact submit already happened.
-    const inFlightKey = this.inFlight.get(input.interactionId);
+    const recordKey = this.recordKey(record);
+    const inFlightKey = this.inFlight.get(recordKey);
     if (inFlightKey) {
       if (inFlightKey === idempotencyKey) {
         return syntheticReceipt('duplicate', input.interactionId);
@@ -176,7 +180,7 @@ export class InteractionClientImpl implements InteractionClient {
       return syntheticReceipt('rejected', input.interactionId);
     }
 
-    this.inFlight.set(input.interactionId, idempotencyKey);
+    this.inFlight.set(recordKey, idempotencyKey);
     this.store.markResolving(record.sessionId, input.interactionId);
 
     const useInteractionV1 =
@@ -184,9 +188,12 @@ export class InteractionClientImpl implements InteractionClient {
 
     try {
       if (!useInteractionV1 && record.source === 'responses' && this.deps.legacyResponsesApproval) {
+        const previousResponseId = record.extensions.previous_response_id;
         const dispatched = await this.deps.legacyResponsesApproval(
           input.interactionId,
           input.action === 'approve',
+          ...(typeof previousResponseId === 'string' && previousResponseId
+            ? [previousResponseId] as const : []),
         );
         if (dispatched === false) {
           this.store.markFailed(record.sessionId, input.interactionId, {
@@ -264,7 +271,7 @@ export class InteractionClientImpl implements InteractionClient {
       });
       throw error;
     } finally {
-      this.inFlight.delete(input.interactionId);
+      this.inFlight.delete(recordKey);
     }
   }
 

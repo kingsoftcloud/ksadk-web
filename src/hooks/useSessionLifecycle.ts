@@ -32,7 +32,7 @@ import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
   createSessionEventCursor,
 } from '../utils/session-event-history.js';
-import { ingestSessionEventRecord } from '../core/interaction/index.js';
+import { ingestLegacyApprovalHistory, ingestSessionEventRecord } from '../core/interaction/index.js';
 import type { Interaction } from '../core/interaction/types.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
@@ -614,6 +614,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           console.warn('[SessionLifecycle] canonical history replay failed:', error);
         }
         if (!isStillCurrentSession()) return;
+        ingestLegacyApprovalHistory(history, sessionId);
         rememberSessionCache(
           canonicalRunIdsBySessionRef.current,
           sessionId,
@@ -1039,6 +1040,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
+      ingestLegacyApprovalHistory(rebuilt.messages, sessionId);
       const mergedHistory = rebuilt.messages;
       rememberSessionCache(
         canonicalRunIdsBySessionRef.current,

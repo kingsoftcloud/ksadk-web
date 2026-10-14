@@ -303,6 +303,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
         message: event.message,
         args: event.args,
         approvalLevel: event.approvalLevel,
+        previousResponseId: event.previousResponseId,
         sessionId: event.sessionId,
       });
       if (sessionIsOffscreen) break;
@@ -317,6 +318,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
           const approvalExtra = {
             approvalRequestId: event.approvalRequestId,
             approvalProtocol: event.protocol,
+            ...(event.previousResponseId ? { previousResponseId: event.previousResponseId } : {}),
             approvalStatus: alreadyResolved ? existing.approvalStatus : 'pending' as const,
             ...(event.message ? { approvalMessage: event.message } : {}),
             ...(event.approvalLevel ? { approvalLevel: event.approvalLevel } : {}),
@@ -324,7 +326,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
           const status = alreadyResolved ? existing.status : 'paused';
           return {
             ...msg,
-            // 同步审批状态到 blocks(ToolRow 从 block.extra 读审批字段渲染审批卡)
+            // 同步审批状态到 blocks，正文只显示只读状态。
             blocks: upsertToolBlock(msg.blocks, event.name, {
               args: event.args,
               status,

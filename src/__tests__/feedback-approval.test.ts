@@ -3,6 +3,7 @@ import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useFeedback } from '../hooks/useFeedback.js';
 import { useMessageStore } from '../stores/message.js';
+import { useSessionStore } from '../stores/session.js';
 import type { Message } from '../components/chat/types.js';
 import type { ApiFacade } from '../core/api/types.js';
 import type { ToolBlock } from '../core/run/blocks.js';
@@ -54,6 +55,7 @@ function probe(options: {
 
 describe('legacy approval dispatch result', () => {
   beforeEach(() => {
+    useSessionStore.getState().setCurrentSessionId('session-1');
     useMessageStore.getState().setMessages([approvalMessage]);
   });
 
@@ -93,6 +95,19 @@ describe('legacy approval dispatch result', () => {
       approvalStatus: 'approved',
       status: 'running',
     });
+  });
+
+  it('does not patch another session with the same approval ID after delayed acceptance', async () => {
+    let finish!: (accepted: boolean) => void;
+    const actions = probe({ isStreaming: false,
+      submitDraft: () => new Promise<boolean>(resolve => { finish = resolve; }) });
+    const responding = actions.respondToApproval({ approvalRequestId: 'approval-1', approve: true });
+    useSessionStore.getState().setCurrentSessionId('session-2');
+    const otherMessage = { ...approvalMessage, id: 'other-message' };
+    useMessageStore.getState().setMessages([otherMessage]);
+    finish(true);
+    await expect(responding).resolves.toBe(true);
+    expect(useMessageStore.getState().messages).toEqual([otherMessage]);
   });
 
   it.each([
