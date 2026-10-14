@@ -17,7 +17,10 @@ export async function readPreparedHistory<T>(read: () => Promise<T>, options: {
     try {
       return await read();
     } catch (error) {
-      if (!isHistoryPreparing(error) || attempt >= 14 || Date.now() - started >= 58_000) throw error;
+      // A cold legacy Runtime may need several full replays to prepare its
+      // durable pages. Poll task status with backoff rather than abandon the
+      // page after 28 seconds. Each HTTP read keeps its existing deadline.
+      if (!isHistoryPreparing(error) || attempt >= 60 || Date.now() - started >= 300_000) throw error;
       if (!options.isCurrent() || options.signal?.aborted) throw new CancelledError();
       options.onPreparing?.();
       await new Promise<void>(resolve => {
@@ -26,7 +29,8 @@ export async function readPreparedHistory<T>(read: () => Promise<T>, options: {
           options.signal?.removeEventListener('abort', done);
           resolve();
         };
-        const timer = setTimeout(done, Math.min(2000, 60_000 - (Date.now() - started)));
+        const timer = setTimeout(done, Math.min(attempt < 5 ? 2000 : 5000,
+          Math.max(0, 300_000 - (Date.now() - started))));
         options.signal?.addEventListener('abort', done, { once: true });
         if (options.signal?.aborted) done();
       });

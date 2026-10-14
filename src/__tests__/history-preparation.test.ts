@@ -38,7 +38,7 @@ describe('queued legacy history', () => {
     const assertion = expect(result).rejects.toMatchObject({ code: 503 });
     await vi.runAllTimersAsync();
     await assertion;
-    expect(read).toHaveBeenCalledTimes(15);
+    expect(read).toHaveBeenCalledTimes(61);
   });
   it('aborts a pending delay without leaving its timer', async () => {
     vi.useFakeTimers();
@@ -49,6 +49,19 @@ describe('queued legacy history', () => {
     await vi.advanceTimersByTimeAsync(0);
     controller.abort();
     await assertion;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('keeps a cold legacy task loading past the former 28 second cutoff', async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const read = vi.fn(async () => {
+      if (Date.now() - start < 120_000) throw pending();
+      return { Messages: ['complete history'] };
+    });
+    const result = readPreparedHistory(read, { isCurrent: () => true });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(await result).toEqual({ Messages: ['complete history'] });
+    expect(read.mock.calls.length).toBeLessThan(30);
     expect(vi.getTimerCount()).toBe(0);
   });
 });
