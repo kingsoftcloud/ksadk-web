@@ -1,4 +1,4 @@
-import { safeToolValue } from './safe-tool-value.js';
+import { safeRuntimeToolOutput, safeToolValue } from './safe-tool-value.js';
 /**
  * Hosted UI presentation bridge for an already-reduced canonical snapshot.
  *
@@ -101,7 +101,7 @@ function toolMessage(item: ConversationItem): Message {
   const callId = nonEmptyString(item.payload.callId);
   const args = displayValue(safeToolValue(item.payload.args));
   const output = Object.prototype.hasOwnProperty.call(item.payload, 'output')
-    ? displayValue(safeToolValue(item.payload.output))
+    ? displayValue(safeRuntimeToolOutput(item.payload.output, item.nativeRef.framework, item.nativeRef.protocol))
     : undefined;
   const executionStatuses = {
     failed: 'error',

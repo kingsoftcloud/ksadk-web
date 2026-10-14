@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { safeToolValue } from '../core/conversation/safe-tool-value';
+import { safeRuntimeToolOutput, safeToolValue } from '../core/conversation/safe-tool-value';
 
 describe('public observation defense in depth', () => {
+  it('retains full local tool text but keeps remote/unknown observation limits', () => {
+    const output = 'x'.repeat(20000) + 'TOOL_END';
+    expect(safeRuntimeToolOutput(output, 'langgraph', undefined)).toBe(output);
+    for (const [framework, protocol] of [['a2a', 'a2a'], [undefined, undefined], ['langgraph', 'a2a/v1']]) {
+      expect(safeRuntimeToolOutput(output, framework, protocol)).toBe('x'.repeat(8192) + '[truncated]');
+    }
+    expect(safeRuntimeToolOutput(output + ' token=private', 'langgraph', undefined)).toBe('[redacted]');
+    expect(safeRuntimeToolOutput({secret: 'private', report: output}, 'langgraph', undefined)).toEqual({report: output});
+  });
   it.each([
     'refresh_token',
     'token',

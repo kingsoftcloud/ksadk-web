@@ -96,6 +96,20 @@ function containsInternalUrl(value: string): boolean {
 
 /** Defense in depth for public tool observations; never render credential/transport diagnostics. */
 export function safeToolValue(value: unknown, depth = 0): unknown {
+  return sanitizeToolValue(value, depth, 8192);
+}
+
+/** Local framework output is already bounded by history/transport budgets.
+ * Keep its text for the expandable log view; remote/unknown observations retain
+ * their existing cap. Both paths apply identical credential redaction.
+ */
+export function safeRuntimeToolOutput(value: unknown, framework: unknown, protocol: unknown): unknown {
+  const local = ['langgraph', 'adk', 'codex'].includes(String(framework))
+    && !String(protocol || '').toLowerCase().includes('a2a');
+  return sanitizeToolValue(value, 0, local ? Infinity : 8192);
+}
+
+function sanitizeToolValue(value: unknown, depth: number, maximumText: number): unknown {
   if (depth > 8) return '[truncated]';
   if (typeof value === 'string') {
     if (
@@ -103,10 +117,10 @@ export function safeToolValue(value: unknown, depth = 0): unknown {
       || containsInternalUrl(value)
     )
       return '[redacted]';
-    return value.length > 8192 ? `${value.slice(0, 8192)}[truncated]` : value;
+    return value.length > maximumText ? `${value.slice(0, maximumText)}[truncated]` : value;
   }
   if (Array.isArray(value))
-    return value.slice(0, 128).map((v) => safeToolValue(v, depth + 1));
+    return value.slice(0, 128).map((v) => sanitizeToolValue(v, depth + 1, maximumText));
   if (value && typeof value === 'object')
     return Object.fromEntries(
       Object.entries(value)
@@ -115,7 +129,7 @@ export function safeToolValue(value: unknown, depth = 0): unknown {
           ([key]) =>
             !sensitiveKey(key),
         )
-        .map(([key, v]) => [key, safeToolValue(v, depth + 1)]),
+        .map(([key, v]) => [key, sanitizeToolValue(v, depth + 1, maximumText)]),
     );
   return value;
 }
