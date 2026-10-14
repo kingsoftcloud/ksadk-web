@@ -18,6 +18,7 @@ export type ResponsesApprovalRequest = {
   name?: string;
   message?: string;
   approvalLevel?: string;
+  previousResponseId?: string;
   args?: string;
   requestSchema?: Record<string, unknown> | null;
 };
@@ -38,6 +39,7 @@ export function interactionFromResponsesApproval(
     revision: 1,
     source: 'responses',
     extensions: {
+      ...(request.previousResponseId ? { previous_response_id: request.previousResponseId } : {}),
       ...(request.approvalLevel
         ? { approval_level: request.approvalLevel }
         : {}),

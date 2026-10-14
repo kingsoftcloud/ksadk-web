@@ -46,6 +46,7 @@ import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
 import { A2UIActivityMessage } from './A2UIActivityMessage';
 import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
 import type { Interaction } from '../../core/interaction/types.js';
+import { interactionApprovalStatus } from './approval-status.js';
 
 export type ChatMessageListProps = {
   agentName: string;
@@ -79,7 +80,7 @@ export type ChatMessageListProps = {
   onScrollToBottom?: () => void;
   checkpoints?: SessionCheckpoint[];
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
-  /** Interaction/v1 records for the current session; anchors replace inline buttons. */
+  /** Interaction records for the current session, used for read-only status and anchors. */
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
   className?: string;
@@ -791,7 +792,10 @@ function ChatMessage({
       ) : null}
 
       {message.tools
-        ? Object.values(message.tools).map((tool, toolIndex) => (
+        ? Object.values(message.tools).map((snapshot, toolIndex) => {
+          const record = interactionRecords?.find(entry => entry.interactionId === snapshot.approvalRequestId);
+          const tool = { ...snapshot, approvalStatus: interactionApprovalStatus(record) || snapshot.approvalStatus };
+          return (
             <details
               key={`${tool.name}-${toolIndex}`}
               // Approval status is the user-facing source of truth. A tool
@@ -868,50 +872,11 @@ function ChatMessage({
                         MCP Server: {tool.serverLabel}
                       </div>
                     ) : null}
-                {tool.approvalStatus === 'pending' ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={isStreaming || tool.approvalStatus !== 'pending'}
-                        onClick={() =>
-                          tool.approvalProtocol === 'ag-ui'
-                            ? onRespondToAguiApproval?.({
-                                interruptId: tool.approvalRequestId || '',
-                                approve: true,
-                              })
-                            : onRespondToApproval({
-                                approvalRequestId: tool.approvalRequestId || '',
-                                approve: true,
-                                previousResponseId: tool.previousResponseId,
-                              })
-                        }
-                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        批准并继续
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isStreaming || tool.approvalStatus !== 'pending'}
-                        onClick={() =>
-                          tool.approvalProtocol === 'ag-ui'
-                            ? onRespondToAguiApproval?.({
-                                interruptId: tool.approvalRequestId || '',
-                                approve: false,
-                              })
-                            : onRespondToApproval({
-                                approvalRequestId: tool.approvalRequestId || '',
-                                approve: false,
-                                previousResponseId: tool.previousResponseId,
-                              })
-                        }
-                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-55 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        拒绝
-                      </button>
-                    </div>
-                    ) : (
+                    {tool.approvalStatus === 'pending' ? (
+                      <div data-slot="tool-approval-status" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        请在输入区确认面板中操作。
+                      </div>
+                    ) : tool.approvalStatus ? (
                       <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
                         {tool.approvalStatus === 'approved' ? (
                           <Check className="h-3.5 w-3.5 text-emerald-500" />
@@ -924,7 +889,7 @@ function ChatMessage({
                             ? '已取消'
                             : '已拒绝'}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 ) : null}
                 {tool.args ? (
@@ -939,7 +904,8 @@ function ChatMessage({
                 ) : null}
               </div>
             </details>
-          ))
+          );
+        })
         : null}
 
       {message.tools

@@ -5,12 +5,19 @@ const TOOL_STATUS_MAP = {
   paused: 'paused',
   approved: 'completed',
   denied: 'completed',
+  rejected: 'completed',
+  cancelled: 'completed',
+  expired: 'completed',
 };
 
 const APPROVAL_STATUS_MAP = {
+  pending: 'pending',
   paused: 'pending',
   approved: 'approved',
   denied: 'rejected',
+  rejected: 'rejected',
+  cancelled: 'cancelled',
+  expired: 'cancelled',
 };
 
 function parseTimestamp(value) {
@@ -63,7 +70,7 @@ function mapToolEvents(toolEvents) {
     }
     if (te.ApprovalRequestId) {
       entry.approvalRequestId = te.ApprovalRequestId;
-      entry.approvalStatus = APPROVAL_STATUS_MAP[String(te.Status ?? 'paused').toLowerCase()] ?? 'pending';
+      entry.approvalStatus = APPROVAL_STATUS_MAP[String(te.ApprovalStatus ?? te.Status ?? 'paused').toLowerCase()];
       entry.approvalProtocol = String(te.Protocol ?? '').toLowerCase() === 'ag-ui'
         ? 'ag-ui'
         : 'responses';
@@ -73,8 +80,9 @@ function mapToolEvents(toolEvents) {
     if (te.ToolCallId) {
       entry.previousResponseId = te.ToolCallId;
     }
-    // 仅同名多次时用 ToolCallId 分键；单工具和旧事件保持 name 键兼容。
-    const key = nameCounts.get(te.Name) > 1 && te.ToolCallId ? te.ToolCallId : te.Name;
+    // 同名多次时按调用/审批 ID 分键；单工具保持 name 键兼容。
+    const key = nameCounts.get(te.Name) > 1
+      ? te.ToolCallId || te.ApprovalRequestId || te.Name : te.Name;
     tools[key] = entry;
   }
   return tools;

@@ -46,6 +46,9 @@ export type { A2uiRenderMode } from './a2ui-validate.js';
 import { InteractionStore } from './store.js';
 import { interactionFromSessionEvent } from './adapters/session-events.js';
 import { interactionFromResponsesApproval } from './adapters/responses.js';
+import { restoreLegacyApprovals } from './legacy-history.js';
+import { interactionFromLegacyRuntimeEvent } from './adapters/legacy-runtime-events.js';
+import type { Message } from '../../components/chat/types.js';
 import { sessionEventRunStatus } from '../../utils/session-events.js';
 
 const RUN_TERMINAL_STATUSES = new Set([
@@ -55,7 +58,8 @@ const RUN_TERMINAL_STATUSES = new Set([
   'cancelled',
   'canceled',
   'aborted',
-  'interrupted',
+  // SDK 0.8.5 interrupts a run while it waits for approval. The interaction
+  // remains actionable until a decision or an actual terminal run fact.
   'resume_failed',
 ]);
 import { interactionFromAguiInterrupt } from './adapters/agui.js';
@@ -68,12 +72,18 @@ import type { Interaction } from './types.js';
  */
 export const sharedInteractionStore = new InteractionStore();
 
+/** Hydrate compatibility approvals after durable interaction events have been ingested. */
+export function ingestLegacyApprovalHistory(messages: readonly Message[], sessionId: string): void {
+  restoreLegacyApprovals(sharedInteractionStore, sessionId, messages);
+}
+
 /** Ingest an Interaction/v1 (or legacy) SessionEvent record/envelope. */
 export function ingestSessionEventRecord(
   raw: unknown,
   fallbackSessionId?: string,
 ): Interaction | null {
-  const interaction = interactionFromSessionEvent(raw, fallbackSessionId);
+  const interaction = interactionFromSessionEvent(raw, fallbackSessionId)
+    ?? interactionFromLegacyRuntimeEvent(raw, fallbackSessionId);
   if (interaction) {
     sharedInteractionStore.upsert(interaction);
   }
@@ -125,6 +135,7 @@ export function ingestApprovalRequestedEvent(event: {
   message?: string;
   args?: string;
   approvalLevel?: string;
+  previousResponseId?: string;
   sessionId?: string | null;
 }): Interaction | null {
   const sessionId = event.sessionId || '';
@@ -134,6 +145,7 @@ export function ingestApprovalRequestedEvent(event: {
       ? interactionFromAguiInterrupt({
           interruptId: event.approvalRequestId,
           sessionId,
+          runId: event.runId,
           name: event.name,
           message: event.message,
           reason: event.approvalLevel,
@@ -146,6 +158,7 @@ export function ingestApprovalRequestedEvent(event: {
           message: event.message,
           args: event.args,
           approvalLevel: event.approvalLevel,
+          previousResponseId: event.previousResponseId,
         });
   if (interaction) {
     sharedInteractionStore.upsert(interaction);

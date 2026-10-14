@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useMessageStore } from '../stores/message.js';
+import { useSessionStore } from '../stores/session.js';
 import {
   applyOptimisticFeedback,
   buildGetFeedbackPayload,
@@ -139,6 +140,10 @@ export function useFeedback(ctx: UseFeedbackContext) {
         options.previousResponseId,
       );
       if (!accepted) return false;
+      // Dispatch belongs to the originating session even if the user navigated
+      // while the HTTP request was pending. Its Interaction record is settled
+      // by the client; only patch the transcript while that session is visible.
+      if (useSessionStore.getState().currentSessionId !== currentSessionId) return true;
 
       // A terminal approval may arrive while submitDraft is awaiting dispatch.
       // Only update pending approvals (or legacy entries without a status).
@@ -183,7 +188,7 @@ export function useFeedback(ctx: UseFeedbackContext) {
       );
       return true;
     },
-    [isStreaming, submitDraft],
+    [currentSessionId, isStreaming, submitDraft],
   );
 
   return { submitResponseFeedback, deleteResponseFeedback, respondToApproval };
