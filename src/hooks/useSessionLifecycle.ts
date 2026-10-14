@@ -41,10 +41,12 @@ import type { Interaction } from '../core/interaction/types.js';
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
-// Tool-heavy Codex runs can make 500 canonical events exceed 600 KB. The
+// Tool-heavy runs can make 200 canonical events exceed half a MiB. The
 // durable Messages projection paints the readable transcript first; hydrate
 // a smaller newest-event window and page older runtime detail on upward scroll.
-const SESSION_EVENTS_PAGE_SIZE = 200;
+// A partial run keeps its complete Messages projection until enough canonical
+// events arrive; smaller detail pages therefore do not truncate visible text.
+const SESSION_EVENTS_PAGE_SIZE = 64;
 const SESSION_TRANSCRIPT_CACHE_SIZE = 8;
 const SESSION_METADATA_CACHE_SIZE = 128;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
@@ -1046,7 +1048,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     } };
     try {
       useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
-      const [messagePage, eventPage] = await Promise.all([
+      const [messageResult, eventResult] = await Promise.allSettled([
         canLoadOlderMessages
           ? readPreparedHistory(() => api.listSessionMessages(sessionId, {
               signal,
@@ -1079,6 +1081,20 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       ) {
         return;
       }
+      // A transient failure of supplemental canonical detail must not discard
+      // a successfully authorized Messages page. Keep its detail offset for a
+      // later explicit read. Authorization, source changes and cancellation
+      // still fail the operation before either result is applied.
+      const detailUnavailable = eventResult.status === 'rejected'
+        && eventResult.reason instanceof ApiError
+        && [429, 502, 503, 504].includes(eventResult.reason.code);
+      if (eventResult.status === 'rejected' && !detailUnavailable) throw eventResult.reason;
+      if (messageResult.status === 'rejected') throw messageResult.reason;
+      const messagePage = messageResult.value;
+      const eventPage = eventResult.status === 'fulfilled' ? eventResult.value : null;
+      const detailWarning = detailUnavailable
+        ? '消息正文已加载，部分事件详情暂时读取失败，请重试加载更早记录。'
+        : undefined;
       if (messagePage && !compatibleHistorySource({
         CursorSource: historyState.cursorSource,
         HistoryEpoch: historyState.historyEpoch,
@@ -1088,6 +1104,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       if (eventPage && cachedEvents && !compatibleHistorySource(eventCacheSource(cachedEvents), eventPage)) {
         throw reloadRequiredError();
       }
+      if (detailWarning) historyReadFailureRef.current = { generation, message: detailWarning };
+      else if (eventPage) historyReadFailureRef.current = null;
       const olderMessages = messagePage
         ? mapBackendMessages(messagePage.Messages) as Message[]
         : [];
@@ -1168,6 +1186,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           persistenceDegraded: messagePage.PersistenceDegraded ?? historyState.persistenceDegraded,
           snapshotSeqId: messagePage.SnapshotSeqId ?? historyState.snapshotSeqId,
         } : {}),
+        preparing: false,
+        error: detailWarning,
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {

@@ -238,7 +238,7 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('offset: cachedEvents.loadedCount');
     expect(lifecycleSource).toContain('loadedEventCount < totalEventCount');
     expect(lifecycleSource).toContain('rebuildPersistedSessionHistory(');
-    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 200');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 64');
     expect(lifecycleSource).toContain('SESSION_TRANSCRIPT_CACHE_SIZE = 8');
     expect(lifecycleSource).toContain('if (!cachedHistory) {');
     expect(lifecycleSource).toContain('setSessionInitialMessageHistoryLoading(sessionId, false)');

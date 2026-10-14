@@ -39,6 +39,99 @@ describe('history continuation and recovery', () => {
     useMessageStore.getState().setMessages([]);
   });
 
+  it('loads bounded event detail pages through the exact total while retaining readable text', async () => {
+    const page = { ...first, CursorSource: 'runtime', DataSource: 'runtime',
+      HistoryEpoch: 'durable', SnapshotSeqId: 150, HasMore: false, NextCursor: null };
+    const listSessionEvents = vi.fn(async (_session: string, options?: { offset?: number; limit?: number }) => {
+      const offset = options?.offset || 0;
+      const count = Math.min(options?.limit || 0, 150 - offset);
+      return { Events: Array.from({ length: count }, (_, index) => ({
+        EventId: `debug-${offset + index}`, SessionId: 's', EventType: 'diagnostic',
+        SeqId: 150 - offset - index, Content: {},
+      })), Total: 150, CursorSource: 'runtime', HistoryEpoch: 'durable', SnapshotSeqId: 150 };
+    });
+    const actions = mount({ listSessionMessages: vi.fn().mockResolvedValue(page), listSessionEvents });
+    await actions.loadSession('s');
+    await actions.loadOlderSessionMessages('s');
+    await actions.loadOlderSessionMessages('s');
+    expect(listSessionEvents.mock.calls.map(([, options]) => options)).toEqual([
+      expect.objectContaining({ offset: 0, limit: 64 }),
+      expect.objectContaining({ offset: 64, limit: 64, historyEpoch: 'durable', snapshotSeqId: 150 }),
+      expect.objectContaining({ offset: 128, limit: 64, historyEpoch: 'durable', snapshotSeqId: 150 }),
+    ]);
+    expect(useSessionStore.getState().messageHistory.s.hasMore).toBe(false);
+    expect(useMessageStore.getState().messages.map(message => message.content)).toEqual(['Old history']);
+  });
+
+  it.each([429, 502, 503, 504])('keeps a successful message page on detail error %i and retries only the unchanged detail offset', async (code) => {
+    const detail = { Events: [{ EventId: 'd1', SessionId: 's', EventType: 'diagnostic', SeqId: 12, Content: {} }],
+      Total: 2, CursorSource: 'control', HistoryEpoch: 'epoch-1', SnapshotSeqId: 0 };
+    const listSessionEvents = vi.fn().mockResolvedValueOnce(detail)
+      .mockRejectedValueOnce(new ApiError(code, 'unavailable'))
+      .mockResolvedValueOnce({ ...detail, Events: [{ ...detail.Events[0], EventId: 'd0', SeqId: 1 }] });
+    const listSessionMessages = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce({ ...first,
+      Messages: [{ MessageId: 'older', Role: 'assistant', Content: { text: 'Older body' }, SeqId: 2 }],
+      HasMore: false, NextCursor: null });
+    const actions = mount({ listSessionMessages, listSessionEvents });
+    await actions.loadSession('s');
+    await actions.loadOlderSessionMessages('s');
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['Older body', 'Old history']);
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({ nextCursor: null, hasMore: true,
+      error: expect.stringContaining('部分事件详情') });
+    expect(actions.historySearchSnapshot().error).toBeTruthy();
+    await actions.loadOlderSessionMessages('s');
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    expect(listSessionEvents.mock.calls.slice(1).map(([, options]) => options.offset)).toEqual([1, 1]);
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({ hasMore: false, error: undefined });
+    expect(actions.historySearchSnapshot().error).toBeUndefined();
+  });
+
+  it.each([401, 403, 404, 409])('does not apply a message page when detail authorization/source fails with %i', async (code) => {
+    const listSessionEvents = vi.fn().mockResolvedValueOnce({ Events: [{ EventId: 'd', EventType: 'diagnostic', Content: {} }],
+      Total: 2, CursorSource: 'control', HistoryEpoch: 'epoch-1', SnapshotSeqId: 0 })
+      .mockRejectedValueOnce(new ApiError(code, 'denied'));
+    const listSessionMessages = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce({ ...first,
+      Messages: [{ MessageId: 'denied', Role: 'assistant', Content: { text: 'Must not merge' }, SeqId: 1 }] });
+    const actions = mount({ listSessionMessages, listSessionEvents });
+    await actions.loadSession('s');
+    await actions.loadOlderSessionMessages('s');
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['Old history']);
+    expect(useSessionStore.getState().messageHistory.s.nextCursor).toBe(8);
+  });
+
+  it('reloads once for a detail epoch conflict before applying the successful message page', async () => {
+    const detail = { Events: [{ EventId: 'd', EventType: 'diagnostic', Content: {} }],
+      Total: 2, CursorSource: 'control', HistoryEpoch: 'epoch-1', SnapshotSeqId: 0 };
+    const listSessionEvents = vi.fn().mockResolvedValueOnce(detail)
+      .mockRejectedValueOnce(reloadRequired()).mockResolvedValueOnce(events);
+    const listSessionMessages = vi.fn().mockResolvedValueOnce(first)
+      .mockResolvedValueOnce({ ...first, Messages: [{ ...first.Messages[0], MessageId: 'stale',
+        Content: { text: 'Stale page' } }] })
+      .mockResolvedValueOnce({ ...first, HasMore: false, NextCursor: null,
+        Messages: [{ ...first.Messages[0], MessageId: 'fresh', Content: { text: 'Fresh page' } }] });
+    const actions = mount({ listSessionMessages, listSessionEvents });
+    await actions.loadSession('s');
+    await actions.loadOlderSessionMessages('s');
+    expect(listSessionMessages).toHaveBeenCalledTimes(3);
+    expect(listSessionMessages.mock.calls[2][1]).not.toHaveProperty('beforeSeqId');
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['Fresh page']);
+  });
+
+  it('ignores delayed detail failures and successful pages after switching sessions', async () => {
+    let fail!: (error: Error) => void;
+    const listSessionEvents = vi.fn().mockResolvedValueOnce({ Events: [{ EventId: 'd', Content: {} }],
+      Total: 2, CursorSource: 'control', HistoryEpoch: 'epoch-1', SnapshotSeqId: 0 })
+      .mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    const actions = mount({ listSessionMessages: vi.fn().mockResolvedValue(first), listSessionEvents });
+    await actions.loadSession('s');
+    const pending = actions.loadOlderSessionMessages('s');
+    actions.startNewConversation();
+    fail(new ApiError(504, 'late timeout'));
+    await pending;
+    expect(useMessageStore.getState().messages).toEqual([]);
+    expect(actions.historySearchSnapshot().error).toBeUndefined();
+  });
+
   it('records a cold history failure visibly without pretending the session is empty', async () => {
     const read = vi.fn().mockRejectedValue(new ApiError(504, 'timeout'));
     await mount({ listSessionMessages: read }).loadSession('s');
