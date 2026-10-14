@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- standalone browser fixture */
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CreateGroupDialog, TeamWorkspace } from '../../src/public/team-components.js';

@@ -24,7 +24,11 @@ type UseInteractionsContext = {
   interactionV1Enabled: boolean;
   onAcceptedInteraction?: (interaction: Interaction) => void;
   /** 0.3.1 fallback: official `mcp_approval_response` submission. */
-  legacyResponsesApproval?: (approvalRequestId: string, approve: boolean) => void;
+  legacyResponsesApproval?: (
+    approvalRequestId: string,
+    approve: boolean,
+    previousResponseId?: string,
+  ) => boolean | void | Promise<boolean | void>;
   /** 0.3.1 fallback: AG-UI `resumeAguiInterrupt`. */
   legacyAguiResume?: (
     interruptId: string,
@@ -93,7 +97,8 @@ export function useInteractions(ctx: UseInteractionsContext) {
       const interaction = currentSessionId
         ? sharedInteractionStore.get(currentSessionId, input.interactionId)
         : null;
-      return client.respond(input).then((receipt) => {
+      if (!currentSessionId) return Promise.reject(new Error('请先选择会话。'));
+      return client.respond({ ...input, sessionId: currentSessionId }).then((receipt) => {
         if (interactionV1Enabled && interaction
           && (receipt.status === 'accepted' || receipt.status === 'duplicate')) {
           onAcceptedInteraction?.(interaction);

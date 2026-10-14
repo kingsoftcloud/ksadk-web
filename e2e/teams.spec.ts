@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- fixture state is intentionally browser-injected */
 import { expect, test } from '@playwright/test';
 
 test('chat first, explicit details and graph, draft and focus survive the round trip', async ({ page }) => {

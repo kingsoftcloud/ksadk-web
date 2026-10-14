@@ -17,6 +17,7 @@ import type { Message } from './types';
 import type { ProcessingBlock, ThinkingBlock, ToolBlock, TextBlock } from '../../core/run/blocks';
 import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
 import type { Interaction } from '../../core/interaction/types';
+import { interactionApprovalStatus } from './approval-status.js';
 
 type ToolData = NonNullable<Message['tools']>[string];
 
@@ -25,7 +26,7 @@ export interface ProcessingBlocksViewProps {
   isStreaming: boolean;
   onRespondToApproval?: (p: { approvalRequestId: string; approve: boolean; previousResponseId?: string }) => void;
   onRespondToAguiApproval?: (p: { interruptId: string; approve: boolean }) => void;
-  /** Interaction/v1 records; when present the read-only anchor replaces inline approval buttons. */
+  /** Interaction/v1 records enrich the read-only approval status. */
   interactionRecords?: readonly Interaction[];
   className?: string;
 }
@@ -114,18 +115,12 @@ function ThinkingRow({ block }: { block: ThinkingBlock }) {
 function ToolRow({
   block,
   tool,
-  isStreaming,
   interactionRecord,
-  onRespondToApproval,
-  onRespondToAguiApproval,
 }: {
   block: ToolBlock;
   tool?: ToolData;
-  isStreaming: boolean;
   /** The composer tray owns all interaction decisions once normalized. */
   interactionRecord?: Interaction;
-  onRespondToApproval?: ProcessingBlocksViewProps['onRespondToApproval'];
-  onRespondToAguiApproval?: ProcessingBlocksViewProps['onRespondToAguiApproval'];
 }) {
   const status = tool?.status ?? block.status;
   const args = tool?.args ?? block.args;
@@ -133,23 +128,10 @@ function ToolRow({
   // 审批字段优先从 block.extra 读(approval_requested 同步写进 blocks,key=toolName 一致);
   // fallback 从 tool 读(旧路径,msg.tools 用 approvalRequestId 做 key 可能和 toolName 不一致。
   const extra = (block.extra || {}) as Record<string, unknown>;
-  const interactionApprovalStatus = interactionRecord?.outcome === 'cancelled'
-    || interactionRecord?.outcome === 'expired'
-    || interactionRecord?.status === 'cancelled'
-    || interactionRecord?.status === 'expired'
-    ? 'cancelled'
-    : interactionRecord?.outcome === 'rejected'
-      ? 'rejected'
-      : interactionRecord?.outcome === 'approved'
-        ? 'approved'
-        : undefined;
-  const approvalStatus = interactionApprovalStatus
+  const approvalStatus = interactionApprovalStatus(interactionRecord)
     || (extra.approvalStatus as string)
     || tool?.approvalStatus;
   const approvalRequestId = (extra.approvalRequestId as string) || tool?.approvalRequestId;
-  const approvalMessage = (extra.approvalMessage as string) || tool?.approvalMessage;
-  const approvalProtocol = (extra.approvalProtocol as string) || tool?.approvalProtocol;
-  const previousResponseId = (extra.previousResponseId as string) || tool?.previousResponseId;
   const running = status === 'running';
   const summary = String(extra.summary ?? tool?.summary ?? '').trim();
   const durationMs = Number(extra.durationMs ?? tool?.durationMs);
@@ -204,46 +186,8 @@ function ToolRow({
       }
     >
       <div className="flex flex-col gap-2.5 py-1 text-[13px]">
-        {approvalRequestId && approvalStatus === 'pending' && !interactionRecord && (
-          <section
-            data-slot="tool-approval-card"
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--ksadk-approval-border)] bg-[var(--ksadk-approval-background)] px-2.5 py-2 font-sans text-[12px] text-[var(--ksadk-approval-foreground)] shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ksadk-approval-foreground)]" aria-hidden="true" />
-              <span className="shrink-0 font-medium">需要确认</span>
-              <span className="min-w-0 truncate opacity-75">{approvalMessage || '允许后将执行此工具调用。'}</span>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={isStreaming}
-                  onClick={() =>
-                    approvalProtocol === 'ag-ui'
-                      ? onRespondToAguiApproval?.({ interruptId: approvalRequestId || '', approve: true })
-                      : onRespondToApproval?.({ approvalRequestId: approvalRequestId || '', approve: true, previousResponseId })
-                  }
-                  className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[12px] font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-55"
-                >
-                  允许执行
-                </button>
-                <button
-                  type="button"
-                  disabled={isStreaming}
-                  onClick={() =>
-                    approvalProtocol === 'ag-ui'
-                      ? onRespondToAguiApproval?.({ interruptId: approvalRequestId || '', approve: false })
-                      : onRespondToApproval?.({ approvalRequestId: approvalRequestId || '', approve: false, previousResponseId })
-                  }
-                  className="inline-flex h-7 items-center rounded-md px-2 text-[12px] font-medium text-slate-500 transition hover:bg-slate-100 hover:text-rose-600 disabled:opacity-55 dark:text-slate-400 dark:hover:bg-slate-800"
-                >
-                  拒绝
-                </button>
-            </div>
-          </section>
-        )}
-        {approvalRequestId && approvalStatus === 'pending' && interactionRecord ? (
-          <div className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
+        {approvalRequestId && approvalStatus === 'pending' ? (
+          <div data-slot="tool-approval-status" className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
             请在输入区确认面板中操作。
           </div>
@@ -448,9 +392,6 @@ function TextRow({ block }: { block: TextBlock }) {
 
 export function ProcessingBlocksView({
   message,
-  isStreaming,
-  onRespondToApproval,
-  onRespondToAguiApproval,
   interactionRecords,
   className,
 }: ProcessingBlocksViewProps) {
@@ -463,9 +404,13 @@ export function ProcessingBlocksView({
         }
         if (block.type === 'tool') {
           const blockExtra = (block.extra || {}) as Record<string, unknown>;
+          const tool = message.tools?.[block.toolName]
+            || Object.values(message.tools || {}).find(entry =>
+              (blockExtra.approvalRequestId && entry.approvalRequestId === blockExtra.approvalRequestId)
+              || (blockExtra.callId && entry.callId === blockExtra.callId));
           const approvalId = String(
             blockExtra.approvalRequestId
-            || message.tools?.[block.toolName]?.approvalRequestId
+            || tool?.approvalRequestId
             || '',
           );
           const callId = String(
@@ -482,11 +427,8 @@ export function ProcessingBlocksView({
             <div key={block.id}>
               <ToolRow
                 block={block}
-                tool={message.tools?.[block.toolName]}
-                isStreaming={isStreaming}
+                tool={tool}
                 interactionRecord={record}
-                onRespondToApproval={onRespondToApproval}
-                onRespondToAguiApproval={onRespondToAguiApproval}
               />
               {record ? <InteractionHistoryAnchor interaction={record} /> : null}
             </div>

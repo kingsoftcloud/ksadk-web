@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Unify tool approval actions above the composer, leaving read-only status in the timeline. Restore legacy Responses/AG-UI approvals from history without reviving terminal decisions, and scope submissions to the active session.
+- Confirm legacy Responses approval dispatch only after the HTTP request is accepted. Failed or cancelled dispatch keeps the approval retryable without waiting for the output stream to finish.
+- Refresh the visible send queue when switching between unbound drafts, while retaining each background queue under its original conversation owner.
+- Fix strict TypeScript and React lint errors while preserving Teams schema validation and current-session cancellation checks. CI now checks application types, lint, Node tests, library builds, and browser interaction ownership on feature branches.
+- Preserve a newly opened local draft when delayed session lists or refreshes return older conversations; create its server session on first send.
+
 ## 0.3.8 - 2026-09-11
 
 - Add the componentized Agent Teams contracts, client, workspace components,

@@ -35,7 +35,7 @@ describe('transcript order independent of wall clocks', () => {
     expect(ids(rebuildPersistedSessionHistory(input, [], 's').messages)).toEqual(['q1', 'a1', 'q2', 'a2']);
   });
   it('keeps the endpoint order for legacy rows without sequences', () => {
-    const input = rounds().map(({ historyOrder, ...row }) => row);
+    const input = rounds().map(message => { const row = { ...message }; delete row.historyOrder; return row; });
     expect(ids(rebuildPersistedSessionHistory(input, [], 's').messages)).toEqual(ids(input));
   });
   it('places activities beside their owning row and keeps ordered tool blocks/call IDs', () => {
@@ -95,7 +95,7 @@ describe('history/live merge', () => {
     expect(ids(mergeHistoryWithLive(rounds(), baseline, current))).toEqual(['q1', 'a1', 'q2', 'canonical']);
   });
   it('keeps the authoritative position of an updated legacy row without a run ID', () => {
-    const baseline = rounds().map(({ invocationId, ...m }) => m);
+    const baseline = rounds().map(message => { const row = { ...message }; delete row.invocationId; return row; });
     const current = baseline.map(m => m.id === 'a1' ? { ...m, content: 'updated', historyOrder: undefined } : m);
     expect(ids(mergeHistoryWithLive(baseline, baseline, current))).toEqual(['q1', 'a1', 'q2', 'a2']);
   });

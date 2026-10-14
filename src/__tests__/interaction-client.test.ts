@@ -194,6 +194,118 @@ describe('single submit path', () => {
     expect(submitInteraction).not.toHaveBeenCalled();
   });
 
+  it('keeps a Responses approval actionable when the legacy callback declines dispatch', async () => {
+    const submitInteraction = vi.fn();
+    const legacyResponsesApproval = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction,
+      legacyResponsesApproval,
+    });
+    client.ingest(FIXTURES.responses!);
+
+    const first = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+
+    expect(first.status).toBe('rejected');
+    expect(client.store.get('session-1', 'int-1')).toMatchObject({
+      status: 'failed',
+      extensions: {
+        submit_error: {
+          code: 'interaction_not_dispatched',
+          retryable: true,
+        },
+      },
+    });
+    expect(client.store.listAll('session-1')).toHaveLength(1);
+
+    const retry = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    expect(retry.status).toBe('accepted');
+    expect(legacyResponsesApproval).toHaveBeenCalledTimes(2);
+    expect(client.store.get('session-1', 'int-1')).toMatchObject({
+      status: 'resolved',
+      outcome: 'approved',
+    });
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it('treats an asynchronous false legacy result as a retryable failed submit', async () => {
+    const legacyResponsesApproval = vi.fn().mockResolvedValue(false);
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction: vi.fn(),
+      legacyResponsesApproval,
+    });
+    client.ingest(FIXTURES.responses!);
+
+    const receipt = await client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'reject',
+      response: { approved: false },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+
+    expect(receipt.status).toBe('rejected');
+    expect(client.store.get('session-1', 'int-1')).toMatchObject({
+      status: 'failed',
+      extensions: {
+        submit_error: {
+          code: 'interaction_not_dispatched',
+          retryable: true,
+        },
+      },
+    });
+  });
+
+  it('preserves a server terminal decision that arrives during an async legacy submit', async () => {
+    let finish!: (accepted: boolean) => void;
+    const legacyResponsesApproval = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const client = new InteractionClientImpl({
+      agentId: 'agent-1',
+      submitInteraction: vi.fn(),
+      legacyResponsesApproval,
+    });
+    client.ingest(FIXTURES.responses!);
+
+    const responding = client.respond({
+      interactionId: 'int-1',
+      expectedRevision: 1,
+      action: 'approve',
+      response: { approved: true },
+      idempotencyKey: interactionIdempotencyKey('int-1', 1),
+    });
+    client.ingest({
+      ...FIXTURES.responses!,
+      status: 'resolved',
+      outcome: 'rejected',
+      revision: 2,
+      actor: 'other-user',
+      resolvedAt: '2026-08-19T00:01:00Z',
+    });
+    finish(true);
+    expect((await responding).status).toBe('accepted');
+    expect(client.store.get('session-1', 'int-1')).toMatchObject({
+      status: 'resolved',
+      outcome: 'rejected',
+      revision: 2,
+      actor: 'other-user',
+    });
+  });
+
   it('routes AG-UI records through resumeAguiInterrupt without SubmitInteraction', async () => {
     const submitInteraction = vi.fn();
     const legacyAguiResume = vi.fn().mockReturnValue(true);

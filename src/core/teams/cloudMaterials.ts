@@ -53,7 +53,12 @@ export class CloudMaterialUpload {
   private snapshot = initial();
   private selection: Selection | null = null;
   private listeners = new Set<() => void>();
-  constructor(private readonly port: CloudMaterialPort, private readonly scope: CloudMaterialScope) {}
+  private readonly port: CloudMaterialPort;
+  private readonly scope: CloudMaterialScope;
+  constructor(port: CloudMaterialPort, scope: CloudMaterialScope) {
+    this.port = port;
+    this.scope = scope;
+  }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(patch: Partial<CloudMaterialSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; for (const listener of this.listeners) listener(); }

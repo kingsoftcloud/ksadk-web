@@ -38,11 +38,12 @@ export const teamsEffectReconcileInputSchema = z.strictObject({
   decision: z.enum(['confirmed_applied', 'confirmed_not_applied', 'accept_risk']),
   evidenceRef: id, reason: length(1, 1000), idempotencyKey: operationKey,
 });
+const projectionOutcomeSchema = teamsEffectOutcomeSchema.required();
 const resolutionSchema = z.strictObject({
   resolutionId: id, expectedRevision: revision, expectedEvidenceDigest: digest,
   decision: z.enum(['confirmed_applied', 'confirmed_not_applied', 'accept_risk']), evidenceRef: id,
   reason: length(1, 1000), kind: z.enum(['manual_risk_acceptance', 'external_evidence']),
-  actorSubject: id, ownerScopeRef: id, verifiedOutcome: teamsEffectOutcomeSchema.nullable(),
+  actorSubject: id, ownerScopeRef: id, verifiedOutcome: projectionOutcomeSchema.nullable(),
 }).refine(value => value.decision === 'accept_risk'
   ? value.kind === 'manual_risk_acceptance' && value.verifiedOutcome === null
   : value.kind === 'external_evidence' && value.verifiedOutcome?.phase === (value.decision === 'confirmed_applied' ? 'completed' : 'failed'), 'effect_resolution_not_verified');
@@ -50,7 +51,7 @@ const resolutionSchema = z.strictObject({
 // lengths/identifier rules instead of JavaScript UTF-16 length approximations.
 export const teamsEffectProjectionSchema = cloudEffectSchema.safeExtend({
   effectKey: id, groupId: id, teamRunId: id, toolName: id,
-  resolution: resolutionSchema.nullable(), outcome: teamsEffectOutcomeSchema.nullable(),
+  resolution: resolutionSchema.nullable(), outcome: projectionOutcomeSchema.nullable(),
 });
 export const teamsEffectProjectionPageSchema = cloudEffectPageSchema.safeExtend({
   scope: z.strictObject({ authorityId: length(1, 256), ownerScopeRef: length(1, 512), groupId: length(1, 256) }),

@@ -74,7 +74,7 @@ function bootstrap() {
 }
 
 async function installFixture(page) {
-  const state = { approved: false, created: false, aguiBodies: [] };
+  const state = { approved: false, created: false, started: false, aguiBodies: [] };
 
   // AG-UI is the intended transport in this fixture. Explicitly advertise
   // canonical ConversationSurface absence so production fallback semantics
@@ -90,6 +90,7 @@ async function installFixture(page) {
   await page.route('**/agentengine/agui', async (route) => {
     const body = route.request().postDataJSON();
     state.aguiBodies.push(body);
+    state.started = true;
     const isResume = Array.isArray(body.resume) && body.resume.length > 0;
     const events = isResume
       ? [
@@ -167,7 +168,9 @@ async function installFixture(page) {
             Content: { text: '审批已完成。' },
           },
         ]
-      : [];
+      : state.started ? [{ MessageId: 'assistant-approval', Role: 'assistant', InvocationId: 'run-original',
+          Content: { text: '需要人工确认。' }, ToolEvents: [{ Name: 'write_file', Status: 'paused',
+            ApprovalRequestId: 'approval-write', Protocol: 'ag-ui', Args: { path: 'demo.txt' } }] }] : [];
     const payloadByAction = {
       GetAgentUiBootstrap: bootstrap(),
       ListSessions: {
@@ -236,4 +239,28 @@ test('projects AG-UI activity, resumes approval, and replays terminal state', as
   await expect(composer).toBeInViewport();
   await expect(page.getByText('E2E 状态卡')).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('legacy AG-UI approval restores above the composer after refresh and resumes once', async ({ page }) => {
+  const fixture = await installFixture(page);
+  await page.goto('/');
+  const composer = page.getByPlaceholder('发送消息…');
+  await composer.fill('请写入 demo.txt');
+  await composer.press('Enter');
+  await expect(page.getByTestId('interaction-tray')).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(1);
+  await expect(page.locator('[data-slot="tool-approval-status"]')).toHaveCount(1);
+  await expect(page.locator('[data-slot="message-list"]').getByRole('button', { name: /允许执行|批准并继续|^拒绝$/ })).toHaveCount(0);
+  expect(fixture.aguiBodies).toHaveLength(1);
+  await page.getByTestId('interaction-approve').dblclick();
+  await expect.poll(() => fixture.aguiBodies.length).toBe(2);
+  expect(fixture.aguiBodies[1].resume).toEqual([{ interruptId: 'approval-write', status: 'resolved', payload: { decision: 'approve' } }]);
+  await expect(page.getByText('审批已完成。')).toBeVisible();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  fixture.approved = true;
+  await page.reload();
+  await expect(page.getByText('审批已完成。')).toBeVisible();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  expect(fixture.aguiBodies).toHaveLength(2);
 });

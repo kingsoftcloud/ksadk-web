@@ -6,6 +6,7 @@ export type SessionEventRecord = {
   SessionId?: string;
   InvocationId?: string;
   Content?: {
+    session_event?: Record<string, unknown>;
     role?: string;
     status?: string;
     detail?: string;

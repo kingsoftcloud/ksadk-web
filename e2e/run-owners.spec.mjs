@@ -14,6 +14,28 @@ test.beforeEach(async ({ page }) => {
   await expect.poll(async () => (await selection(page)).status).toBe('ready');
 });
 
+test('an empty new draft hides the previous unbound draft queue without discarding it', async ({ page }) => {
+  await send(page, 'A first');
+  await send(page, 'A queued');
+  await expect(page.getByText('发送队列 · 1', { exact: true })).toBeVisible();
+  const draftA = (await selection(page)).conversationId;
+  await click(page, 'New conversation');
+  const draftB = (await selection(page)).conversationId;
+  expect(draftB).not.toBe(draftA);
+  expect(await selection(page)).toMatchObject({ sessionId: null, isStreaming: false });
+  await expect(page.getByText('A queued', { exact: true })).toHaveCount(0);
+  expect((await audit(page)).creations).toHaveLength(1);
+
+  await click(page, 'Resolve creation 1');
+  await expect.poll(async () => (await audit(page)).runs.length).toBe(1);
+  await click(page, 'Finish run 1');
+  await expect.poll(async () => (await audit(page)).runs.length).toBe(2);
+  expect((await audit(page)).runs[1]).toMatchObject({ sessionId: 'native-1', text: 'A queued' });
+  expect(await selection(page)).toMatchObject({ conversationId: draftB, sessionId: null });
+  await expect(page.getByText('A queued', { exact: true })).toHaveCount(0);
+  await click(page, 'Finish run 2');
+});
+
 test('four drafts bind in reverse order; background queue and cancellation keep their owner', async ({ page }, testInfo) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

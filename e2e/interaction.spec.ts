@@ -180,7 +180,11 @@ async function installFixture(page, state, options = {}) {
       return;
     }
 
-    const events = typeof state.events === 'function' ? state.events() : state.events;
+    const sessionId = route.request().postDataJSON()?.SessionId
+      || new URL(route.request().url()).searchParams.get('SessionId') || SESSION_ID;
+    const events = typeof state.events === 'function' ? state.events(sessionId) : state.events;
+    const sessions = state.sessions || (state.sessionCreated
+      ? [{ SessionId: SESSION_ID, AgentId: AGENT_ID, Title: 'Interaction fixture' }] : []);
     const payloadByAction = {
       GetAgentUiBootstrap: {
         ...bootstrap(options.interactionV1 !== false, options.executionModes === true),
@@ -189,19 +193,17 @@ async function installFixture(page, state, options = {}) {
         } } : {}),
       },
       ListSessions: {
-        Sessions: state.sessionCreated
-          ? [{ SessionId: SESSION_ID, AgentId: AGENT_ID, Title: 'Interaction fixture' }]
-          : [],
-        Total: state.sessionCreated ? 1 : 0,
+        Sessions: sessions,
+        Total: sessions.length,
         Page: 1,
         PageSize: 30,
       },
       ListAgentModels: { Models: [{ id: 'fixture-model', display_name: 'Fixture Model' }] },
       CreateSession: { Session: { SessionId: SESSION_ID, AgentId: AGENT_ID } },
-      GetSession: { Session: { SessionId: SESSION_ID, AgentId: AGENT_ID, ActiveRunStatus: '' } },
+      GetSession: { Session: { SessionId: sessionId, AgentId: AGENT_ID, ActiveRunStatus: '' } },
       ListSessionEvents: { Events: events, Total: events.length },
       ListSessionMessages: {
-        Messages: typeof state.history === 'function' ? state.history() : (state.history || []),
+        Messages: typeof state.history === 'function' ? state.history(sessionId) : (state.history || []),
         LatestSeqId: 0,
         HasMore: false,
         NextCursor: null,
@@ -240,12 +242,126 @@ function historyWithApproval(status = 'paused') {
 
 async function createSession(page) {
   await page.goto('/');
-  await expect(page.getByText('Interaction Fixture')).toBeVisible();
+  await expect(page.getByText('Interaction Fixture', { exact: true })).toBeVisible();
   const composer = page.getByPlaceholder('发送消息…');
   await composer.fill('hello');
   await composer.press('Enter');
   await expect(page.getByText('运行完成。')).toBeVisible();
 }
+
+async function expectComposerApprovalOnly(page) {
+  const tray = page.getByTestId('interaction-tray');
+  await expect(tray).toHaveCount(1);
+  await expect(tray).toBeVisible();
+  const timeline = page.locator('[data-slot="message-list"]');
+  await expect(timeline.getByRole('button', { name: /允许执行|批准并继续|^拒绝$/ })).toHaveCount(0);
+  await expect(timeline.locator('[data-slot="tool-approval-card"]')).toHaveCount(0);
+  const trayBounds = await tray.boundingBox();
+  const composerBounds = await page.locator('[data-slot="composer"]').boundingBox();
+  expect(trayBounds).not.toBeNull();
+  expect(composerBounds).not.toBeNull();
+  expect(trayBounds.y + trayBounds.height).toBeLessThanOrEqual(composerBounds.y + 1);
+}
+
+for (const protocol of ['mcp', 'ksadk']) {
+  test(`legacy ${protocol} approval stays above composer across reload, submits once, and stays resolved`, async ({ page }) => {
+    const state = { submits: [], resolvedIds: new Set(), sessionCreated: false, events: [], status: 'paused', approvals: [] };
+    state.history = () => [{ ...historyWithApproval(state.status)()[0], ResponseId: 'response-original' }];
+    await installFixture(page, state, { interactionV1: false });
+    await page.route('**/agentengine/api/v1/RunAgent', async route => {
+      const body = route.request().postDataJSON();
+      const approval = Array.isArray(body.ResponsesInput) && body.ResponsesInput.find(item => item.type === 'mcp_approval_response');
+      if (approval) {
+        state.approvals.push(body);
+        state.status = approval.approve ? 'approved' : 'denied';
+      }
+      const request = protocol === 'mcp'
+        ? { type: 'response.output_item.done', item: { type: 'mcp_approval_request', id: 'int-1',
+            name: 'write_file', arguments: '{"path":"demo.txt"}' } }
+        : { type: 'response.ksadk.approval_request', interrupt_info: { approval_request_id: 'int-1',
+            action_requests: [{ name: 'write_file', args: { path: 'demo.txt' } }] } };
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse(approval
+        ? [{ type: 'response.completed', output_text: '审批已处理。', status: 'completed' }]
+        : [{ type: 'response.created', response: { id: 'response-original' } }, request,
+            { type: 'response.incomplete', response: { id: 'response-original', status: 'incomplete' } }]) });
+    });
+    await page.goto('/');
+    const composer = page.getByPlaceholder('发送消息…');
+    await composer.fill('执行工具');
+    await composer.press('Enter');
+    await expectComposerApprovalOnly(page);
+    await page.reload();
+    await expectComposerApprovalOnly(page);
+    await expect(page.locator('[data-slot="tool-approval-status"]')).toHaveCount(1);
+    if (protocol === 'mcp') await page.screenshot({ path: test.info().outputPath('approval-above-composer.png') });
+    expect(state.approvals).toHaveLength(0);
+    await page.getByTestId(protocol === 'mcp' ? 'interaction-approve' : 'interaction-reject').dblclick();
+    await expect.poll(() => state.approvals.length).toBe(1);
+    expect(state.approvals[0]).toMatchObject({ SessionId: SESSION_ID, PreviousResponseId: 'response-original',
+      ResponsesInput: [{ type: 'mcp_approval_response', approval_request_id: 'int-1', approve: protocol === 'mcp' }] });
+    await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByText('需要人工确认。')).toBeVisible();
+    await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+    expect(state.approvals).toHaveLength(1);
+    expect(state.submits).toHaveLength(0);
+  });
+}
+
+test('session switching isolates identical legacy approval IDs and never revives a processed decision', async ({ page }) => {
+  const otherSession = 'session-other';
+  const state = { submits: [], resolvedIds: new Set(), sessionCreated: true, events: [], approvals: [],
+    sessions: [{ SessionId: SESSION_ID, Title: '审批会话 A' }, { SessionId: otherSession, Title: '审批会话 B' }],
+    statuses: { [SESSION_ID]: 'paused', [otherSession]: 'paused' } };
+  state.history = sessionId => [{ ...historyWithApproval(state.statuses[sessionId])()[0],
+    ResponseId: `response-${sessionId}`, Content: { text: `历史 ${sessionId}` } }];
+  await installFixture(page, state, { interactionV1: false });
+  await page.route('**/agentengine/api/v1/RunAgent', async route => {
+    const body = route.request().postDataJSON();
+    state.approvals.push(body);
+    state.statuses[body.SessionId] = 'approved';
+    await route.fulfill({ status: 200, contentType: 'text/event-stream',
+      body: sse([{ type: 'response.completed', status: 'completed', output_text: '处理完成。' }]) });
+  });
+  await page.goto('/');
+  await page.getByText('审批会话 A', { exact: true }).click();
+  await expectComposerApprovalOnly(page);
+  await page.getByText('审批会话 B', { exact: true }).click();
+  await expect(page.getByText(`历史 ${otherSession}`, { exact: true })).toBeVisible();
+  await expectComposerApprovalOnly(page);
+  await page.getByText('审批会话 A', { exact: true }).click();
+  await expect(page.getByText(`历史 ${SESSION_ID}`, { exact: true })).toBeVisible();
+  await expectComposerApprovalOnly(page);
+  expect(state.approvals).toHaveLength(0);
+  await page.getByTestId('interaction-approve').click();
+  await expect.poll(() => state.approvals.length).toBe(1);
+  expect(state.approvals[0]).toMatchObject({ SessionId: SESSION_ID, PreviousResponseId: `response-${SESSION_ID}` });
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  // The other session still has its own pending decision despite the shared ID.
+  await page.getByText('审批会话 B', { exact: true }).click();
+  await expectComposerApprovalOnly(page);
+  await page.getByText('审批会话 A', { exact: true }).click();
+  await expect(page.getByText(`历史 ${SESSION_ID}`, { exact: true })).toBeVisible();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText(`历史 ${SESSION_ID}`, { exact: true })).toBeVisible();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  expect(state.approvals).toHaveLength(1);
+});
+
+test('different historical and current IDs never create approval actions in the body', async ({ page }) => {
+  const state = { submits: [], resolvedIds: new Set(), sessionCreated: true,
+    events: [requestedEvent({ interactionId: 'int-new' })], history: historyWithApproval() };
+  await installFixture(page, state);
+  await page.goto('/');
+  await expectComposerApprovalOnly(page);
+  // Both outstanding IDs remain distinct in a single tray queue; no name-based guessing.
+  await expect(page.getByTestId('interaction-tray-count')).toContainText('2');
+  await page.reload();
+  await expectComposerApprovalOnly(page);
+  await expect(page.getByTestId('interaction-tray-count')).toContainText('2');
+  expect(state.submits).toHaveLength(0);
+});
 
 test('approve sends exactly one SubmitInteraction and replay never resubmits', async ({ page }) => {
   const state = {
@@ -750,4 +866,53 @@ test('native multi-select preserves custom feedback and Enter never submits an e
   await expect.poll(() => state.submits.length).toBe(1);
   expect(state.submits[0].Action).toBe('submit');
   expect(state.submits[0].Response).toEqual({ scope: ['前端', '服务端', '请改成 echo 你好'] });
+});
+
+test('SDK 0.8.5 runtime history restores one legacy approval through interruption and terminal replay', async ({ page }) => {
+  const id = 'native-approval';
+  const native = (type, seq, extra = {}) => ({
+    SessionId: SESSION_ID, InvocationId: 'native-run', EventType: type, SeqId: seq,
+    Content: { runtime_event: {
+      schema_version: 2, event_type: type, run_id: 'native-run', timestamp: 1791967072 + seq,
+      source: { framework: 'langgraph' }, ...extra,
+    } },
+  });
+  const detail = { approval_request_id: id, tool_name: 'start_spark_sql_query',
+    action_requests: [{ name: 'start_spark_sql_query', args: { plan_id: 'plan-test' } }] };
+  const requested = native('interaction.requested', 11, {
+    interaction_id: id, interaction_kind: 'approval',
+    request: { request_type: 'approval', kind: 'tool', detail },
+  });
+  const interrupted = native('run.interrupted', 12, { status: 'interrupted', reason: 'input_required' });
+  const state = { submits: [], resolvedIds: new Set(), sessionCreated: false, events: [interrupted, requested], approvals: [] };
+  await installFixture(page, state, { interactionV1: false });
+  await page.route('**/agentengine/api/v1/RunAgent', async route => {
+    const body = route.request().postDataJSON();
+    const approval = Array.isArray(body.ResponsesInput) && body.ResponsesInput.find(x => x.type === 'mcp_approval_response');
+    if (approval) {
+      state.approvals.push(body);
+      state.events = [native('interaction.resolved', 13, { interaction_id: id,
+        interaction_kind: 'approval', response: { response_type: 'approval', decision: 'approved' } }), ...state.events];
+    }
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse(approval
+      ? [{ type: 'response.completed', output_text: '原生审批已处理。', status: 'completed' }]
+      : [{ type: 'response.ksadk.approval_request', interrupt_info: detail },
+          { type: 'response.incomplete', response: { id: 'native-response', status: 'incomplete' } }]) });
+  });
+  await page.goto('/');
+  await page.getByPlaceholder('发送消息…').fill('原生审批验证');
+  await page.getByPlaceholder('发送消息…').press('Enter');
+  await expectComposerApprovalOnly(page);
+  await page.reload();
+  await expectComposerApprovalOnly(page);
+  expect(state.approvals).toHaveLength(0);
+  await page.getByTestId('interaction-approve').dblclick();
+  await expect.poll(() => state.approvals.length).toBe(1);
+  expect(state.approvals[0].ResponsesInput).toEqual([{ type: 'mcp_approval_response', approval_request_id: id, approve: true }]);
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('Interaction Fixture', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  expect(state.approvals).toHaveLength(1);
+  expect(state.submits).toHaveLength(0);
 });

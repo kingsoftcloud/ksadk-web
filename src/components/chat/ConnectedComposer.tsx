@@ -35,7 +35,7 @@ export type ConnectedComposerProps = {
     responsesInput?: unknown,
     previousResponseId?: string,
     executionMode?: RuntimeExecutionMode,
-  ) => Promise<void>;
+  ) => Promise<boolean | void>;
   stopGeneration: () => void;
   cancelRemote?: () => void;
   isMobile: boolean;

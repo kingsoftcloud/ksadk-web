@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- standalone browser fixture */
 import { useMemo, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChatMessageList } from '../../src/public/chat-timeline.js';

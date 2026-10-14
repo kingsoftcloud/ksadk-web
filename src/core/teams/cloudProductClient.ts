@@ -134,7 +134,7 @@ export class HttpCloudTeamsProductClient implements TeamsOperationTransport, Clo
   async createMaterial(scope: CloudMaterialScope, input: TeamsMaterialCreateInput, signal: AbortSignal): Promise<CloudMaterial> {
     if (scope.origin !== this.origin) throw new TeamsError('scope_mismatch', '材料来源不一致。');
     const payload = teamsMaterialCreateSchema.parse(input);
-    return verifyCloudMaterial(await this.json(`${this.teamsBase}/materials`, signal, scope, payload), scope, { kind: payload.kind, entries: payload.entries, ...(payload.sourceCommit ? { sourceCommit: payload.sourceCommit } : {}) });
+    return verifyCloudMaterial(await this.json(`${this.teamsBase}/materials`, signal, scope, payload), scope, { kind: payload.kind, entries: payload.entries, sourceCommit: payload.sourceCommit });
   }
   async uploadMaterialBlob(scope: CloudMaterialScope, raw: CloudMaterial, entry: CloudMaterialEntry, file: Blob, signal: AbortSignal): Promise<void> {
     if (scope.origin !== this.origin) throw new TeamsError('scope_mismatch', '材料来源不一致。');

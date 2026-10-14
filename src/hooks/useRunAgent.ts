@@ -44,6 +44,8 @@ type RunAgentContext = {
   onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
   /** Stable owner before native creation. Omit for the legacy Hosted shell. */
   conversationIdRef?: React.MutableRefObject<ConversationId | undefined>;
+  /** Reactive selected owner, including null-to-null native draft switches. */
+  conversationId?: ConversationId;
   waitForPendingSessionCreation?: () => Promise<string | null>;
   /** `null` keeps an embedded host on the legacy action transport. */
   conversationClient?: ConversationClient | null;
@@ -93,6 +95,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     thinkingMode,
     permissionMode,
     currentSessionIdRef,
+    conversationIdRef,
     queuedDraftRef,
     onRunSettled,
     onSessionCreated,
@@ -162,14 +165,14 @@ export function useRunAgent(ctx: RunAgentContext) {
   }, [publishQueue]);
 
   useEffect(() => {
-    const key = JSON.stringify([agentId, ctx.conversationIdRef?.current || ctx.currentSessionId || 'new-session']);
+    const key = JSON.stringify([agentId, ctx.conversationId || conversationIdRef?.current || ctx.currentSessionId || 'new-session']);
     const owner = ownersRef.current.get(key);
     if (owner) publishQueue(owner);
     else {
       queuedDraftRef.current = [];
       useUIStore.getState().setQueuedDrafts([]);
     }
-  }, [agentId, ctx.currentSessionId, ctx.conversationIdRef?.current, publishQueue, queuedDraftRef]);
+  }, [agentId, ctx.currentSessionId, ctx.conversationId, conversationIdRef, publishQueue, queuedDraftRef]);
 
   const appendOptimisticMessage = useCallback((draft: Pick<QueuedDraft, 'text' | 'attachments'>) => {
     const trimmedText = draft.text.trim();
@@ -216,8 +219,8 @@ export function useRunAgent(ctx: RunAgentContext) {
     draftText: string, draftAttachments: File[], responsesInput?: unknown,
     previousResponseId?: string, executionMode?: RuntimeExecutionMode,
     outboxRequestId?: string,
-  ) => {
-    if (outboxRequestId && outboxRequestsRef.current.has(outboxRequestId)) return;
+  ): Promise<boolean> => {
+    if (outboxRequestId && outboxRequestsRef.current.has(outboxRequestId)) return false;
     // Capture the owner before the first await. Navigation can happen while a
     // legacy CreateSession or an attachment upload is still pending.
     const owner = getOwner();
@@ -226,7 +229,9 @@ export function useRunAgent(ctx: RunAgentContext) {
       text: draftText, attachments: [...draftAttachments], responsesInput, previousResponseId, executionMode,
       optimisticMessageId: appendOptimisticMessage({ text: draftText, attachments: draftAttachments }),
     };
-    const ledger = owner.conversationId && outbox ? outbox : undefined;
+    // Legacy approval/resume inputs are tracked by the interaction store, not
+    // the text outbox, which cannot persist their protocol payload for replay.
+    const ledger = responsesInput === undefined && owner.conversationId && outbox ? outbox : undefined;
     const outboxEntry = owner.conversationId && ledger
       ? ledger.enqueue({
           requestId: outboxRequestId,
@@ -251,6 +256,11 @@ export function useRunAgent(ctx: RunAgentContext) {
       throw error;
     }
     if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
+
+    let confirmDispatch: ((accepted: boolean) => void) | undefined;
+    const dispatch = responsesInput !== undefined
+      ? new Promise<boolean>(resolve => { confirmDispatch = resolve; })
+      : null;
 
     const launch = (): boolean => {
       if (owner.engine.stage !== 'idle') return false;
@@ -293,6 +303,7 @@ export function useRunAgent(ctx: RunAgentContext) {
           if (wasVisible) writePersistedSessionId(owner.agentId, sessionId);
         },
         onSessionUpsert: () => {},
+        onDispatchResult: confirmDispatch,
         onSettled: (sessionId, outcome = 'unknown') => {
           if (outboxEntry) outboxRequestsRef.current.delete(outboxEntry.requestId);
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, {
@@ -306,10 +317,21 @@ export function useRunAgent(ctx: RunAgentContext) {
       if (!accepted) useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, false);
       return accepted;
     };
-    if (!launch() && responsesInput === undefined) {
+    const started = launch();
+    if (!started && responsesInput === undefined) {
       owner.queue.push({ draft, launch });
       publishQueue(owner);
+      // Ordinary user turns are accepted into the owner queue even when the
+      // engine is busy.  Resume/approval inputs are deliberately never queued
+      // because replaying them against a later run could approve the wrong
+      // request; callers need the false result to keep the interaction retryable.
+      return true;
     }
+    if (dispatch) {
+      if (!started) confirmDispatch?.(false);
+      return dispatch;
+    }
+    return started;
   }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunSettled, onSessionCreated, outbox, publishQueue, waitForPendingSessionCreation]);
 
   const stopGeneration = useCallback(() => {

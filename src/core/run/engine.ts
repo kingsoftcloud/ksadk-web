@@ -306,6 +306,8 @@ export class RunEngineImpl implements RunEngine {
     onSessionCreated?: (sessionId: string) => void;
     onInvocationCreated?: (invocationId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
+    /** Legacy Responses HTTP admission, before the output stream finishes. */
+    onDispatchResult?: (accepted: boolean) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
@@ -317,6 +319,12 @@ export class RunEngineImpl implements RunEngine {
     this.recordCursor(0);
     this.setStage(this.activeSessionId ? 'connecting' : 'creating-session');
     const isResponsesResume = draft.responsesInput !== undefined;
+    let dispatchReported = false;
+    const reportDispatch = (accepted: boolean) => {
+      if (dispatchReported) return;
+      dispatchReported = true;
+      draft.onDispatchResult?.(accepted);
+    };
 
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
@@ -455,6 +463,12 @@ export class RunEngineImpl implements RunEngine {
         const requestedProfile = this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
           ? 'agent-block-v1' : 'flat-v1';
         const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
+        if (this.operationEpoch !== operationEpoch || this.abortController?.signal.aborted) {
+          reportDispatch(false);
+          await stream.cancel();
+          return;
+        }
+        if (!this.config.kernelSessionEventsEnabled) reportDispatch(true);
         this.setStage('streaming');
         this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
 
@@ -463,6 +477,15 @@ export class RunEngineImpl implements RunEngine {
         // AgentKernel path: RunAgent answers with a control receipt (JSON);
         // run output arrives on SubscribeSessionEvents as raw kernel frames.
         const peeked = await peekKernelReceipt(stream);
+        if (this.operationEpoch !== operationEpoch || this.abortController?.signal.aborted) {
+          reportDispatch(false);
+          await peeked.stream.cancel();
+          return;
+        }
+        if (this.config.kernelSessionEventsEnabled) {
+          reportDispatch(!peeked.receipt
+            || peeked.receipt.status === 'accepted' || peeked.receipt.status === 'duplicate');
+        }
         let streamResult: StreamConsumeResult;
         if (peeked.receipt) {
           streamResult = await this.consumeKernelRunEvents(
@@ -559,6 +582,7 @@ export class RunEngineImpl implements RunEngine {
           settlement = 'cancelled';
         }
       } finally {
+        reportDispatch(false);
         // A detached renderer may have started another owner before this
         // stream's promise settled. Do not let the old finalizer clear the
         // new owner's stage, invocation, activity, or outbox settlement.
@@ -1448,6 +1472,7 @@ export class RunEngineImpl implements RunEngine {
           type: 'approval_requested',
           messageId,
           approvalRequestId: action.approvalRequestId,
+          previousResponseId: action.previousResponseId,
           protocol: 'responses',
           runId: action.runId,
           name: action.name || '人工确认',

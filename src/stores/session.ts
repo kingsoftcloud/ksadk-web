@@ -24,6 +24,8 @@ export type SessionState = {
   sessions: Session[];
   currentSessionId: string | null;
   sessionsAgentId: string;
+  /** Invalidates list requests across resets, including returning to the same Agent. */
+  sessionsGeneration: number;
   sessionsTotal: number;
   sessionsPage: number;
   sessionsPageSize: number;
@@ -119,6 +121,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   sessions: [],
   currentSessionId: null,
   sessionsAgentId: '',
+  sessionsGeneration: 0,
   sessionsTotal: 0,
   sessionsPage: 0,
   sessionsPageSize: 30,
@@ -180,7 +183,8 @@ export const useSessionStore = create<SessionStore>()((set) => ({
     }),
   setLoadingSessions: (loading) => set({ isLoadingSessions: loading }),
   resetSessionPagination: (agentId) =>
-    set({
+    set((s) => ({
+      sessionsGeneration: s.sessionsGeneration + 1,
       sessions: [],
       sessionsAgentId: agentId,
       sessionsTotal: 0,
@@ -188,7 +192,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       loadedPages: new Set(),
       hasMoreSessions: false,
       isLoadingSessions: false,
-    }),
+    })),
   togglePinnedSession: (id) =>
     set((s) => {
       const pinned = new Set(s.pinnedSessionIds);

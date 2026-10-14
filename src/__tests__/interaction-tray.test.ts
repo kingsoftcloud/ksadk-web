@@ -115,25 +115,28 @@ describe('InteractionTray contract', () => {
     expect(source).toContain('interaction.responseSummary');
   });
 
-  it('ChatMessageList replaces interactive history buttons with anchors when a record exists', () => {
+  it('ChatMessageList keeps legacy history read-only even without interaction events', () => {
     const source = readSource('components/chat/ChatMessageList.tsx');
     expect(source).toContain('InteractionHistoryAnchor');
     // Anchors render after the (collapsed) tool details and filter on
     // records whose id matches a tool approvalRequestId.
     const anchorIndex = source.indexOf('interactionRecords?.some');
     expect(anchorIndex).toBeGreaterThan(-1);
-    // The interactive buttons only render for tools without an
-    // Interaction record and only while pending.
+    expect(source).not.toContain('允许执行');
+    expect(source).not.toContain('onRespondToApproval({');
+    expect(source).toContain('请在输入区确认面板中操作。');
     expect(source).toContain("tool.approvalStatus === 'pending' ? (");
   });
 
-  it('keeps a streamed tool approval read-only once the composer tray owns it', () => {
+  it('keeps all streamed tool approvals read-only', () => {
     const source = readSource('components/chat/ProcessingBlocksView.tsx');
     expect(source).toContain('interactionRecord={record}');
     expect(source).toContain("entry.extensions.call_id");
     expect(source).toContain("status === 'error' && !cancelledByInteraction");
     expect(source).toContain('output && !cancelledByInteraction');
-    expect(source).toContain("approvalStatus === 'pending' && !interactionRecord");
+    expect(source).not.toContain('tool-approval-card');
+    expect(source).not.toContain('允许执行');
+    expect(source).not.toContain('onRespondToApproval?.(');
     expect(source).toContain('请在输入区确认面板中操作。');
   });
 });

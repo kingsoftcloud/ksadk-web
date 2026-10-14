@@ -2,11 +2,22 @@ name: CI
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
       - master
       - "open-source/**"
+      - "feature/**"
+      - "fix/**"
+      - "codex/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -20,6 +31,13 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
+      - run: npm run test:node
+      - run: npm run build:lib
       - run: npm run build:ksadk
       - run: npm run build:hosted
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:interaction
+      - run: npm run test:e2e:run-owners

@@ -218,11 +218,11 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
   const agentBlockActions = useMemo(() => createScopedAgentBlockActions({
     api, agentId,
     getContext: () => ({
-      sessionId: currentSessionIdRef.current || '',
+      sessionId: useSessionStore.getState().currentSessionId || '',
       supported: useBootstrapStore.getState().capabilities.scoped_cancel?.supported === true,
       items: useMessageStore.getState().messages.flatMap(message => message.agentBlock ? [message.agentBlock.item] : []),
     }),
-  }), [api, agentId, currentSessionIdRef]);
+  }), [api, agentId]);
 
   const handleCancelRemote = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
@@ -279,8 +279,8 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     api,
     interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
     onAcceptedInteraction: followAcceptedInteraction,
-    legacyResponsesApproval: (approvalRequestId, approve) => {
-      respondToApprovalRef.current({ approvalRequestId, approve });
+    legacyResponsesApproval: (approvalRequestId, approve, previousResponseId) => {
+      return respondToApprovalRef.current({ approvalRequestId, approve, previousResponseId });
     },
     legacyAguiResume: (interruptId, status, payload) => {
       const engineAccepted = respondToAguiApprovalRef.current({

@@ -35,7 +35,7 @@ import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
   createSessionEventCursor,
 } from '../utils/session-event-history.js';
-import { ingestSessionEventRecord } from '../core/interaction/index.js';
+import { ingestLegacyApprovalHistory, ingestSessionEventRecord } from '../core/interaction/index.js';
 import type { Interaction } from '../core/interaction/types.js';
 
 const RESTORE_RECONNECT_DELAY_MS = 500;
@@ -101,7 +101,7 @@ function reloadRequiredError(): ApiError {
   });
 }
 
-function historyPageMetadata(page: ListSessionMessagesResponse) {
+function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>) {
   return {
     dataSource: page.DataSource,
     degraded: page.Degraded,
@@ -234,6 +234,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   // refresh cannot evict the active transcript in that short window.
   const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
   const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
+  const localDraftAgentRef = useRef<string | null>(null);
   const loadSessionRef = useRef<((sessionId: string, historyReload?: boolean, signal?: AbortSignal) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
@@ -308,6 +309,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       runSubscriptionAbortRef.current = controller;
       let shouldReloadSession = false;
       let terminalStatusSeen = false;
+      let cancelledByCaller = false;
       let afterSeqId = options.afterSeqId;
       const isCurrentSubscription = () => (
         runSubscriptionAbortRef.current === controller
@@ -434,7 +436,47 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             }
           } catch (error) {
             const isAbortError = error instanceof DOMException && error.name === 'AbortError';
-            if (isAbortError || !isCurrentSubscription()) break;
+            const isCancelledSubscription = isAbortError
+              || error instanceof CancelledError
+              || controller.signal.aborted;
+            if (isCancelledSubscription) {
+              // AgentEngineClient maps an aborted fetch to CancelledError.
+              // Treat that as explicit lifecycle cleanup, rather than a
+              // transient disconnect: otherwise the already-aborted signal
+              // is retried immediately forever (waitForRestoreRetry resolves
+              // synchronously for an aborted signal).
+              terminalStatusSeen = true;
+              cancelledByCaller = true;
+              if (isCurrentSubscription()) {
+                useStreamingStore.getState().stopSessionActivity(
+                  options.sessionId,
+                  '恢复事件订阅已取消。',
+                );
+              }
+              break;
+            }
+            if (!isCurrentSubscription()) break;
+            // Authentication, authorization, and invalid-session responses
+            // cannot be repaired by replaying the same subscription. Retrying
+            // them forever left the UI in a permanent "恢复连接中" state and
+            // generated a request every 500ms after a session expired. Surface
+            // the existing run error/banner path and stop this subscription;
+            // transient network failures and server errors still reconnect.
+            const isPermanentClientError = error instanceof ApiError
+              && error.code >= 400
+              && error.code < 500
+              && error.code !== 408
+              && error.code !== 429;
+            if (isPermanentClientError) {
+              terminalStatusSeen = true;
+              shouldReloadSession = false;
+              dispatchRunEventToStores({
+                type: 'error',
+                sessionId: options.sessionId,
+                error,
+              });
+              break;
+            }
             console.warn('Run event subscription disconnected; retrying:', error);
             useStreamingStore.getState().updateActivity({
               sessionId: options.sessionId,
@@ -450,7 +492,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           }
         }
 
-        if (terminalStatusSeen && isCurrentSubscription()) {
+        if (terminalStatusSeen && !cancelledByCaller && isCurrentSubscription()) {
           dispatchRunEventToStores({ type: 'stream_ended', sessionId: options.sessionId });
         }
       } catch (error) {
@@ -495,6 +537,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const loadSession = useCallback(
     async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
       if (signal?.aborted) return;
+      localDraftAgentRef.current = null;
       // Bootstrap can invoke the initial list callback before React replaces
       // its closure. Read the committed capabilities for this Agent, then
       // freeze the selected profile for this history read and its pages.
@@ -557,7 +600,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           { isCurrent: isStillCurrentSession, signal, onPreparing: () => {
             const previous = useSessionStore.getState().messageHistory[sessionId];
             useSessionStore.getState().setSessionMessageHistory(sessionId, {
-              nextCursor: null, hasMore: false, ...previous, preparing: true, error: undefined,
+              ...previous, nextCursor: previous?.nextCursor ?? null, hasMore: previous?.hasMore ?? false,
+              preparing: true, error: undefined,
             });
             useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
           } },
@@ -652,6 +696,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           console.warn('[SessionLifecycle] canonical history replay failed:', error);
         }
         if (!isStillCurrentSession()) return;
+        ingestLegacyApprovalHistory(history, sessionId);
         rememberSessionCache(
           canonicalRunIdsBySessionRef.current,
           sessionId,
@@ -748,8 +793,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           historyReadFailureRef.current = { generation, message };
             const previous = useSessionStore.getState().messageHistory[sessionId];
             useSessionStore.getState().setSessionMessageHistory(sessionId, {
-              nextCursor: null, hasMore: false,
               ...previous,
+              nextCursor: previous?.nextCursor ?? null, hasMore: previous?.hasMore ?? false,
               ...(historyReload ? { nextCursor: null, hasMore: false,
                 cursorSource: undefined, historyEpoch: undefined, snapshotSeqId: undefined } : {}),
               preparing: false,
@@ -780,17 +825,20 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       targetAgentId = 'default-agent',
       preferredSessionId: string | null = null,
     ) => {
+      const store = useSessionStore.getState();
+      if (store.sessionsAgentId && store.sessionsAgentId !== targetAgentId) {
+        store.resetSessionPagination(targetAgentId);
+      }
+      const generation = useSessionStore.getState().sessionsGeneration;
+      const isCurrentList = () => useBootstrapStore.getState().agentId === targetAgentId
+        && useSessionStore.getState().sessionsGeneration === generation;
       try {
-        const store = useSessionStore.getState();
-        if (store.sessionsAgentId && store.sessionsAgentId !== targetAgentId) {
-          store.resetSessionPagination(targetAgentId);
-        }
         useSessionStore.getState().setLoadingSessions(true);
         const data = await api.listSessions(targetAgentId, {
           page: 1,
           pageSize: SESSION_LIST_PAGE_SIZE,
         });
-        if (useBootstrapStore.getState().agentId !== targetAgentId) return;
+        if (!isCurrentList()) return;
         const listedSessions = (data.Sessions || []) as Session[];
         for (const listedSession of listedSessions) {
           pendingCreatedSessionAgentsRef.current.delete(listedSession.SessionId);
@@ -814,9 +862,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         });
         // A manual “new conversation” can overlap the initial ListSessions
         // request. Do not let that older response restore a previous session
-        // while CreateSession is still resolving: doing so starts a stale
-        // history hydrate that can replace the just-rendered optimistic turn.
-        if (sessionCreationPromiseRef.current) {
+        // while CreateSession is resolving or a local draft is selected: a
+        // draft intentionally has no server session until its first send.
+        if (sessionCreationPromiseRef.current || localDraftAgentRef.current === targetAgentId) {
           return;
         }
         const sorted = useSessionStore.getState().sessions;
@@ -833,7 +881,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (error instanceof CancelledError) return;
         console.error('Failed to fetch sessions:', error);
       } finally {
-        if (useBootstrapStore.getState().agentId === targetAgentId) {
+        if (isCurrentList()) {
           useSessionStore.getState().setLoadingSessions(false);
         }
       }
@@ -856,12 +904,17 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     }
     const pageSize = store.sessionsPageSize || SESSION_LIST_PAGE_SIZE;
     const targetAgentId = store.sessionsAgentId || agentIdRef.current || 'default-agent';
+    const isCurrentList = () => useBootstrapStore.getState().agentId === targetAgentId
+      && useSessionStore.getState().sessionsGeneration === store.sessionsGeneration;
     try {
       useSessionStore.getState().setLoadingSessions(true);
       const data = await api.listSessions(targetAgentId, {
         page: nextPage,
         pageSize,
       });
+      // Pagination can finish after navigation, just like the first page.
+      // Keep the former Agent's rows and pagination out of the selected list.
+      if (!isCurrentList()) return;
       useSessionStore.getState().upsertSessions((data.Sessions || []) as Session[], {
         agentId: targetAgentId,
         total: Number(data.Total ?? store.sessionsTotal),
@@ -872,7 +925,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       if (error instanceof CancelledError) return;
       console.error('Failed to load more sessions:', error);
     } finally {
-      useSessionStore.getState().setLoadingSessions(false);
+      if (isCurrentList()) useSessionStore.getState().setLoadingSessions(false);
     }
   }, [api]);
 
@@ -885,6 +938,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [fetchSessions]);
 
   const adoptCreatedSession = useCallback((newId: string, preserveMessages = false) => {
+    localDraftAgentRef.current = null;
     // Responses can announce the existing session on every turn. That is an
     // acknowledgement, not navigation: keep its fixed snapshot and in-flight
     // older page so another turn cannot strand the remaining history.
@@ -917,6 +971,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [isMobile]);
 
   const startNewConversation = useCallback(() => {
+    localDraftAgentRef.current = agentIdRef.current;
     loadSessionGenerationRef.current += 1;
     runSubscriptionAbortRef.current?.abort();
     // Navigation creates a local draft; it must not disconnect an execution
@@ -1152,6 +1207,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
+      ingestLegacyApprovalHistory(rebuilt.messages, sessionId);
       rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuilt.messages, currentSessionIdRef.current);
       const mergedHistory = mergeHistoryWithLive(
         rebuilt.messages, visibleBaseline, useMessageStore.getState().messages);

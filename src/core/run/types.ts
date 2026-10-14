@@ -51,6 +51,7 @@ export type RunEvent =
       args: string;
       message?: string;
       approvalLevel?: string;
+      previousResponseId?: string;
       runId?: string;
       sessionId?: string | null;
     }
@@ -113,6 +114,8 @@ export interface RunEngine {
     onSessionCreated?: (sessionId: string) => void;
     onInvocationCreated?: (invocationId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
+    /** Legacy Responses HTTP admission, before the output stream finishes. */
+    onDispatchResult?: (accepted: boolean) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   disconnect(): void;

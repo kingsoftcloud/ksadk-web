@@ -33,11 +33,18 @@ export class RuntimeConversationIngress {
   private readonly descriptors = new Map<string, Record<string, unknown>>();
   private rootScope = '';
   private runId = '';
+  private readonly sessionId: string;
+  private readonly conversation: ConversationItemReducer;
+  private readonly profile: 'agent-block-v1' | 'flat-v1';
   constructor(
-    private readonly sessionId: string,
-    private readonly conversation = new ConversationItemReducer(),
-    private readonly profile: 'agent-block-v1' | 'flat-v1' = 'flat-v1',
-  ) {}
+    sessionId: string,
+    conversation = new ConversationItemReducer(),
+    profile: 'agent-block-v1' | 'flat-v1' = 'flat-v1',
+  ) {
+    this.sessionId = sessionId;
+    this.conversation = conversation;
+    this.profile = profile;
+  }
   private identity(run: string, scope: string, item: string, child = false): string {
     return this.profile === 'agent-block-v1' || child
       ? runtimeConversationIdentity(run, scope, item)

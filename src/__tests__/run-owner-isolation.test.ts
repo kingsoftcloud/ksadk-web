@@ -166,6 +166,33 @@ describe('submitted conversation ownership', () => {
     await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalledTimes(3));
   });
 
+  it('reports a Responses resume as unavailable while the owner engine is busy', async () => {
+    const stream = outputStream();
+    const runAgent = vi.fn().mockResolvedValue(stream.stream);
+    const p = probe({
+      createSession: vi.fn().mockResolvedValue({ SessionId: 'native-a' }),
+      runAgent,
+    });
+
+    await p.actions.submitDraft('initial turn', []);
+    await vi.waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
+
+    const accepted = await p.actions.submitDraft(
+      '',
+      [],
+      [{ type: 'mcp_approval_response', approval_request_id: 'approval-1', approve: true }],
+      'resp-1',
+    );
+
+    expect(accepted).toBe(false);
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(useUIStore.getState().queuedDrafts).toEqual([]);
+    expect(p.controller.outbox.list()).toHaveLength(1);
+
+    p.actions.disconnectRun();
+    stream.close();
+  });
+
   it('never executes a fabricated session after creation fails', async () => {
     const runAgent = vi.fn();
     const p = probe({ createSession: vi.fn().mockRejectedValue(new Error('creation uncertain')), runAgent });

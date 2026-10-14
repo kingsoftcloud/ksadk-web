@@ -22,9 +22,10 @@ export type BackendMessage = {
     Name: string;
     Args?: unknown;
     Result?: unknown;
-    Status?: 'running' | 'completed' | 'failed' | 'paused' | 'approved' | 'denied';
+    Status?: 'running' | 'completed' | 'failed' | 'paused' | 'approved' | 'denied' | 'rejected' | 'cancelled' | 'expired';
     ToolCallId?: string;
     ApprovalRequestId?: string;
+    ApprovalStatus?: 'pending' | 'paused' | 'approved' | 'denied' | 'rejected' | 'cancelled' | 'expired';
     Protocol?: string;
     ApprovalLevel?: string;
     ApprovalMessage?: string;
@@ -49,6 +50,7 @@ export type BackendMessage = {
   Timestamp?: string;
   SeqId?: number;
   InvocationId?: string;
+  ResponseId?: string;
 };
 
 export type ListSessionMessagesOptions = {
