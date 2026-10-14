@@ -867,3 +867,52 @@ test('native multi-select preserves custom feedback and Enter never submits an e
   expect(state.submits[0].Action).toBe('submit');
   expect(state.submits[0].Response).toEqual({ scope: ['前端', '服务端', '请改成 echo 你好'] });
 });
+
+test('SDK 0.8.5 runtime history restores one legacy approval through interruption and terminal replay', async ({ page }) => {
+  const id = 'native-approval';
+  const native = (type, seq, extra = {}) => ({
+    SessionId: SESSION_ID, InvocationId: 'native-run', EventType: type, SeqId: seq,
+    Content: { runtime_event: {
+      schema_version: 2, event_type: type, run_id: 'native-run', timestamp: 1791967072 + seq,
+      source: { framework: 'langgraph' }, ...extra,
+    } },
+  });
+  const detail = { approval_request_id: id, tool_name: 'start_spark_sql_query',
+    action_requests: [{ name: 'start_spark_sql_query', args: { plan_id: 'plan-test' } }] };
+  const requested = native('interaction.requested', 11, {
+    interaction_id: id, interaction_kind: 'approval',
+    request: { request_type: 'approval', kind: 'tool', detail },
+  });
+  const interrupted = native('run.interrupted', 12, { status: 'interrupted', reason: 'input_required' });
+  const state = { submits: [], resolvedIds: new Set(), sessionCreated: false, events: [interrupted, requested], approvals: [] };
+  await installFixture(page, state, { interactionV1: false });
+  await page.route('**/agentengine/api/v1/RunAgent', async route => {
+    const body = route.request().postDataJSON();
+    const approval = Array.isArray(body.ResponsesInput) && body.ResponsesInput.find(x => x.type === 'mcp_approval_response');
+    if (approval) {
+      state.approvals.push(body);
+      state.events = [native('interaction.resolved', 13, { interaction_id: id,
+        interaction_kind: 'approval', response: { response_type: 'approval', decision: 'approved' } }), ...state.events];
+    }
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse(approval
+      ? [{ type: 'response.completed', output_text: '原生审批已处理。', status: 'completed' }]
+      : [{ type: 'response.ksadk.approval_request', interrupt_info: detail },
+          { type: 'response.incomplete', response: { id: 'native-response', status: 'incomplete' } }]) });
+  });
+  await page.goto('/');
+  await page.getByPlaceholder('发送消息…').fill('原生审批验证');
+  await page.getByPlaceholder('发送消息…').press('Enter');
+  await expectComposerApprovalOnly(page);
+  await page.reload();
+  await expectComposerApprovalOnly(page);
+  expect(state.approvals).toHaveLength(0);
+  await page.getByTestId('interaction-approve').dblclick();
+  await expect.poll(() => state.approvals.length).toBe(1);
+  expect(state.approvals[0].ResponsesInput).toEqual([{ type: 'mcp_approval_response', approval_request_id: id, approve: true }]);
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('Interaction Fixture', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+  expect(state.approvals).toHaveLength(1);
+  expect(state.submits).toHaveLength(0);
+});

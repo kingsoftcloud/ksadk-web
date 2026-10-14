@@ -47,6 +47,7 @@ import { InteractionStore } from './store.js';
 import { interactionFromSessionEvent } from './adapters/session-events.js';
 import { interactionFromResponsesApproval } from './adapters/responses.js';
 import { restoreLegacyApprovals } from './legacy-history.js';
+import { interactionFromLegacyRuntimeEvent } from './adapters/legacy-runtime-events.js';
 import type { Message } from '../../components/chat/types.js';
 import { sessionEventRunStatus } from '../../utils/session-events.js';
 
@@ -57,7 +58,8 @@ const RUN_TERMINAL_STATUSES = new Set([
   'cancelled',
   'canceled',
   'aborted',
-  'interrupted',
+  // SDK 0.8.5 interrupts a run while it waits for approval. The interaction
+  // remains actionable until a decision or an actual terminal run fact.
   'resume_failed',
 ]);
 import { interactionFromAguiInterrupt } from './adapters/agui.js';
@@ -80,7 +82,8 @@ export function ingestSessionEventRecord(
   raw: unknown,
   fallbackSessionId?: string,
 ): Interaction | null {
-  const interaction = interactionFromSessionEvent(raw, fallbackSessionId);
+  const interaction = interactionFromSessionEvent(raw, fallbackSessionId)
+    ?? interactionFromLegacyRuntimeEvent(raw, fallbackSessionId);
   if (interaction) {
     sharedInteractionStore.upsert(interaction);
   }
