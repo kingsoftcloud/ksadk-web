@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.3.13 - 2026-10-15
 
 ### History and live conversations
@@ -16,16 +18,10 @@
 
 ### Consumers and validation
 
+- Fix strict TypeScript and React lint errors while preserving Teams schema validation and current-session cancellation checks. CI checks types, lint, Node tests, builds, and browser interaction ownership on feature branches.
+
 - Companion UI for KsADK 0.8.6; production consumers should pin this exact npm version. The package includes the reusable React library and SDK static UI; Hosted UI deployment remains owned by its host.
 - The formal release preflight runs frontend and Node tests, lint, all four builds, conversation/demo browser tests, provenance checks, and an isolated packed-package import check. Demo fixtures are sample data and do not prove a deployed backend integration.
-
-## Unreleased
-
-- Unify tool approval actions above the composer, leaving read-only status in the timeline. Restore legacy Responses/AG-UI approvals from history without reviving terminal decisions, and scope submissions to the active session.
-- Confirm legacy Responses approval dispatch only after the HTTP request is accepted. Failed or cancelled dispatch keeps the approval retryable without waiting for the output stream to finish.
-- Refresh the visible send queue when switching between unbound drafts, while retaining each background queue under its original conversation owner.
-- Fix strict TypeScript and React lint errors while preserving Teams schema validation and current-session cancellation checks. CI now checks application types, lint, Node tests, library builds, and browser interaction ownership on feature branches.
-- Preserve a newly opened local draft when delayed session lists or refreshes return older conversations; create its server session on first send.
 
 ## 0.3.8 - 2026-09-11
 
