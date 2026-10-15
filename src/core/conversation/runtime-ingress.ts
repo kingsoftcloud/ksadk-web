@@ -1,4 +1,4 @@
-import { safeToolValue } from './safe-tool-value.js';
+import { safeRuntimeToolOutput, safeToolValue } from './safe-tool-value.js';
 import { validateAgentItem } from './agent.js';
 import {
   RuntimeItemReducer,
@@ -319,7 +319,7 @@ export class RuntimeConversationIngress {
           ...(result
             ? {
                 callId: result.call_id,
-                output: safeToolValue(result.result),
+                output: safeRuntimeToolOutput(result.result, source.framework, source.protocol),
                 isError: result.is_error,
               }
             : {}),

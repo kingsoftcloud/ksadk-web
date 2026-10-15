@@ -122,12 +122,15 @@ describe('submitted conversation ownership', () => {
     b.resolve({ SessionId: 'native-b' });
     await vi.waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
     const runB = useStreamingStore.getState().currentRunId;
+    expect(runB).toBeTruthy();
+    expect(useMessageStore.getState().messages.find(row => row.content === 'draft B')?.invocationId).toBe(runB);
     a.resolve({ SessionId: 'native-a' });
     await vi.waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
     expect(p.controller.binding(ownerA)?.nativeSessionId).toBe('native-a');
     expect(p.controller.binding(ownerB)?.nativeSessionId).toBe('native-b');
     expect(p.currentSessionIdRef.current).toBe('native-b');
     expect(useStreamingStore.getState().currentRunId).toBe(runB);
+    expect(useMessageStore.getState().messages.find(row => row.content === 'draft B')?.invocationId).toBe(runB);
     expect(runAgent.mock.calls.map(([body]) => body.SessionId)).toEqual(['native-b', 'native-a']);
 
     streams[1].delta('offscreen A');

@@ -57,6 +57,9 @@ export type ListSessionMessagesOptions = {
   agentId?: string;
   afterSeqId?: number;
   beforeSeqId?: number;
+  cursorSource?: string;
+  historyEpoch?: string;
+  snapshotSeqId?: number;
   limit?: number;
   includeReasoning?: boolean;
   includeToolEvents?: boolean;
@@ -69,7 +72,36 @@ export type ListSessionMessagesResponse = {
   LatestSeqId: number;
   HasMore: boolean;
   NextCursor: number | null;
+  DataSource?: string;
+  Degraded?: boolean;
+  CursorSource?: string;
+  CursorCompatibleWithRuntime?: boolean;
+  SessionContractVersion?: number;
+  HistoryEpoch?: string;
+  PersistenceDegraded?: boolean;
+  SnapshotSeqId?: number;
 };
+
+/** Preserve the history contract through both hosted and embedded API entries. */
+export function normalizeSessionMessagesResponse(data: ListSessionMessagesResponse): ListSessionMessagesResponse {
+  const optionalSeq = (value: unknown) => value !== null && value !== undefined
+    && Number.isInteger(Number(value)) && Number(value) >= 0 ? Number(value) : undefined;
+  return {
+    Messages: data.Messages ?? [],
+    LatestSeqId: Number.isFinite(Number(data.LatestSeqId)) ? Number(data.LatestSeqId) : 0,
+    HasMore: Boolean(data.HasMore),
+    NextCursor: data.NextCursor === null || data.NextCursor === undefined
+      ? null : Number.isFinite(Number(data.NextCursor)) ? Number(data.NextCursor) : null,
+    DataSource: data.DataSource,
+    Degraded: data.Degraded,
+    CursorSource: data.CursorSource,
+    CursorCompatibleWithRuntime: data.CursorCompatibleWithRuntime,
+    SessionContractVersion: data.SessionContractVersion,
+    HistoryEpoch: data.HistoryEpoch,
+    PersistenceDegraded: data.PersistenceDegraded,
+    SnapshotSeqId: optionalSeq(data.SnapshotSeqId),
+  };
+}
 
 export async function listSessionMessages(
   sessionId: string,
@@ -82,6 +114,9 @@ export async function listSessionMessages(
       SessionId: sessionId,
       AfterSeqId: opts?.afterSeqId,
       BeforeSeqId: opts?.beforeSeqId,
+      CursorSource: opts?.cursorSource,
+      HistoryEpoch: opts?.historyEpoch,
+      SnapshotSeqId: opts?.snapshotSeqId,
       Limit: opts?.limit,
       IncludeReasoning: opts?.includeReasoning,
       IncludeToolEvents: opts?.includeToolEvents,
@@ -89,14 +124,5 @@ export async function listSessionMessages(
     },
     opts,
   );
-  return {
-    Messages: data.Messages ?? [],
-    LatestSeqId: Number.isFinite(Number(data.LatestSeqId)) ? Number(data.LatestSeqId) : 0,
-    HasMore: Boolean(data.HasMore),
-    NextCursor: data.NextCursor === null || data.NextCursor === undefined
-      ? null
-      : Number.isFinite(Number(data.NextCursor))
-        ? Number(data.NextCursor)
-        : null,
-  };
+  return normalizeSessionMessagesResponse(data);
 }

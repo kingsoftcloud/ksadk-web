@@ -238,7 +238,7 @@ describe('chat message list contracts', () => {
     expect(lifecycleSource).toContain('offset: cachedEvents.loadedCount');
     expect(lifecycleSource).toContain('loadedEventCount < totalEventCount');
     expect(lifecycleSource).toContain('rebuildPersistedSessionHistory(');
-    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 200');
+    expect(lifecycleSource).toContain('SESSION_EVENTS_PAGE_SIZE = 64');
     expect(lifecycleSource).toContain('SESSION_TRANSCRIPT_CACHE_SIZE = 8');
     expect(lifecycleSource).toContain('if (!cachedHistory) {');
     expect(lifecycleSource).toContain('setSessionInitialMessageHistoryLoading(sessionId, false)');
@@ -300,7 +300,7 @@ describe('chat message list contracts', () => {
     // the header keeps the selected session while the transcript stays empty
     // until the user clicks the same session again.
     expect(appSource).not.toContain('currentSessionIdRef.current = currentSessionId;');
-    expect(appSource).toContain('clearSessionMessageHistory(sessionId)');
+    expect(appSource).not.toContain('clearSessionMessageHistory(sessionId)');
     expect(lifecycleSource).toContain('const isStillCurrentSession = () => (');
     expect(lifecycleSource).toContain('loadSessionGenerationRef.current === generation');
     expect(lifecycleSource).toContain('if (!isStillCurrentSession()) {');

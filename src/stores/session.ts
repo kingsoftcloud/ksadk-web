@@ -3,6 +3,23 @@ import { authorizationCache } from '../utils/authorization-cache.js';
 import type { Session } from '../components/chat/types.js';
 import { buildSessionPaginationState, mergeLoadedPages } from '../utils/session-pagination.js';
 
+export type SessionMessageHistory = {
+  nextCursor: number | null;
+  hasMore: boolean;
+  isLoadingInitial: boolean;
+  isLoadingOlder: boolean;
+  dataSource?: string;
+  degraded?: boolean;
+  cursorSource?: string;
+  cursorCompatibleWithRuntime?: boolean;
+  sessionContractVersion?: number;
+  historyEpoch?: string;
+  persistenceDegraded?: boolean;
+  snapshotSeqId?: number;
+  error?: string;
+  preparing?: boolean;
+};
+
 export type SessionState = {
   sessions: Session[];
   currentSessionId: string | null;
@@ -16,12 +33,7 @@ export type SessionState = {
   hasMoreSessions: boolean;
   isLoadingSessions: boolean;
   pinnedSessionIds: string[];
-  messageHistory: Record<string, {
-    nextCursor: number | null;
-    hasMore: boolean;
-    isLoadingInitial: boolean;
-    isLoadingOlder: boolean;
-  }>;
+  messageHistory: Record<string, SessionMessageHistory>;
 };
 
 export type SessionActions = {
@@ -38,11 +50,8 @@ export type SessionActions = {
   setLoadingSessions: (loading: boolean) => void;
   resetSessionPagination: (agentId: string) => void;
   togglePinnedSession: (id: string) => void;
-  setSessionMessageHistory: (sessionId: string, history: {
-    nextCursor: number | null;
-    hasMore: boolean;
-    isLoadingOlder?: boolean;
-  }) => void;
+  setSessionMessageHistory: (sessionId: string, history: Pick<SessionMessageHistory, 'nextCursor' | 'hasMore'> &
+    Partial<Omit<SessionMessageHistory, 'nextCursor' | 'hasMore'>>) => void;
   setSessionInitialMessageHistoryLoading: (sessionId: string, loading: boolean) => void;
   setSessionMessageHistoryLoading: (sessionId: string, loading: boolean) => void;
   clearSessionMessageHistory: (sessionId?: string) => void;
@@ -204,6 +213,8 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       messageHistory: {
         ...s.messageHistory,
         [sessionId]: {
+          ...s.messageHistory[sessionId],
+          ...history,
           nextCursor: history.nextCursor,
           hasMore: history.hasMore,
           isLoadingInitial: false,
@@ -218,6 +229,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
         messageHistory: {
           ...s.messageHistory,
           [sessionId]: {
+            ...existing,
             nextCursor: existing?.nextCursor ?? null,
             hasMore: existing?.hasMore ?? false,
             isLoadingInitial: loading,

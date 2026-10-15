@@ -1,3 +1,5 @@
+import { mergeHistoryWithLive } from '../utils/transcript-order.js';
+import { isHistoryPreparing, readPreparedHistory } from '../utils/history-preparation.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useCallback, useEffect, useRef } from 'react';
@@ -27,6 +29,7 @@ import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
+import type { ListSessionMessagesResponse } from '../api/messages.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
@@ -38,10 +41,12 @@ import type { Interaction } from '../core/interaction/types.js';
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
-// Tool-heavy Codex runs can make 500 canonical events exceed 600 KB. The
+// Tool-heavy runs can make 200 canonical events exceed half a MiB. The
 // durable Messages projection paints the readable transcript first; hydrate
 // a smaller newest-event window and page older runtime detail on upward scroll.
-const SESSION_EVENTS_PAGE_SIZE = 200;
+// A partial run keeps its complete Messages projection until enough canonical
+// events arrive; smaller detail pages therefore do not truncate visible text.
+const SESSION_EVENTS_PAGE_SIZE = 64;
 const SESSION_TRANSCRIPT_CACHE_SIZE = 8;
 const SESSION_METADATA_CACHE_SIZE = 128;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
@@ -50,7 +55,66 @@ type SessionEventHistoryCache = {
   events: SessionEventRecord[];
   loadedCount: number;
   total: number;
+  cursorSource?: string;
+  historyEpoch?: string;
+  snapshotSeqId?: number;
 };
+
+type HistorySource = {
+  CursorSource?: string;
+  HistoryEpoch?: string;
+  SnapshotSeqId?: number;
+  CursorCompatibleWithRuntime?: boolean;
+};
+
+function compatibleHistorySource(left: HistorySource, right: HistorySource): boolean {
+  // Missing provenance is compatible only with another legacy, untagged page.
+  // A tagged control fallback must never absorb an untagged runtime page.
+  if (left.CursorSource !== right.CursorSource) return false;
+  if (left.HistoryEpoch !== right.HistoryEpoch) return false;
+  if (left.SnapshotSeqId !== undefined && right.SnapshotSeqId !== undefined
+    && left.SnapshotSeqId !== right.SnapshotSeqId) return false;
+  if (!left.CursorSource && (left.CursorCompatibleWithRuntime === false
+    || right.CursorCompatibleWithRuntime === false)) return false;
+  return true;
+}
+
+function eventCacheSource(cache: SessionEventHistoryCache): HistorySource {
+  return { CursorSource: cache.cursorSource, HistoryEpoch: cache.historyEpoch,
+    SnapshotSeqId: cache.snapshotSeqId };
+}
+
+function historyErrorReason(error: unknown): string | undefined {
+  if (!(error instanceof ApiError) || !error.detail || typeof error.detail !== 'object') return undefined;
+  const detail = error.detail as { ReasonCode?: unknown };
+  return typeof detail.ReasonCode === 'string' ? detail.ReasonCode : undefined;
+}
+
+function isHistoryReloadRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 409
+    && historyErrorReason(error) === 'HISTORY_RELOAD_REQUIRED';
+}
+
+function reloadRequiredError(): ApiError {
+  return new ApiError(409, '历史来源已变化', {
+    Code: 409, ReasonCode: 'HISTORY_RELOAD_REQUIRED', Data: null,
+  });
+}
+
+function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>) {
+  return {
+    dataSource: page.DataSource,
+    degraded: page.Degraded,
+    cursorSource: page.CursorSource,
+    cursorCompatibleWithRuntime: page.CursorCompatibleWithRuntime,
+    sessionContractVersion: page.SessionContractVersion,
+    historyEpoch: page.HistoryEpoch,
+    persistenceDegraded: page.PersistenceDegraded,
+    snapshotSeqId: page.SnapshotSeqId,
+    error: undefined,
+    preparing: false,
+  };
+}
 
 /** Keep per-session read caches bounded while retaining the currently visible session. */
 function rememberSessionCache<T>(
@@ -160,6 +224,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const historyReadFailureRef = useRef<{ generation: number; message: string } | null>(null);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
+  const persistedTranscriptBySessionRef = useRef(new Map<string, Message[]>());
   const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
   const historyProfileBySessionRef = useRef(new Map<string, 'flat-v1' | 'agent-block-v1'>());
   const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
@@ -170,7 +235,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
   const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
   const localDraftAgentRef = useRef<string | null>(null);
-  const loadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
+  const loadSessionRef = useRef<((sessionId: string, historyReload?: boolean, signal?: AbortSignal) => Promise<void>) | null>(null);
   const fetchSessionsRef = useRef<
     ((
       targetAgentId?: string,
@@ -470,7 +535,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [agentId, subscribeRunEvents, uiCapabilities.RunLifecycle.Enabled]);
 
   const loadSession = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
+      if (signal?.aborted) return;
       localDraftAgentRef.current = null;
       // Bootstrap can invoke the initial list callback before React replaces
       // its closure. Read the committed capabilities for this Agent, then
@@ -508,12 +574,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const isStillCurrentSession = () => (
         currentSessionIdRef.current === sessionId
         && loadSessionGenerationRef.current === generation
+        && !signal?.aborted
       );
       useSessionStore.getState().setCurrentSessionId(sessionId);
       useSessionStore
         .getState()
         .setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
       resetCompaction();
+      let visibleBaseline = useMessageStore.getState().messages;
       runSubscriptionAbortRef.current?.abort();
       if (isMobile) {
         useUIStore.getState().setMobileSidebarOpen(false);
@@ -525,20 +593,19 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
+          signal,
         };
-        let messagesData;
-        try {
-          messagesData = await api.listSessionMessages(sessionId, messageOptions);
-        } catch (error) {
-          if (error instanceof CancelledError) throw error;
-          // Cloud history reads can briefly race a deployment proxy refresh.
-          // Retry one small idempotent read before turning a cold switch into
-          // an empty conversation. Warm switches continue showing the LRU
-          // transcript throughout this recovery window.
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 180));
-          if (!isStillCurrentSession()) return;
-          messagesData = await api.listSessionMessages(sessionId, messageOptions);
-        }
+        const messagesData = await readPreparedHistory(
+          () => api.listSessionMessages(sessionId, messageOptions),
+          { isCurrent: isStillCurrentSession, signal, onPreparing: () => {
+            const previous = useSessionStore.getState().messageHistory[sessionId];
+            useSessionStore.getState().setSessionMessageHistory(sessionId, {
+              ...previous, nextCursor: previous?.nextCursor ?? null, hasMore: previous?.hasMore ?? false,
+              preparing: true, error: undefined,
+            });
+            useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
+          } },
+        );
         if (!isStillCurrentSession()) {
           return;
         }
@@ -560,12 +627,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // switch keeps the cached canonical transcript visible until the
         // background refresh is complete.
         if (!cachedHistory) {
-          useMessageStore.getState().setMessages(fallbackHistory);
-          cacheTranscript(sessionId, fallbackHistory);
+          const painted = mergeHistoryWithLive(
+            fallbackHistory, visibleBaseline, useMessageStore.getState().messages);
+          useMessageStore.getState().setMessages(painted);
+          visibleBaseline = fallbackHistory;
+          cacheTranscript(sessionId, painted);
         }
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
           nextCursor: messagesData.NextCursor,
           hasMore: messagesData.HasMore,
+          ...historyPageMetadata(messagesData),
         });
         useSessionStore.getState().setSessionInitialMessageHistoryLoading(sessionId, false);
 
@@ -576,12 +647,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           const eventPage = await api.listSessionEvents(sessionId, {
             offset: 0,
             limit: SESSION_EVENTS_PAGE_SIZE,
+            signal,
+            // A control message page can coexist with a recovered Runtime.
+            // Probe events independently and merge only after their returned
+            // source/epoch agrees; a control epoch must not constrain Runtime.
+            historyEpoch: messagesData.CursorSource === 'runtime' ? messagesData.HistoryEpoch : undefined,
+            snapshotSeqId: messagesData.CursorSource === 'runtime' ? messagesData.SnapshotSeqId : undefined,
           });
           if (!isStillCurrentSession()) return;
+          const compatible = compatibleHistorySource(messagesData, eventPage);
           const eventHistory = {
-            events: (eventPage.Events || []) as SessionEventRecord[],
-            loadedCount: eventPage.Events?.length || 0,
-            total: Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0),
+            events: compatible ? (eventPage.Events || []) as SessionEventRecord[] : [],
+            loadedCount: compatible ? eventPage.Events?.length || 0 : 0,
+            total: compatible ? Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0) : 0,
+            cursorSource: compatible ? eventPage.CursorSource : undefined,
+            historyEpoch: compatible ? eventPage.HistoryEpoch : undefined,
+            snapshotSeqId: compatible ? eventPage.SnapshotSeqId : undefined,
           };
           rememberSessionCache(
             eventHistoryBySessionRef.current,
@@ -608,6 +689,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             history = rebuilt.messages;
           }
         } catch (error) {
+          if (isHistoryReloadRequired(error)) throw error;
           if (isStillCurrentSession()) historyReadFailureRef.current = {
             generation, message: '完整事件历史读取失败，请刷新会话后重新查找。当前结果只包含已读取的正文。',
           };
@@ -621,6 +703,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           new Set(canonicalRunIds),
           currentSessionIdRef.current,
         );
+        rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, history, currentSessionIdRef.current);
+        history = mergeHistoryWithLive(
+          history, visibleBaseline, useMessageStore.getState().messages);
         useMessageStore.getState().setMessages(history);
         cacheTranscript(sessionId, history);
         historyHydrationGenerationRef.current = null;
@@ -687,10 +772,37 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           }
         }
       } catch (error) {
-        if (isStillCurrentSession()) historyReadFailureRef.current = {
-          generation, message: '会话历史读取失败，请刷新会话后重新查找。',
-        };
-        console.error('Failed to load session messages:', error);
+        if (isHistoryReloadRequired(error) && !historyReload && isStillCurrentSession()) {
+          useSessionStore.getState().setSessionMessageHistory(sessionId, {
+            nextCursor: null, hasMore: false, cursorSource: undefined,
+            historyEpoch: undefined, snapshotSeqId: undefined,
+            dataSource: undefined, degraded: undefined,
+            cursorCompatibleWithRuntime: undefined,
+            sessionContractVersion: undefined,
+          });
+          queueMicrotask(() => {
+            if (isStillCurrentSession()) void loadSessionRef.current?.(sessionId, true);
+          });
+          return;
+        }
+        if (isStillCurrentSession() && !(error instanceof CancelledError)) {
+          const message = historyReload
+            ? '历史来源已变化，重新加载失败。原有消息已保留，请手动刷新会话。'
+            : isHistoryPreparing(error) ? '历史仍在准备，请稍后重试。'
+              : '会话历史读取失败，请重试。已有消息已保留。';
+          historyReadFailureRef.current = { generation, message };
+            const previous = useSessionStore.getState().messageHistory[sessionId];
+            useSessionStore.getState().setSessionMessageHistory(sessionId, {
+              ...previous,
+              nextCursor: previous?.nextCursor ?? null, hasMore: previous?.hasMore ?? false,
+              ...(historyReload ? { nextCursor: null, hasMore: false,
+                cursorSource: undefined, historyEpoch: undefined, snapshotSeqId: undefined } : {}),
+              preparing: false,
+              error: message,
+            });
+          if (historyReload) useUIStore.getState().pushToast(message, 'error');
+        }
+        if (!(error instanceof CancelledError)) console.error('Failed to load session messages:', error);
       } finally {
         if (historyHydrationGenerationRef.current === generation) historyHydrationGenerationRef.current = null;
         if (isStillCurrentSession()) {
@@ -827,6 +939,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const adoptCreatedSession = useCallback((newId: string, preserveMessages = false) => {
     localDraftAgentRef.current = null;
+    // Responses can announce the existing session on every turn. That is an
+    // acknowledgement, not navigation: keep its fixed snapshot and in-flight
+    // older page so another turn cannot strand the remaining history.
+    if (preserveMessages && currentSessionIdRef.current === newId) {
+      useSessionStore.getState().upsertSessions([
+        { SessionId: newId, UpdatedAt: new Date().toISOString() } as unknown as Session,
+      ]);
+      return;
+    }
     loadSessionGenerationRef.current += 1;
     runSubscriptionAbortRef.current?.abort();
     pendingCreatedSessionAgentsRef.current.set(newId, agentIdRef.current);
@@ -930,6 +1051,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         historyProfileBySessionRef.current.delete(sessionId);
         eventHistoryBySessionRef.current.delete(sessionId);
         canonicalRunIdsBySessionRef.current.delete(sessionId);
+        persistedTranscriptBySessionRef.current.delete(sessionId);
         pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
@@ -966,27 +1088,44 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       return;
     }
     const generation = loadSessionGenerationRef.current;
+    const visibleBaseline = persistedTranscriptBySessionRef.current.get(sessionId)
+      || useMessageStore.getState().messages;
     const requestToken = Symbol(sessionId);
     olderMessageRequestRef.current.set(sessionId, requestToken);
+    const isCurrent = () => currentSessionIdRef.current === sessionId
+      && loadSessionGenerationRef.current === generation
+      && olderMessageRequestRef.current.get(sessionId) === requestToken
+      && !signal?.aborted;
+    const preparation = { isCurrent, signal, onPreparing: () => {
+      useSessionStore.getState().setSessionMessageHistory(sessionId, {
+        ...historyState, preparing: true, error: undefined, isLoadingOlder: true,
+      });
+    } };
     try {
       useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
-      const [messagePage, eventPage] = await Promise.all([
+      const [messageResult, eventResult] = await Promise.allSettled([
         canLoadOlderMessages
-          ? api.listSessionMessages(sessionId, {
+          ? readPreparedHistory(() => api.listSessionMessages(sessionId, {
               signal,
               beforeSeqId: historyState.nextCursor ?? undefined,
+              cursorSource: historyState.cursorSource,
+              historyEpoch: historyState.historyEpoch,
+              snapshotSeqId: historyState.snapshotSeqId,
               limit: SESSION_MESSAGES_PAGE_SIZE,
               includeReasoning: true,
               includeToolEvents: true,
               includeAttachments: true,
-            })
+            }), preparation)
           : Promise.resolve(null),
         canLoadOlderEvents && cachedEvents
-          ? api.listSessionEvents(sessionId, {
+          ? readPreparedHistory(() => api.listSessionEvents(sessionId, {
               signal,
               offset: cachedEvents.loadedCount,
               limit: SESSION_EVENTS_PAGE_SIZE,
-            })
+              cursorSource: cachedEvents.cursorSource,
+              historyEpoch: cachedEvents.historyEpoch,
+              snapshotSeqId: cachedEvents.snapshotSeqId,
+            }), preparation)
           : Promise.resolve(null),
       ]);
       signal?.throwIfAborted();
@@ -997,6 +1136,31 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       ) {
         return;
       }
+      // A transient failure of supplemental canonical detail must not discard
+      // a successfully authorized Messages page. Keep its detail offset for a
+      // later explicit read. Authorization, source changes and cancellation
+      // still fail the operation before either result is applied.
+      const detailUnavailable = eventResult.status === 'rejected'
+        && eventResult.reason instanceof ApiError
+        && [429, 502, 503, 504].includes(eventResult.reason.code);
+      if (eventResult.status === 'rejected' && !detailUnavailable) throw eventResult.reason;
+      if (messageResult.status === 'rejected') throw messageResult.reason;
+      const messagePage = messageResult.value;
+      const eventPage = eventResult.status === 'fulfilled' ? eventResult.value : null;
+      const detailWarning = detailUnavailable
+        ? '消息正文已加载，部分事件详情暂时读取失败，请重试加载更早记录。'
+        : undefined;
+      if (messagePage && !compatibleHistorySource({
+        CursorSource: historyState.cursorSource,
+        HistoryEpoch: historyState.historyEpoch,
+        SnapshotSeqId: historyState.snapshotSeqId,
+        CursorCompatibleWithRuntime: historyState.cursorCompatibleWithRuntime,
+      }, messagePage)) throw reloadRequiredError();
+      if (eventPage && cachedEvents && !compatibleHistorySource(eventCacheSource(cachedEvents), eventPage)) {
+        throw reloadRequiredError();
+      }
+      if (detailWarning) historyReadFailureRef.current = { generation, message: detailWarning };
+      else if (eventPage) historyReadFailureRef.current = null;
       const olderMessages = messagePage
         ? mapBackendMessages(messagePage.Messages) as Message[]
         : [];
@@ -1030,6 +1194,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             events: mergedEvents,
             loadedCount: loadedEventCount,
             total: totalEventCount,
+            cursorSource: eventPage.CursorSource ?? cachedEvents?.cursorSource,
+            historyEpoch: eventPage.HistoryEpoch ?? cachedEvents?.historyEpoch,
+            snapshotSeqId: eventPage.SnapshotSeqId ?? cachedEvents?.snapshotSeqId,
           },
           currentSessionIdRef.current,
         );
@@ -1041,7 +1208,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
       ingestLegacyApprovalHistory(rebuilt.messages, sessionId);
-      const mergedHistory = rebuilt.messages;
+      rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuilt.messages, currentSessionIdRef.current);
+      const mergedHistory = mergeHistoryWithLive(
+        rebuilt.messages, visibleBaseline, useMessageStore.getState().messages);
       rememberSessionCache(
         canonicalRunIdsBySessionRef.current,
         sessionId,
@@ -1062,9 +1231,51 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           (messagePage ? messagePage.HasMore : false)
           || loadedEventCount < totalEventCount
         ),
+        ...(messagePage ? historyPageMetadata(messagePage) : {}),
+        ...(messagePage ? {
+          dataSource: messagePage.DataSource ?? historyState.dataSource,
+          degraded: messagePage.Degraded ?? historyState.degraded,
+          cursorSource: messagePage.CursorSource ?? historyState.cursorSource,
+          cursorCompatibleWithRuntime: messagePage.CursorCompatibleWithRuntime ?? historyState.cursorCompatibleWithRuntime,
+          sessionContractVersion: messagePage.SessionContractVersion ?? historyState.sessionContractVersion,
+          historyEpoch: messagePage.HistoryEpoch ?? historyState.historyEpoch,
+          persistenceDegraded: messagePage.PersistenceDegraded ?? historyState.persistenceDegraded,
+          snapshotSeqId: messagePage.SnapshotSeqId ?? historyState.snapshotSeqId,
+        } : {}),
+        preparing: false,
+        error: detailWarning,
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {
+      if (isHistoryReloadRequired(error)
+        && currentSessionIdRef.current === sessionId
+        && loadSessionGenerationRef.current === generation
+        && olderMessageRequestRef.current.get(sessionId) === requestToken
+        && !signal?.aborted) {
+        // Invalidate every part of the old pagination contract before a single
+        // fresh first-page read. loadSession does not recursively reload 409s.
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          nextCursor: null,
+          hasMore: false,
+          cursorSource: undefined,
+          historyEpoch: undefined,
+          snapshotSeqId: undefined,
+          dataSource: undefined,
+          degraded: undefined,
+          cursorCompatibleWithRuntime: undefined,
+          sessionContractVersion: undefined,
+          persistenceDegraded: undefined,
+          error: undefined,
+        });
+        await loadSession(sessionId, true, signal);
+        return;
+      }
+      if (isCurrent() && !(error instanceof CancelledError)) {
+        useSessionStore.getState().setSessionMessageHistory(sessionId, {
+          ...historyState, preparing: false,
+          error: error instanceof Error ? error.message : '历史加载失败，请重试',
+        });
+      }
       if (signal) throw error;
       if (!(error instanceof CancelledError)) {
         console.error('Failed to load older session messages:', error);
@@ -1072,10 +1283,18 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     } finally {
       if (olderMessageRequestRef.current.get(sessionId) === requestToken) {
         olderMessageRequestRef.current.delete(sessionId);
-        useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, false);
+        if (loadSessionGenerationRef.current === generation) {
+          const current = useSessionStore.getState().messageHistory[sessionId];
+          useSessionStore.getState().setSessionMessageHistory(sessionId, {
+            ...current, nextCursor: current?.nextCursor ?? null,
+            hasMore: current?.hasMore ?? false, preparing: false, isLoadingOlder: false,
+          });
+        } else {
+          useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, false);
+        }
       }
     }
-  }, [api, loadFeedbackForMessages]);
+  }, [api, loadFeedbackForMessages, loadSession]);
 
   const historySearchSnapshot = useCallback(() => {
     const sessionId = currentSessionIdRef.current || '';

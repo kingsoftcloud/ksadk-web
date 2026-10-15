@@ -1,3 +1,4 @@
+import { orderTranscript } from './transcript-order.js';
 import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
 import { projectConversationItems } from '../core/conversation/presentation.js';
 import { projectConversationStreamForHostedUi } from '../core/conversation/hosted.js';
@@ -121,9 +122,7 @@ function applyLegacyTerminalReceipts(
       });
     result.push({ ...receipt, invocationId: runId, eventId: persisted.EventId });
   }
-  return result === messages ? messages : [...result].sort(
-    (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
-  );
+  return result === messages ? messages : orderTranscript(result);
 }
 
 function withHistoryBlocks(message: Message): Message {
@@ -310,7 +309,13 @@ export function rebuildPersistedSessionHistory(
   const canonicalTerminalRunIds = new Set<string>();
   const fullyObservedRunIds = new Set<string>();
 
-  const orderedRecords = [...(records || [])].sort(
+  const orderedRecords = [...(records || [])].filter(row => {
+    const content = row.Content;
+    const envelope = record(content?.session_event || content?.sessionEvent);
+    const frame = record(content?.runtime_event || content?.runtimeEvent);
+    return [row.SessionId, envelope?.session_id, frame?.session_id]
+      .every(owner => !owner || owner === sessionId);
+  }).sort(
     (left, right) => Number(left.SeqId || 0) - Number(right.SeqId || 0),
   );
   const startsAtSessionBeginning = Number(orderedRecords[0]?.SeqId || 0) <= 1;
@@ -398,7 +403,12 @@ export function rebuildPersistedSessionHistory(
       replayedRuns.set(runId, projectConversationStreamForHostedUi({
         state, presentation, runId,
         cursor: Math.max(...frames.map(frame => Number(frame.seq || 0))),
-      }).messages.map((message, index) => ({ ...message, invocationId: runId, timestamp: timestamp + index })));
+      }).messages.map((message, index) => {
+        const first = frames.find(frame => frame.item_id === message.itemId
+          && (!message.scopeId || frame.scope_id === message.scopeId)) || frames[0];
+        return { ...message, invocationId: runId, timestamp: timestamp + index,
+          historyOrder: { seq: Number(first.seq), index } };
+      }));
     } catch (error) {
       failedStrictRuns.add(runId);
       console.warn(`[SessionHistory] strict replay skipped for run ${runId}:`, error instanceof Error ? error.message : 'invalid runtime history');
@@ -450,9 +460,7 @@ export function rebuildPersistedSessionHistory(
       || !completeCanonicalRunIds.has(message.invocationId)
     )
   )).map((message) => partialFallbackMessageById.get(message.id) || message);
-  let messages = [...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages].sort(
-    (left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0),
-  );
+  let messages = orderTranscript([...retainedFallback, ...canonicalMessages, ...partialCanonicalMessages]);
 
   for (const [runId, projectedRemote] of replayedRuns) {
     if (!projectedRemote.length) continue;
@@ -471,7 +479,7 @@ export function rebuildPersistedSessionHistory(
   }
 
   return {
-    messages: applyLegacyTerminalReceipts(messages, orderedRecords, canonicalTerminalRunIds),
+    messages: orderTranscript(applyLegacyTerminalReceipts(messages, orderedRecords, canonicalTerminalRunIds)),
     canonicalRunIds: [...completeCanonicalRunIds],
     translatedEvents,
   };

@@ -278,6 +278,12 @@ export function useRunAgent(ctx: RunAgentContext) {
         sessionId: owner.sessionId,
         onInvocationCreated: invocationId => {
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, { invocationId });
+          // Bind the submitted input by identity, never by text or by the last
+          // user row (which can belong to a queued turn or another session).
+          if (owner.isVisible()) {
+            useMessageStore.getState().patchMessages(rows => rows.map(message =>
+              message.id === draft.optimisticMessageId ? { ...message, invocationId } : message));
+          }
         },
         onSessionCreated: sessionId => {
           const wasVisible = owner.isVisible();
