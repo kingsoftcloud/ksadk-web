@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.13 - 2026-10-15
+
+### History and live conversations
+
+- Preserve the original order of user inputs, interleaved assistant output, and native tool results across streaming, refresh, and history pagination. Keep live turns and local drafts while a history page is loading.
+- Negotiate bounded history reads with compatible runtimes, preserve history provenance, recover stale cursors, and retain readable pages when supplemental details time out. Older runtimes retain their advertised pagination behavior.
+- Render canonical child scopes and A2A text artifacts without replacing the root transcript. Scoped cancellation is enabled only when the runtime advertises support.
+
+### Approvals and input
+
+- Present tool approval above the composer and restore native LangGraph approval history after refresh. Preserve rejected, cancelled, unknown, and asynchronously rejected delivery states.
+- Wait for HTTP admission before resolving an approval, and stop retrying cancelled subscriptions or permanent subscription errors.
+- Keep input-method confirmation Enter from submitting a message, and isolate queued inputs, history requests, and delayed updates when switching Agents or drafts.
+
+### Consumers and validation
+
+- Companion UI for KsADK 0.8.6; production consumers should pin this exact npm version. The package includes the reusable React library and SDK static UI; Hosted UI deployment remains owned by its host.
+- The formal release preflight runs frontend and Node tests, lint, all four builds, conversation/demo browser tests, provenance checks, and an isolated packed-package import check. Demo fixtures are sample data and do not prove a deployed backend integration.
+
 ## Unreleased
 
 - Unify tool approval actions above the composer, leaving read-only status in the timeline. Restore legacy Responses/AG-UI approvals from history without reviving terminal decisions, and scope submissions to the active session.
