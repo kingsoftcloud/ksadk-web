@@ -5,15 +5,18 @@ the KSADK embedded static UI.
 
 ## Consumers
 
-- `kingsoftcloud/ksadk-python` consumes `@kingsoftcloud/ksadk-web@latest` by
-  default and copies `dist-ksadk` into `ksadk/server/static`.
-- `agentengine-hosted-ui` consumes `@kingsoftcloud/ksadk-web@latest` by default
+- `kingsoftcloud/ksadk-python` consumes the pinned `@kingsoftcloud/ksadk-web@0.3.13` and copies `dist-ksadk` into `ksadk/server/static`.
+- `agentengine-hosted-ui` should pin a reviewed `@kingsoftcloud/ksadk-web` version
   and keeps private deployment shell files such as Docker, nginx, Helm, image
   tags, and runtime environment injection outside this repository.
 
+## Upgrade to 0.3.13
+
+Use `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.13` for the KsADK 0.8.6 companion UI. Keep existing imports and React peer dependencies. History and scoped cancellation are capability negotiated; deploying this package alone does not upgrade an older Runtime or the Hosted UI service. See [CHANGELOG.md](CHANGELOG.md) for history, approval, and input fixes.
+
 ## Public Demo
 
-The GitHub Pages demo is published from the reviewed `build:ksadk` output:
+The GitHub Pages demo is published from the reviewed `build:demo` output and uses local sample data:
 
 https://kingsoftcloud.github.io/ksadk-web/
 
