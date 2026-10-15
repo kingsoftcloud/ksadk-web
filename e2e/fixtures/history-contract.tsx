@@ -5,6 +5,7 @@ import { ApiFacadeImpl } from '../../src/core/api/facade.js';
 import { ConnectedMessageList } from '../../src/components/chat/ConnectedMessageList.js';
 import { useBootstrapStore } from '../../src/stores/bootstrap.js';
 import { useSessionStore } from '../../src/stores/session.js';
+import { useMessageStore } from '../../src/stores/message.js';
 import type { UiCapabilities } from '../../src/types/capabilities.js';
 
 const capabilities = { RunLifecycle: { Enabled: false } } as UiCapabilities;
@@ -27,6 +28,11 @@ function Harness() {
         void actions.loadOlderSessionMessages('s', olderAbortController.signal).catch(() => {});
       }}>Older S cancellable</button>
       <button type="button" onClick={() => olderAbortController?.abort()}>Cancel older</button>
+      <button type="button" onClick={() => useMessageStore.getState().patchMessages(rows => [
+        ...rows,
+        { id: 'live-question', role: 'user', content: 'New live question', timestamp: 1, invocationId: 'live-run' },
+        { id: 'live-answer', role: 'model', content: 'New live answer', timestamp: 2, invocationId: 'live-run' },
+      ])}>Append live turn</button>
     </div>
     <ConnectedMessageList agentName="Fixture" isMobile={false}
       onDeleteFeedback={() => {}} onSubmitFeedback={() => {}}

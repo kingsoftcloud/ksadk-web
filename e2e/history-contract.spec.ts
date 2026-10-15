@@ -164,3 +164,42 @@ test('browser cancellation prevents a late 409 reload from replacing visible his
   await expect(page.getByText('Old history')).toBeVisible();
   await expect(page.getByText('Late replacement')).toHaveCount(0);
 });
+
+test('browser retains a live turn received while the 409 replacement page is pending', async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(first()) };
+    if (index === 2) return { body: reload };
+    await held;
+    return { body: ok({ ...first(), Messages: [message('fresh', 'Fresh history', 2)],
+      HasMore: false, NextCursor: null, CursorSource: 'runtime', HistoryEpoch: 'epoch-2' }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await expect(page.getByText('Old history')).toBeVisible();
+  await page.getByRole('button', { name: 'Older S', exact: true }).click();
+  await expect.poll(() => calls.filter(call => call.action === 'ListSessionMessages').length).toBe(3);
+  await page.getByRole('button', { name: 'Append live turn' }).click();
+  await expect(page.getByText('New live question')).toBeVisible();
+  await expect(page.getByText('New live answer')).toBeVisible();
+  release();
+  await expect(page.getByText('Fresh history')).toBeVisible();
+  await expect(page.getByText('Old history')).toHaveCount(0);
+  await expect(page.getByText('New live question')).toBeVisible();
+  await expect(page.getByText('New live answer')).toBeVisible();
+});
+
+test('browser preparation polling keeps one pagination request and cancellation clears the indicator', async ({ page }) => {
+  const calls = await intercept(page, (_body, index) => index === 1
+    ? { body: ok(first()) }
+    : { body: { Code: 503, Message: 'Preparing', ReasonCode: 'HISTORY_PREPARING', Data: null } });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await expect(page.getByText('Old history')).toBeVisible();
+  await page.getByRole('button', { name: 'Older S cancellable' }).click();
+  await expect(page.getByTestId('history-preparing')).toBeVisible();
+  await page.getByRole('button', { name: 'Older S', exact: true }).click();
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+  await page.getByRole('button', { name: 'Cancel older' }).click();
+  await expect(page.getByTestId('history-preparing')).toHaveCount(0);
+  await expect(page.getByText('Old history')).toBeVisible();
+});

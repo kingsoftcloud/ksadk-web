@@ -627,7 +627,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // switch keeps the cached canonical transcript visible until the
         // background refresh is complete.
         if (!cachedHistory) {
-          const painted = historyReload ? fallbackHistory : mergeHistoryWithLive(
+          const painted = mergeHistoryWithLive(
             fallbackHistory, visibleBaseline, useMessageStore.getState().messages);
           useMessageStore.getState().setMessages(painted);
           visibleBaseline = fallbackHistory;
@@ -704,7 +704,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           currentSessionIdRef.current,
         );
         rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, history, currentSessionIdRef.current);
-        history = historyReload ? history : mergeHistoryWithLive(
+        history = mergeHistoryWithLive(
           history, visibleBaseline, useMessageStore.getState().messages);
         useMessageStore.getState().setMessages(history);
         cacheTranscript(sessionId, history);
@@ -1098,7 +1098,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       && !signal?.aborted;
     const preparation = { isCurrent, signal, onPreparing: () => {
       useSessionStore.getState().setSessionMessageHistory(sessionId, {
-        ...historyState, preparing: true, error: undefined,
+        ...historyState, preparing: true, error: undefined, isLoadingOlder: true,
       });
     } };
     try {
@@ -1283,7 +1283,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     } finally {
       if (olderMessageRequestRef.current.get(sessionId) === requestToken) {
         olderMessageRequestRef.current.delete(sessionId);
-        useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, false);
+        if (loadSessionGenerationRef.current === generation) {
+          const current = useSessionStore.getState().messageHistory[sessionId];
+          useSessionStore.getState().setSessionMessageHistory(sessionId, {
+            ...current, nextCursor: current?.nextCursor ?? null,
+            hasMore: current?.hasMore ?? false, preparing: false, isLoadingOlder: false,
+          });
+        } else {
+          useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, false);
+        }
       }
     }
   }, [api, loadFeedbackForMessages, loadSession]);

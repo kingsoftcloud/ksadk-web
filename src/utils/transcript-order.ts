@@ -35,15 +35,42 @@ export function orderTranscript(messages: Message[]): Message[] {
     || (a.side === 0 ? a.part - b.part : 0) || a.index - b.index).map(row => row.message);
 }
 
+function contentChanged(message: Message, previous?: Message): boolean {
+  if (!previous) return true;
+  const changed = (key: keyof Message) => {
+    if (key === 'feedback') return false;
+    if (key === 'historyOrder') {
+      return message.historyOrder?.seq !== previous.historyOrder?.seq
+        || message.historyOrder?.index !== previous.historyOrder?.index
+        || message.historyOrder?.group !== previous.historyOrder?.group;
+    }
+    return message[key] !== previous[key];
+  };
+  return (Object.keys(message) as (keyof Message)[]).some(changed)
+    || (Object.keys(previous) as (keyof Message)[]).some(changed);
+}
+
 /** An in-flight page must not roll a live run back to its older snapshot.
- * Baseline is the last committed history snapshot for this session. Store updates are
- * immutable; reference changes identify live revisions without text matching. */
+ * Feedback updates are presentation changes, not new runtime content. Keep
+ * them without replacing the run's newly hydrated historical items. */
 export function mergeHistoryWithLive(
   history: Message[], baseline: Message[], current: Message[],
 ): Message[] {
   const before = new Map(baseline.map(message => [message.id, message]));
-  const changed = current.filter(message => before.get(message.id) !== message);
-  if (!changed.length) return history;
+  const feedback = current.filter(message => before.has(message.id)
+    && before.get(message.id)?.feedback !== message.feedback);
+  const feedbackById = new Map(feedback.map(message => [message.id, message.feedback]));
+  const feedbackKey = (message: Message) => JSON.stringify([runOf(message), message.responseId]);
+  const feedbackByResponse = new Map(feedback.filter(message => message.responseId)
+    .map(message => [feedbackKey(message), message.feedback]));
+  const withFeedback = (messages: Message[]) => messages.map(message => {
+    if (feedbackById.has(message.id)) return { ...message, feedback: feedbackById.get(message.id) };
+    const key = feedbackKey(message);
+    return message.responseId && feedbackByResponse.has(key)
+      ? { ...message, feedback: feedbackByResponse.get(key) } : message;
+  });
+  const changed = current.filter(message => contentChanged(message, before.get(message.id)));
+  if (!changed.length) return withFeedback(history);
   const changedRuns = new Set(changed.map(runOf).filter(Boolean));
   const changedIds = new Set(changed.map(message => message.id));
   const live = current.filter(message => changedRuns.has(runOf(message)) || changedIds.has(message.id));
@@ -79,5 +106,5 @@ export function mergeHistoryWithLive(
     else result = result.map((row, i) => i === index
       ? { ...message, historyOrder: message.historyOrder || row.historyOrder } : row);
   }
-  return orderTranscript(result);
+  return withFeedback(orderTranscript(result));
 }
