@@ -90,6 +90,8 @@ export type RunEngineConfig = {
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
   permissionMode?: PermissionMode;
+  /** False when bootstrap explicitly denies caller approval-policy overrides. */
+  runtimeApprovalOverride?: boolean;
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;

@@ -38,6 +38,7 @@ export type ConnectedComposerProps = {
   ) => Promise<boolean | void>;
   stopGeneration: () => void;
   cancelRemote?: () => void;
+  cancelPreservesCheckpoint?: boolean;
   isMobile: boolean;
   attachmentsEnabled?: boolean;
   approvalEnabled?: boolean;
@@ -60,6 +61,7 @@ export function ConnectedComposer({
   submitDraft,
   stopGeneration,
   cancelRemote,
+  cancelPreservesCheckpoint,
   isMobile,
   attachmentsEnabled = true,
   approvalEnabled = false,
@@ -224,6 +226,7 @@ export function ConnectedComposer({
       }
       onStopGeneration={stopGeneration}
       onCancelRemote={cancelRemote}
+      cancelPreservesCheckpoint={cancelPreservesCheckpoint}
       onSubmit={handleSubmit}
       textareaRef={textareaRef}
       className={className}

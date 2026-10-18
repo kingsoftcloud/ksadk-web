@@ -107,6 +107,7 @@ export function useRunAgent(ctx: RunAgentContext) {
   const config = useMemo<RunEngineConfig>(() => ({
     agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata,
     thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto', permissionMode,
+    runtimeApprovalOverride: uiCapabilities.Approval !== false && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false,
     runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
     hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
       requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),

@@ -325,7 +325,7 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     ];
   }
 
-  if (eventType === 'response.cancelled') {
+  if (eventType === 'response.cancelled' || eventType === 'response.canceled') {
     return [
       { type: 'terminal', status: 'cancelled' },
     ];

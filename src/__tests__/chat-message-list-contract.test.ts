@@ -217,7 +217,7 @@ describe('chat message list contracts', () => {
     const composerSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatComposer.tsx'), 'utf8');
 
     expect(composerSource).toContain('保留恢复点并结束本次执行');
-    expect(composerSource).toContain("onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成'");
+    expect(composerSource).toContain("onCancelRemote && cancelPreservesCheckpoint ? '保留恢复点并结束本次执行' : '停止生成'");
     expect(composerSource).toContain('onCancelRemote();');
   });
 

@@ -959,6 +959,18 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('omits approval policy controls when the runtime explicitly denies overrides', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'dsh-native',
+      selectedModel: '', thinkingMode: 'auto', permissionMode: 'full', runtimeApprovalOverride: false });
+    engine.start({ text: 'plain turn', attachments: [], sessionId: 'session-live' });
+    await waitForCalls(calls);
+    expect(calls[0]).toMatchObject({ Stream: true, ApiFormat: 'responses' });
+    expect((calls[0].Metadata as { agentengine: object }).agentengine).not.toHaveProperty('tool_approval_mode');
+    expect(calls[0]).not.toHaveProperty('Background');
+  });
+
   it('maps advertised plan and goal controls to distinct runtime request metadata', async () => {
     const native = { supported: true, mode: 'native' as const, extensions: {} };
     const runtimeCapabilityMatrix = {
@@ -1731,7 +1743,7 @@ describe('RunEngineImpl', () => {
     expect(messages.at(-1)?.content).toContain('image_url is only supported by certain models');
   });
 
-  it('treats response.cancelled as a cancelled run instead of a failure', async () => {
+  it.each(['response.cancelled', 'response.canceled'])('treats %s as a cancelled run instead of a failure', async (eventType) => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine({
       ...createApiFacade(calls),
@@ -1740,8 +1752,8 @@ describe('RunEngineImpl', () => {
         return new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(new TextEncoder().encode(
-              'event: response.cancelled\n'
-              + 'data: {"status":"cancelled"}\n\n',
+              `event: ${eventType}\n`
+              + `data: ${JSON.stringify({ type: eventType, response: { status: 'cancelled', error: { code: 'RUNTIME_CANCELLED' } } })}\n\n`,
             ));
           },
         });

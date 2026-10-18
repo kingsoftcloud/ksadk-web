@@ -51,6 +51,7 @@ export type ChatComposerProps = {
   onRemoveAttachment: (index: number) => void;
   onStopGeneration: () => void;
   onCancelRemote?: () => void;
+  cancelPreservesCheckpoint?: boolean;
   onSubmit: (text: string, attachments: File[]) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   className?: string;
@@ -80,6 +81,7 @@ export function ChatComposer({
   onRemoveAttachment,
   onStopGeneration,
   onCancelRemote,
+  cancelPreservesCheckpoint = false,
   onSubmit,
   textareaRef,
   className,
@@ -95,7 +97,7 @@ export function ChatComposer({
     : executionMode === 'plan'
       ? '描述需要先规划的任务…'
       : isMobile ? '发送消息...' : '发送消息…';
-  const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成';
+  const activeStopTitle = onCancelRemote && cancelPreservesCheckpoint ? '保留恢复点并结束本次执行' : '停止生成';
   const canSubmit = executionMode === 'goal'
     ? Boolean(input.trim())
     : Boolean(input.trim() || attachments.length > 0);

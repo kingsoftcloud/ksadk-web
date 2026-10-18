@@ -1,5 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { AgentAuthorizationBoundary, AgentAuthorizationLoading } from './components/AgentAuthorizationBoundary.js';
+import { UnavailableSurfaceNotice } from './components/UnavailableSurfaceNotice.js';
 import { createScopedAgentBlockActions } from './core/conversation/scoped-cancel.js';
 import { useMessageStore } from './stores/message.js';
 import { useUIStore } from './stores/ui.js';
@@ -233,7 +234,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
         await api.cancelRun(agentId, sessionId, invocationId);
         useStreamingStore.getState().stopSessionActivity(
           sessionId,
-          '取消请求已发送，后台运行会停在最近 checkpoint。',
+          '取消请求已发送，等待运行时确认结束。',
         );
       } catch (err) {
         console.warn('[App] cancelRun failed:', err);
@@ -479,6 +480,8 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
           nativeTerminal={uiCapabilities.NativeTerminal}
         />
 
+        <UnavailableSurfaceNotice surface={initialSurface}
+          terminalEnabled={Boolean(uiCapabilities.NativeTerminal?.Enabled)} workspaceEnabled={workspaceEnabled} />
         {nativeLauncherMode ? (
           <NativeRuntimeLauncher
             productLabel={nativeRuntimeLabel}
@@ -521,6 +524,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
           submitDraft={submitDraft}
           stopGeneration={handleStopGeneration}
           cancelRemote={uiCapabilities.StopRun ? handleCancelRemote : undefined}
+          cancelPreservesCheckpoint={uiCapabilities.RunLifecycle.Checkpoints}
           isMobile={isMobile}
           attachmentsEnabled={uiCapabilities.Attachments !== false}
           approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
