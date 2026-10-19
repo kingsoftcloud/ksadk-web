@@ -16,7 +16,7 @@ import { shouldStopReadingRunStream } from '../../utils/stream-control.js';
 import { parseSseChunk, splitSseBuffer } from '../transport/sse-parser.js';
 import type { SessionEventRecord } from '../../types/session-events.js';
 import { getErrorMessage } from '../../utils/error.js';
-import { ApiError } from '../../api/errors.js';
+import { ApiError, CancelledError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
 import { useStreamingStore } from '../../stores/streaming.js';
@@ -1271,6 +1271,7 @@ export class RunEngineImpl implements RunEngine {
     const maxConsecutiveErrors = 6;
 
     while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
         const afterSeq = this.lastSeqId;
         const stream = await this.api.subscribeSessionEvents(
@@ -1279,7 +1280,7 @@ export class RunEngineImpl implements RunEngine {
           { signal: this.abortController?.signal, ...(scopedCommand ? { commandId: scopedCommand } : {}) },
         );
         consecutiveErrors = 0;
-        const reader = stream.getReader();
+        reader = stream.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         while (terminalStatus === undefined) {
@@ -1343,7 +1344,8 @@ export class RunEngineImpl implements RunEngine {
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (error instanceof CancelledError || this.abortController?.signal.aborted
+          || (error instanceof DOMException && error.name === 'AbortError')) {
           return { terminalStatus: 'cancelled' };
         }
         if (scopedCommand && error instanceof ApiError && error.code === 409
@@ -1360,6 +1362,10 @@ export class RunEngineImpl implements RunEngine {
         consecutiveErrors += 1;
         if (consecutiveErrors >= maxConsecutiveErrors) break;
         await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveErrors));
+      } finally {
+        // A durable terminal or local disconnect must also release its HTTP
+        // subscription, including when the upstream remains open for heartbeats.
+        await reader?.cancel().catch(() => {});
       }
     }
     if (terminalStatus === undefined) terminalStatus = 'interrupted';

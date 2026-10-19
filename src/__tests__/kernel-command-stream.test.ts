@@ -15,6 +15,19 @@ const framesFor = (run: string) => fixture.map((f, i) => ({ ...f, family: 'runti
   ...(f.parent_scope_id && f.item_kind === 'message' ? { item_kind: 'artifact' } : {}) }));
 
 describe('command-bound native hosted streaming', () => {
+  it('releases an open subscription when a durable control terminal arrives', async () => {
+    const cancelled=vi.fn();
+    const api={runAgent:async()=>bytes(JSON.stringify({Data:{ReceiptStatus:'accepted',CommandId:commandId}})),
+      subscribeSessionEvents:async()=>new ReadableStream<Uint8Array>({start(c){c.enqueue(encode([
+        {seq:501,family:'control',event_type:'control.run_transition',run_id:'root-run-1',state:'completed'},
+      ]))},cancel:cancelled}),
+    } as unknown as ApiFacade;
+    const engine=createRunEngine(api);const settled=vi.fn();
+    engine.updateConfig({agentId:'agent',apiFormats:['responses'],agentFramework:'langgraph',selectedModel:'',thinkingMode:'auto',kernelSessionEventsEnabled:true,kernelCommandEventsEnabled:true});
+    engine.start({text:'task',sessionId:'session',attachments:[],onSettled:settled});
+    await vi.waitFor(()=>expect(settled).toHaveBeenCalledWith('session','completed'));
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
   it.each(['accepted', 'duplicate'])('shows remote text before completion and reconnects from the same session cursor: %s', async status => {
     const frames = framesFor('root-run-1');
     let first!: ReadableStreamDefaultController<Uint8Array>;
