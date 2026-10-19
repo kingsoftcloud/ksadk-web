@@ -4,6 +4,7 @@ import { RunEngineImpl } from '../core/run/index.js';
 import { ApiError } from '../api/client.js';
 import type { ApiFacade } from '../core/api/types.js';
 import type { RunEvent } from '../core/run/types.js';
+import { ApiFacadeImpl } from '../core/api/facade.js';
 
 const fixture = readFileSync(new URL('./fixtures/a2a_remote_agent/v1/a2a_stream_tool_terminal.jsonl', import.meta.url), 'utf8')
   .trim().split('\n').map(line => JSON.parse(line)).filter(row => row.kind === 'runtime_event').map(row => row.payload);
@@ -15,6 +16,22 @@ const framesFor = (run: string) => fixture.map((f, i) => ({ ...f, family: 'runti
   ...(f.parent_scope_id && f.item_kind === 'message' ? { item_kind: 'artifact' } : {}) }));
 
 describe('command-bound native hosted streaming', () => {
+  it.each([200,409])('keeps the real GET transport reason for a queued admission (HTTP %s)',async status=>{
+    let subscriptions=0;
+    const fetcher=vi.fn(async(url:RequestInfo|URL)=>{
+      if(String(url).includes('/RunAgent'))return new Response(JSON.stringify({Code:0,Data:{ReceiptStatus:'accepted',CommandId:commandId,PresentationProfile:'agent-block-v1'}}),{headers:{'content-type':'application/json'}});
+      subscriptions++;
+      if(subscriptions===1)return new Response(JSON.stringify({Code:409,Message:'Kernel command is waiting for its run',Data:{ReasonCode:'KERNEL_COMMAND_PENDING'}}),{status,headers:{'content-type':'application/json'}});
+      return new Response(encode(framesFor('root-run-1')),{headers:{'content-type':'text/event-stream'}});
+    });
+    const engine=createRunEngine(new ApiFacadeImpl({fetch:fetcher,agentId:'agent'}));const settled=vi.fn();
+    engine.updateConfig({agentId:'agent',apiFormats:['responses'],agentFramework:'langgraph',selectedModel:'',thinkingMode:'auto',kernelSessionEventsEnabled:true,kernelCommandEventsEnabled:true,presentationProfile:'agent-block-v1'});
+    engine.start({text:'queued turn',sessionId:'session',attachments:[],onSettled:settled});
+    await vi.waitFor(()=>expect(settled).toHaveBeenCalledWith('session','completed'),{timeout:3000});
+    expect(fetcher.mock.calls.filter(([u])=>String(u).includes('/RunAgent'))).toHaveLength(1);
+    expect(subscriptions).toBe(2);
+    expect(fetcher.mock.calls.filter(([u])=>String(u).includes('/SubscribeSessionEvents')).every(([u])=>String(u).includes('CommandId='+commandId))).toBe(true);
+  });
   it('releases an open subscription when a durable control terminal arrives', async () => {
     const cancelled=vi.fn();
     const api={runAgent:async()=>bytes(JSON.stringify({Data:{ReceiptStatus:'accepted',CommandId:commandId}})),
