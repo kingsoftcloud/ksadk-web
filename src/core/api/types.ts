@@ -37,9 +37,10 @@ export interface ApiFacade {
   }>;
 
   // Events & Run
-  listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; cursorSource?: string; historyEpoch?: string; snapshotSeqId?: number; signal?: AbortSignal }): Promise<{
+  listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; beforeSeqId?: number; afterSeqId?: number; eventTypes?: string[]; cursorSource?: string; historyEpoch?: string; snapshotSeqId?: number; signal?: AbortSignal }): Promise<{
     Events: unknown[];
     Total?: number;
+    HasMore?: boolean;
     Offset?: number;
     Limit?: number;
     DataSource?: string;
@@ -104,7 +105,7 @@ export interface ApiFacade {
     IdempotencyKey: string;
   }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
   getAgentStatus(opts?: { signal?: AbortSignal }): Promise<unknown>;
-  subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>;
+  subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal; commandId?: string }): Promise<ReadableStream<Uint8Array>>;
 
   // Feedback
   getResponseFeedback(payload: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<unknown>;
