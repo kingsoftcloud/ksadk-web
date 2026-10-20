@@ -215,6 +215,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   } = ctx;
   const currentSessionIdRef = useRef<string | null>(ctx.currentSessionId);
   const agentIdRef = useRef(ctx.agentId);
+  const uiCapabilitiesRef = useRef(uiCapabilities);
+  uiCapabilitiesRef.current = uiCapabilities;
   const runSubscriptionAbortRef = useRef<AbortController | null>(null);
   // agent-kernel/v1 unified cursor: only the Session seq dedupes/orders and
   // drives reconnects; Responses/AG-UI/A2A internal event ids are ignored.
@@ -314,7 +316,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       let terminalStatusSeen = false;
       let cancelledByCaller = false;
       const bootstrap = useBootstrapStore.getState();
-      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilities;
+      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilitiesRef.current;
       const nativeRecovery = capabilities.KernelSessionEventsByCommand === true;
       const profile = bootstrapPresentationProfile(capabilities.ConversationSurface, agentBlockRendererCatalog);
       const canonical = new RuntimeConversationIngress(options.sessionId, undefined, profile);
@@ -543,12 +545,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const followAcceptedInteraction = useCallback((interaction: Interaction) => {
     // The inbox receipt does not mean the run has finished resuming. Follow
     // its durable identity even while GetSession still projects waiting_input.
-    if (!uiCapabilities.RunLifecycle.Enabled || !interaction.runId
+    if (!uiCapabilitiesRef.current.RunLifecycle.Enabled || !interaction.runId
       || agentIdRef.current !== agentId
       || currentSessionIdRef.current !== interaction.sessionId
       || runSubscriptionAbortRef.current) return;
     const activity = useStreamingStore.getState().getSessionActivity(interaction.sessionId);
-    if (uiCapabilities.KernelSessionEventsByCommand === true
+    if (uiCapabilitiesRef.current.KernelSessionEventsByCommand === true
       && useStreamingStore.getState().isSessionStreaming(interaction.sessionId)
       && activity?.source === 'run' && activity.runId === interaction.runId
       && ['connecting', 'running', 'waiting'].includes(activity.status)) return;
@@ -559,7 +561,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         eventHistoryBySessionRef.current.get(interaction.sessionId)?.events || [],
       ),
     });
-  }, [agentId, subscribeRunEvents, uiCapabilities.RunLifecycle.Enabled, uiCapabilities.KernelSessionEventsByCommand]);
+  }, [agentId, subscribeRunEvents]);
 
   const loadSession = useCallback(
     async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
@@ -569,7 +571,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       // its closure. Read the committed capabilities for this Agent, then
       // freeze the selected profile for this history read and its pages.
       const bootstrap = useBootstrapStore.getState();
-      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilities;
+      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilitiesRef.current;
       const profile = bootstrapPresentationProfile(capabilities.ConversationSurface, agentBlockRendererCatalog);
       historyProfileBySessionRef.current.set(sessionId, profile);
       const previousSessionId = currentSessionIdRef.current;
