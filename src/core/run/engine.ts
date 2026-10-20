@@ -1173,7 +1173,7 @@ export class RunEngineImpl implements RunEngine {
       // the server can validate them and still apply a stricter deployment policy.
       Metadata: {
         agentengine: {
-          tool_approval_mode: this.config.permissionMode || 'risk',
+          ...(this.config.runtimeApprovalOverride === false ? {} : { tool_approval_mode: this.config.permissionMode || 'risk' }),
           ...executionMetadata,
         },
       },

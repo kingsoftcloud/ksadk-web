@@ -90,6 +90,8 @@ export type RunEngineConfig = {
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
   permissionMode?: PermissionMode;
+  /** Explicit false keeps fixed runtime policy out of request overrides. */
+  runtimeApprovalOverride?: boolean;
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;

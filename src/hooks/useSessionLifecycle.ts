@@ -537,7 +537,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       }
     },
-    [api],
+    [api, uiCapabilities],
   );
 
   const followAcceptedInteraction = useCallback((interaction: Interaction) => {

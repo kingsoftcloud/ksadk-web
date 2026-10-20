@@ -38,7 +38,7 @@ const config: RunEngineConfig = {
   selectedModel: 'model-a', thinkingMode: 'auto', permissionMode: 'ask',
 };
 
-function probe(api: Partial<ApiFacade>) {
+function probe(api: Partial<ApiFacade>, uiCapabilities: Record<string, unknown> = {}) {
   const controller = new ConversationController('fixture-run-owners');
   const conversationIdRef = { current: controller.createDraft('agent-a') as string | undefined };
   const currentSessionIdRef = { current: null as string | null };
@@ -46,7 +46,7 @@ function probe(api: Partial<ApiFacade>) {
   const onSettled = vi.fn();
   let actions!: ReturnType<typeof useRunAgent>;
   function Probe() {
-    actions = useRunAgent({ ...config, api: api as ApiFacade, uiCapabilities: {}, isMobile: false,
+    actions = useRunAgent({ ...config, api: api as ApiFacade, uiCapabilities: uiCapabilities as never, isMobile: false,
       currentSessionId: currentSessionIdRef.current, currentSessionIdRef, agentIdRef,
       conversationIdRef, queuedDraftRef: { current: [] }, conversationClient: null,
       outbox: controller.outbox,
@@ -83,6 +83,25 @@ beforeEach(() => {
 });
 
 describe('submitted conversation ownership', () => {
+  it.each([
+    ['legacy capabilities', {}, true],
+    ['explicit approval override', { Approval: true, ApprovalPolicy: { RuntimeOverride: true } }, true],
+    ['fixed approval policy', { Approval: true, ApprovalPolicy: { RuntimeOverride: false } }, false],
+    ['approval unavailable', { Approval: false, ApprovalPolicy: { RuntimeOverride: true } }, false],
+  ] as const)('respects %s when submitting an actual hook-owned run', async (_name, capabilities, allowed) => {
+    const stream = outputStream();
+    const runAgent = vi.fn().mockResolvedValue(stream.stream);
+    const p = probe({ createSession: vi.fn().mockResolvedValue({ SessionId: 'native-a' }), runAgent }, capabilities);
+    await p.actions.submitDraft('hello from Hosted UI', []);
+    await vi.waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
+    const body = runAgent.mock.calls[0][0];
+    expect(body).toMatchObject({ ApiFormat: 'responses', ResponsesInput: [{ role: 'user' }] });
+    if (allowed) expect(body.Metadata.agentengine.tool_approval_mode).toBe('ask');
+    else expect(body.Metadata.agentengine).not.toHaveProperty('tool_approval_mode');
+    stream.close();
+    await vi.waitFor(() => expect(p.onSettled).toHaveBeenCalled());
+  });
+
   it.each([true, false])('settles an approval wait without a retryable failure (approval=%s)', async approval => {
     const stream = new ReadableStream<Uint8Array>({ start(controller) {
       controller.enqueue(new TextEncoder().encode(
