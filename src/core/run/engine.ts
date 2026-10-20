@@ -16,7 +16,7 @@ import { shouldStopReadingRunStream } from '../../utils/stream-control.js';
 import { parseSseChunk, splitSseBuffer } from '../transport/sse-parser.js';
 import type { SessionEventRecord } from '../../types/session-events.js';
 import { getErrorMessage } from '../../utils/error.js';
-import { ApiError } from '../../api/errors.js';
+import { ApiError, CancelledError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
 import { useStreamingStore } from '../../stores/streaming.js';
@@ -1253,7 +1253,14 @@ export class RunEngineImpl implements RunEngine {
     const canonical = new RuntimeConversationIngress(sessionId, undefined, profile);
     // Inbox acceptedSeq is not a SessionEvent cursor. Scope replay to the
     // admitted command before considering any older run's terminal facts.
-    let commandSeen = !receipt.commandId;
+    const scopedCommand = this.config.kernelCommandEventsEnabled ? receipt.commandId || undefined : undefined;
+    if (this.config.kernelCommandEventsEnabled && !scopedCommand) {
+      this.emit({ type: 'error', error: new Error('运行回执缺少命令身份，无法安全订阅本轮输出。') });
+      return { terminalStatus: 'failed' };
+    }
+    // Command-scoped admission starts at its committed run binding, including
+    // duplicate receipts. acceptedSeq belongs to the Inbox, never this cursor.
+    let commandSeen = Boolean(scopedCommand) || !receipt.commandId;
     let kernelRunId = receipt.runId || '';
     if (kernelRunId) {
       this.publishInvocation(kernelRunId);
@@ -1264,15 +1271,16 @@ export class RunEngineImpl implements RunEngine {
     const maxConsecutiveErrors = 6;
 
     while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
         const afterSeq = this.lastSeqId;
         const stream = await this.api.subscribeSessionEvents(
           sessionId,
           afterSeq,
-          { signal: this.abortController?.signal },
+          { signal: this.abortController?.signal, ...(scopedCommand ? { commandId: scopedCommand } : {}) },
         );
         consecutiveErrors = 0;
-        const reader = stream.getReader();
+        reader = stream.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         while (terminalStatus === undefined) {
@@ -1336,12 +1344,28 @@ export class RunEngineImpl implements RunEngine {
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (error instanceof CancelledError || this.abortController?.signal.aborted
+          || (error instanceof DOMException && error.name === 'AbortError')) {
           return { terminalStatus: 'cancelled' };
+        }
+        if (scopedCommand && error instanceof ApiError && error.code === 409
+          && (error.detail as { Data?: { ReasonCode?: string } } | undefined)?.Data?.ReasonCode === 'KERNEL_COMMAND_PENDING') {
+          this.emit({ type: 'activity', phase: '运行已入队，等待执行', status: 'waiting', countEvent: false });
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          if (this.abortController?.signal.aborted) return { terminalStatus: 'cancelled' };
+          continue;
+        }
+        if (error instanceof ApiError && error.code >= 400 && error.code < 500 && error.code !== 429) {
+          this.emit({ type: 'error', error });
+          return { terminalStatus: 'failed' };
         }
         consecutiveErrors += 1;
         if (consecutiveErrors >= maxConsecutiveErrors) break;
         await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveErrors));
+      } finally {
+        // A durable terminal or local disconnect must also release its HTTP
+        // subscription, including when the upstream remains open for heartbeats.
+        await reader?.cancel().catch(() => {});
       }
     }
     if (terminalStatus === undefined) terminalStatus = 'interrupted';

@@ -2,6 +2,9 @@ import { mergeHistoryWithLive } from '../utils/transcript-order.js';
 import { isHistoryPreparing, readPreparedHistory } from '../utils/history-preparation.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
+import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
+import { projectConversationItems } from '../core/conversation/presentation.js';
+import { hydrateKernelRunHistory } from '../utils/kernel-run-history.js';
 import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
@@ -212,6 +215,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   } = ctx;
   const currentSessionIdRef = useRef<string | null>(ctx.currentSessionId);
   const agentIdRef = useRef(ctx.agentId);
+  const uiCapabilitiesRef = useRef(uiCapabilities);
+  uiCapabilitiesRef.current = uiCapabilities;
   const runSubscriptionAbortRef = useRef<AbortController | null>(null);
   // agent-kernel/v1 unified cursor: only the Session seq dedupes/orders and
   // drives reconnects; Responses/AG-UI/A2A internal event ids are ignored.
@@ -310,7 +315,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       let shouldReloadSession = false;
       let terminalStatusSeen = false;
       let cancelledByCaller = false;
-      let afterSeqId = options.afterSeqId;
+      const bootstrap = useBootstrapStore.getState();
+      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilitiesRef.current;
+      const nativeRecovery = capabilities.KernelSessionEventsByCommand === true;
+      const profile = bootstrapPresentationProfile(capabilities.ConversationSurface, agentBlockRendererCatalog);
+      const canonical = new RuntimeConversationIngress(options.sessionId, undefined, profile);
+      // This endpoint is explicitly bound to InvocationId by Server. Start
+      // from that run's boundary so its descriptor precedes remote children;
+      // reconnects then keep the last observed cursor and the same reducer.
+      let afterSeqId = nativeRecovery ? 0 : options.afterSeqId;
       const isCurrentSubscription = () => (
         runSubscriptionAbortRef.current === controller
         && currentSessionIdRef.current === options.sessionId
@@ -408,6 +421,17 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                   const seqId = Number(event.SeqId || 0);
                   if (Number.isFinite(seqId)) {
                     afterSeqId = Math.max(afterSeqId, seqId);
+                  }
+                  const frame = (event.Content as { runtime_event?: Record<string, unknown> } | undefined)?.runtime_event;
+                  if (nativeRecovery && frame?.schema_version === 2 && frame.run_id === options.invocationId) {
+                    if (canonical.apply(frame)) {
+                      const state = canonical.snapshot();
+                      dispatchRunEventToStores({
+                        type: 'conversation_snapshot', sessionId: options.sessionId,
+                        result: { state, presentation: projectConversationItems(state, { profile }),
+                          runId: options.invocationId, cursor: afterSeqId },
+                      });
+                    }
                   }
                   dispatchRunEventToStores({
                     type: 'stream_event',
@@ -521,10 +545,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const followAcceptedInteraction = useCallback((interaction: Interaction) => {
     // The inbox receipt does not mean the run has finished resuming. Follow
     // its durable identity even while GetSession still projects waiting_input.
-    if (!uiCapabilities.RunLifecycle.Enabled || !interaction.runId
+    if (!uiCapabilitiesRef.current.RunLifecycle.Enabled || !interaction.runId
       || agentIdRef.current !== agentId
       || currentSessionIdRef.current !== interaction.sessionId
       || runSubscriptionAbortRef.current) return;
+    const activity = useStreamingStore.getState().getSessionActivity(interaction.sessionId);
+    if (uiCapabilitiesRef.current.KernelSessionEventsByCommand === true
+      && useStreamingStore.getState().isSessionStreaming(interaction.sessionId)
+      && activity?.source === 'run' && activity.runId === interaction.runId
+      && ['connecting', 'running', 'waiting'].includes(activity.status)) return;
     void subscribeRunEvents({
       sessionId: interaction.sessionId,
       invocationId: interaction.runId,
@@ -532,7 +561,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         eventHistoryBySessionRef.current.get(interaction.sessionId)?.events || [],
       ),
     });
-  }, [agentId, subscribeRunEvents, uiCapabilities.RunLifecycle.Enabled]);
+  }, [agentId, subscribeRunEvents]);
 
   const loadSession = useCallback(
     async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
@@ -542,7 +571,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       // its closure. Read the committed capabilities for this Agent, then
       // freeze the selected profile for this history read and its pages.
       const bootstrap = useBootstrapStore.getState();
-      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilities;
+      const capabilities = bootstrap.agentId === agentIdRef.current ? bootstrap.capabilities : uiCapabilitiesRef.current;
       const profile = bootstrapPresentationProfile(capabilities.ConversationSurface, agentBlockRendererCatalog);
       historyProfileBySessionRef.current.set(sessionId, profile);
       const previousSessionId = currentSessionIdRef.current;
@@ -656,9 +685,17 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           });
           if (!isStillCurrentSession()) return;
           const compatible = compatibleHistorySource(messagesData, eventPage);
+          let hydratedEvents = eventPage.Events as SessionEventRecord[];
+          const remoteRun = [...fallbackHistory].reverse().find(message => message.invocationId
+            && Object.values(message.tools || {}).some(tool => tool.name === 'call_a2a_agent'))?.invocationId;
+          if (compatible && capabilities.KernelSessionEventsByCommand === true
+            && eventPage.CursorSource === 'runtime' && remoteRun) {
+            hydratedEvents = await hydrateKernelRunHistory(api, sessionId, remoteRun, eventPage, isStillCurrentSession, signal);
+            if (!isStillCurrentSession()) return;
+          }
           const eventHistory = {
-            events: compatible ? (eventPage.Events || []) as SessionEventRecord[] : [],
-            loadedCount: compatible ? eventPage.Events?.length || 0 : 0,
+            events: compatible ? hydratedEvents : [],
+            loadedCount: compatible ? hydratedEvents.length : 0,
             total: compatible ? Math.max(0, Number(eventPage.Total ?? eventPage.Events?.length ?? 0) || 0) : 0,
             cursorSource: compatible ? eventPage.CursorSource : undefined,
             historyEpoch: compatible ? eventPage.HistoryEpoch : undefined,
@@ -761,10 +798,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               || (status === '' && isRecentlyUpdatedSession(session))
             );
             if (isActive) {
-              void subscribeRunEvents({
-                sessionId,
-                invocationId: session.ActiveInvocationId!,
-                afterSeqId: lastSeqId,
+              const activity = useStreamingStore.getState().getSessionActivity(sessionId);
+              const nativeOwner = capabilities.KernelSessionEventsByCommand === true
+                && useStreamingStore.getState().isSessionStreaming(sessionId)
+                && activity?.source === 'run' && activity.runId === session.ActiveInvocationId
+                && ['connecting', 'running', 'waiting'].includes(activity.status);
+              if (!nativeOwner) void subscribeRunEvents({
+                sessionId, invocationId: session.ActiveInvocationId!, afterSeqId: lastSeqId,
               });
             }
           } catch (error) {

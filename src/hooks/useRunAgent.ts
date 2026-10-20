@@ -112,7 +112,8 @@ export function useRunAgent(ctx: RunAgentContext) {
       requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),
     }),
     checkpointResumePreviewEnabled: Boolean(uiCapabilities.RunLifecycle?.CheckpointResumePreview),
-    kernelSessionEventsEnabled: uiCapabilities.KernelSessionEvents === true,
+    kernelSessionEventsEnabled: uiCapabilities.KernelSessionEvents === true || uiCapabilities.KernelSessionEventsByCommand === true,
+    kernelCommandEventsEnabled: uiCapabilities.KernelSessionEventsByCommand === true,
     presentationProfile: bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog),
     conversationClient: conversationClient || undefined,
   }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);

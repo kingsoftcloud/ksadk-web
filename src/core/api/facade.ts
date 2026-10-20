@@ -76,10 +76,11 @@ export class ApiFacadeImpl implements ApiFacade {
     return data.Session;
   }
 
-  async listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; cursorSource?: string; historyEpoch?: string; snapshotSeqId?: number; signal?: AbortSignal }) {
+  async listSessionEvents(sessionId: string, opts?: { offset?: number; limit?: number; beforeSeqId?: number; afterSeqId?: number; eventTypes?: string[]; cursorSource?: string; historyEpoch?: string; snapshotSeqId?: number; signal?: AbortSignal }) {
     const data = await this.client.postJsonAction<{
       Events?: unknown[];
       Total?: number;
+      HasMore?: boolean;
       Offset?: number;
       Limit?: number;
       DataSource?: string;
@@ -94,6 +95,9 @@ export class ApiFacadeImpl implements ApiFacade {
       SessionId: sessionId,
       Offset: opts?.offset,
       Limit: opts?.limit,
+      BeforeSeqId: opts?.beforeSeqId,
+      AfterSeqId: opts?.afterSeqId,
+      EventTypes: opts?.eventTypes,
       CursorSource: opts?.cursorSource,
       HistoryEpoch: opts?.historyEpoch,
       SnapshotSeqId: opts?.snapshotSeqId,
@@ -101,6 +105,7 @@ export class ApiFacadeImpl implements ApiFacade {
     const events = data.Events ?? [];
     return {
       Events: events,
+      HasMore: data.HasMore,
       Total: Number.isFinite(Number(data.Total)) ? Number(data.Total) : events.length,
       Offset: Number.isFinite(Number(data.Offset)) ? Number(data.Offset) : opts?.offset ?? 0,
       Limit: Number.isFinite(Number(data.Limit)) ? Number(data.Limit) : opts?.limit ?? events.length,
@@ -236,10 +241,11 @@ export class ApiFacadeImpl implements ApiFacade {
     return this.client.postJsonAction('GetAgentStatus', {}, opts);
   }
 
-  async subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal }) {
+  async subscribeSessionEvents(sessionId: string, afterSeq: number, opts?: { signal?: AbortSignal; commandId?: string }) {
     return this.client.streamGetAction('SubscribeSessionEvents', {
       SessionId: sessionId,
       after_seq: String(afterSeq),
+      ...(opts?.commandId ? { CommandId: opts.commandId } : {}),
     }, opts);
   }
 

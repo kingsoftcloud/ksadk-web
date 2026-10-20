@@ -259,8 +259,12 @@ export class AgentEngineClient {
       throw rethrowIfNotCancelled(error);
     }
 
-    if (!response.ok) {
-      throw new ApiError(response.status, `流式订阅失败: ${response.statusText}`);
+    if (!response.ok || response.headers.get('content-type')?.toLowerCase().includes('application/json')) {
+      // Admission failures may be HTTP errors or HTTP-200 Action envelopes.
+      // Preserve their structured reason so a queued command is retried with
+      // the same identity instead of being treated as a failed run.
+      const detail = await parseActionResponse<unknown>(response);
+      throw new ApiError(502, '流式订阅未返回事件流', detail);
     }
 
     if (!response.body) {
