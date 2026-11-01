@@ -6,6 +6,7 @@ export type CancelRunOptions = {
 };
 
 export interface ApiFacade {
+  mcpAuthorization?: import('../mcp-authorization/types.js').McpAuthorizationRequest;
   compactSession?(agentId: string, sessionId: string): Promise<{ Status: string }>;
   // Session
   listSessions(agentId: string, opts?: { page?: number; pageSize?: number; signal?: AbortSignal }): Promise<{

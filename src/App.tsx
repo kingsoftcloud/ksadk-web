@@ -534,6 +534,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
           thinkingEnabled={thinkingEnabled}
           runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}
           pendingInteractions={pendingInteractions}
+          mcpAuthorization={api.mcpAuthorization}
           onRespondInteraction={(input) => {
             void respondInteraction(input);
           }}

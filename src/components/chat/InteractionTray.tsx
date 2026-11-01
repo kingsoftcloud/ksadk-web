@@ -1,3 +1,5 @@
+import { McpAuthorizationCard } from './McpAuthorizationCard.js';
+import type { McpAuthorizationRequest, McpAuthorizationSnapshot } from '../../core/mcp-authorization/types.js';
 import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import { jsonValue, type JsonValue } from '../../types/json-value.js';
 import { useState } from 'react';
@@ -41,6 +43,7 @@ export type InteractionTrayProps = {
   onRespond: (input: InteractionTrayRespondInput) => void | Promise<unknown>;
   /** Local pinned A2UI catalog used for digest validation. */
   localCatalog?: unknown;
+  mcpAuthorization?: McpAuthorizationRequest;
   className?: string;
 };
 
@@ -134,6 +137,7 @@ export function InteractionTray({
   onSelectIndex,
   onRespond,
   localCatalog,
+  mcpAuthorization,
   className,
 }: InteractionTrayProps) {
   const registry = useA2uiCatalogRegistry();
@@ -143,6 +147,9 @@ export function InteractionTray({
 
   const active = interactions[Math.min(activeIndex, Math.max(interactions.length - 1, 0))];
   if (!active) return null;
+  if (active.extensions.mcpAuthorization) return <McpAuthorizationCard
+    key={active.interactionId} sessionId={active.sessionId}
+    snapshot={active.extensions.mcpAuthorization as McpAuthorizationSnapshot} request={mcpAuthorization} />;
 
   const expired = isExpired(active);
   const submitError = readSubmitError(active);

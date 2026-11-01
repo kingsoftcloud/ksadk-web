@@ -1,3 +1,4 @@
+import { authorizationInteraction } from '../../mcp-authorization/normalize.js';
 /**
  * AgentEngine Interaction/v1 SessionEvent adapter.
  *
@@ -57,6 +58,12 @@ export function interactionFromSessionEvent(
   const canonical = persisted
     ?? (translated?.family === 'interaction' ? translated : null)
     ?? (outer.family === 'interaction' ? outer : null);
+  const authEnvelope = persisted
+    ?? (String(translated?.event_type || '').startsWith('mcp.authorization.') ? translated : null)
+    ?? (String(content?.event_type || '').startsWith('mcp.authorization.') ? content : outer);
+  if (authEnvelope && String(authEnvelope?.event_type || authEnvelope?.EventType || '').startsWith('mcp.authorization.')) {
+    return authorizationInteraction(authEnvelope.payload ?? authEnvelope, String(authEnvelope.session_id || outer.SessionId || fallbackSessionId || ''), String(authEnvelope.run_id || outer.InvocationId || ''));
+  }
   if (canonical && canonical.family !== 'interaction') return null;
   const envelope = canonical ?? outer;
   const eventType = String(

@@ -202,7 +202,7 @@ export class KernelRunEventTranslator {
       SeqId: seq,
     });
 
-    if (family === 'interaction') {
+    if (family === 'interaction' || eventType.startsWith('mcp.authorization.')) {
       // The interaction adapter reads interaction facts from
       // envelope.payload; wrap the flattened kernel frame so the adapter's
       // payload/body fallbacks find interaction_id / kind / outcome.

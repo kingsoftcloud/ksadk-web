@@ -4,7 +4,7 @@ import { interactionFromSessionEvent } from '../core/interaction/adapters/sessio
 import type { SessionEventRecord } from '../types/session-events.js';
 
 type Page = Awaited<ReturnType<ApiFacade['listSessionEvents']>>;
-const REQUESTED_TYPES = ['interaction.requested', 'interaction_requested',
+const REQUESTED_TYPES = ['mcp.authorization.requested', 'mcp.authorization.updated', 'interaction.requested', 'interaction_requested',
   'ksadk.interaction/v1.requested', 'InteractionRequested', 'approval.requested', 'a2ui.interaction'];
 const EVENT_TYPES = [...REQUESTED_TYPES, 'interaction.resolved', 'interaction_resolved',
   'ksadk.interaction/v1.resolved', 'InteractionResolved', 'interaction.cancelled',

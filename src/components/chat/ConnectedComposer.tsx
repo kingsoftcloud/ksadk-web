@@ -48,6 +48,7 @@ export type ConnectedComposerProps = {
   pendingInteractions?: readonly Interaction[];
   onRespondInteraction?: (input: InteractionTrayRespondInput) => void;
   localCatalog?: unknown;
+  mcpAuthorization?: import('../../core/mcp-authorization/types.js').McpAuthorizationRequest;
   className?: string;
 };
 
@@ -69,6 +70,7 @@ export function ConnectedComposer({
   pendingInteractions,
   onRespondInteraction,
   localCatalog,
+  mcpAuthorization,
   className,
 }: ConnectedComposerProps) {
   const [activeInteractionIndex, setActiveInteractionIndex] = useState(0);
@@ -142,15 +144,16 @@ export function ConnectedComposer({
     ? selectedExecutionMode
     : undefined;
 
+  const authorizationPending = Boolean(pendingInteractions?.some(item => item.extensions.mcpAuthorization));
   const handleSubmit = useCallback((draftText: string, draftAttachments: File[]) => {
-    if (!draftText && draftAttachments.length === 0) return;
+    if (authorizationPending || (!draftText && draftAttachments.length === 0)) return;
     useUIStore.getState().setInput('');
     useUIStore.getState().setAttachments([]);
     void submitDraft(draftText, draftAttachments, undefined, undefined, executionMode);
     if (executionMode === 'goal') {
       setSelectedExecutionMode(undefined);
     }
-  }, [executionMode, submitDraft]);
+  }, [authorizationPending, executionMode, submitDraft]);
 
   useEffect(() => {
     if (!textareaRef.current) return;
@@ -194,9 +197,11 @@ export function ConnectedComposer({
           onSelectIndex={setActiveInteractionIndex}
           onRespond={onRespondInteraction}
           localCatalog={localCatalog}
+          mcpAuthorization={mcpAuthorization}
         />
       ) : null}
       <ChatComposer
+      submissionBlocked={authorizationPending}
       headerSlot={headerSlot}
       onCompactContext={currentSessionId ? onCompactContext : undefined}
       attachments={attachments}

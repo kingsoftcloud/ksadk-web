@@ -1,5 +1,5 @@
 import type { JsonValue } from '../types/json-value.js';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   InteractionClientImpl,
   sharedInteractionStore,
@@ -88,6 +88,19 @@ export function useInteractions(ctx: UseInteractionsContext) {
   }, [version, ctx.currentSessionId]);
 
   const { currentSessionId, interactionV1Enabled, onAcceptedInteraction } = ctx;
+  const followedAuthorization = useRef(new Set<string>());
+  useEffect(() => {
+    for (const interaction of records) {
+      const auth = interaction.extensions.mcpAuthorization as { status?: string } | undefined;
+      if (!auth || !['credential_ready', 'connecting', 'resumed', 'cancelled', 'expired'].includes(auth.status || '')) continue;
+      const key = `${interaction.sessionId}:${interaction.interactionId}:${auth.status}`;
+      if (!followedAuthorization.current.has(key)) {
+        followedAuthorization.current.add(key);
+        onAcceptedInteraction?.(interaction);
+      }
+    }
+  }, [records, onAcceptedInteraction]);
+
   const respond = useCallback(
     (input: {
       interactionId: string;

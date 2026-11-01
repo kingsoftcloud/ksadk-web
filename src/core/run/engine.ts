@@ -1352,7 +1352,13 @@ export class RunEngineImpl implements RunEngine {
                 onInvocationCreated?.(kernelRunId);
               }
               if (frameRunId && kernelRunId !== frameRunId) continue;
-              if (frame.family === 'interaction' && typeof frame.interaction_id === 'string') {
+              if (String(frame.event_type).startsWith('mcp.authorization.')) {
+                const auth = (frame.payload ?? frame) as Record<string, unknown>;
+                const id = String(auth.wait_id || '');
+                if (id && ['resumed', 'cancelled', 'expired', 'failed'].includes(String(auth.status))) pendingInteractions.delete(id);
+                else if (id) pendingInteractions.add(id);
+              }
+              if (frame.family === 'interaction'  && typeof frame.interaction_id === 'string') {
                 if (frame.event_type === 'interaction.requested') pendingInteractions.add(frame.interaction_id);
                 else if (['interaction.resolved', 'interaction.cancelled', 'interaction.expired']
                   .includes(String(frame.event_type))) pendingInteractions.delete(frame.interaction_id);

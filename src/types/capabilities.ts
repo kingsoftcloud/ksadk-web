@@ -68,6 +68,7 @@ export type UiCapabilities = {
   BuiltinTools: BuiltinToolCapability[];
   /** agent-kernel/v1 Interaction capability (bootstrap `interaction_v1`). */
   InteractionV1?: boolean;
+  McpAuthorization?: { schema: string; digest: string };
   KernelSessionEvents?: boolean;
   /** Server can bind a native subscription to its admitted CommandId. */
   KernelSessionEventsByCommand?: boolean;

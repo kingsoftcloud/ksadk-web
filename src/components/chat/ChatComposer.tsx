@@ -37,6 +37,7 @@ export type ChatComposerProps = {
   input: string;
   isMobile: boolean;
   isStreaming: boolean;
+  submissionBlocked?: boolean;
   attachmentsEnabled?: boolean;
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
@@ -66,6 +67,7 @@ export function ChatComposer({
   input,
   isMobile,
   isStreaming,
+  submissionBlocked = false,
   attachmentsEnabled = true,
   approvalEnabled = false,
   approvalPolicy,
@@ -96,9 +98,9 @@ export function ChatComposer({
       ? '描述需要先规划的任务…'
       : isMobile ? '发送消息...' : '发送消息…';
   const activeStopTitle = onCancelRemote ? '保留恢复点并结束本次执行' : '停止生成';
-  const canSubmit = executionMode === 'goal'
+  const canSubmit = !submissionBlocked && (executionMode === 'goal'
     ? Boolean(input.trim())
-    : Boolean(input.trim() || attachments.length > 0);
+    : Boolean(input.trim() || attachments.length > 0));
 
   // wework 风格:model/思考 chip 放输入框工具栏(从 model store 直读,不经 props)。
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
