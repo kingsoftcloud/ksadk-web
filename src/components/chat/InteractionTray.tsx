@@ -199,7 +199,10 @@ export function InteractionTray({
       data-ui="interaction-tray"
       data-interaction-status={active.status}
       data-interaction-count={interactions.length}
-      className={cn('mx-auto mb-2 w-full max-w-[64rem] px-3 sm:px-4', className)}
+      role="region"
+      aria-label="待确认内容"
+      tabIndex={0}
+      className={cn('custom-scrollbar mx-auto mb-2 min-h-0 max-h-[min(60dvh,36rem)] w-full max-w-[64rem] overflow-y-auto overscroll-contain px-3 sm:px-4', className)}
     >
       <div
         data-slot="interaction-card"

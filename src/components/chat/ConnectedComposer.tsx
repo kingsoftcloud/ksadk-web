@@ -186,7 +186,7 @@ export function ConnectedComposer({
   }, [setThinkingMode, thinkingEnabled]);
 
   return (
-    <div className="flex w-full flex-col justify-center">
+    <div className="flex min-h-0 w-full flex-col justify-center">
       {trayInteractions.length > 0 && onRespondInteraction ? (
         <InteractionTray
           interactions={trayInteractions}
