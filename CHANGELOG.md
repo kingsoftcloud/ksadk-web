@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.15 - 2026-11-02
+
+### Structured form submissions
+
+- Adapt unambiguous numeric and boolean control values to the saved business JSON Schema before client validation and dispatch, including A2UI, default forms and legacy AG-UI continuation.
+- Preserve valid JSON values, string identifiers and valid union answers. Keep empty numeric input, ambiguous alternatives and lossy numeric conversions as correctable validation errors.
+- Isolate independent local Git worktrees from Vitest discovery while retaining its default exclusions and all current-source tests.
+
 ## 0.3.14 - 2026-11-02
 
 ### A2UI and structured input
