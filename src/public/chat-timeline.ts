@@ -11,3 +11,7 @@ export { MessageMarkdown } from '../components/MessageMarkdown.js';
 export type * from '../components/chat/types.js';
 export { AgentBlockView } from '../components/chat/AgentBlockView.js';
 export type { AgentBlockViewProps } from '../components/chat/AgentBlockView.js';
+
+export { createA2uiCatalogRegistry } from '../core/a2ui/registry.js';
+export type { A2uiCatalogRegistry, A2uiCatalogRegistration, A2uiHistoryAdapter } from '../core/a2ui/registry.js';
+export { A2uiCatalogProvider } from '../core/a2ui/provider.js';

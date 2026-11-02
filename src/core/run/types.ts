@@ -38,6 +38,7 @@ export type RunEvent =
   | { type: 'user_message_added'; messageId: string; sessionId?: string | null }
   | { type: 'assistant_message_created'; messageId: string; invocationId?: string; sessionId?: string | null }
   | { type: 'text_delta'; messageId: string; delta: string; sessionId?: string | null }
+  | { type: 'text_replace'; messageId: string; text: string; sessionId?: string | null }
   | { type: 'text_final'; messageId: string; text: string; sessionId?: string | null }
   | { type: 'reasoning_delta'; messageId: string; delta: string; sessionId?: string | null }
   | { type: 'tool_upsert'; messageId: string; name: string; args: string; status: string; extra?: Record<string, unknown>; sessionId?: string | null }
@@ -47,6 +48,7 @@ export type RunEvent =
       messageId: string;
       approvalRequestId: string;
       protocol: 'ag-ui' | 'responses';
+      requestSchema?: Record<string, unknown> | null;
       name: string;
       args: string;
       message?: string;
@@ -55,6 +57,7 @@ export type RunEvent =
       runId?: string;
       sessionId?: string | null;
     }
+  | { type: 'interaction_submit_rejected'; interactionId: string; message: string; sessionId?: string | null }
   | {
       type: 'approval_resolved';
       approvalRequestId: string;
@@ -76,6 +79,10 @@ export type RunEvent =
   | { type: 'a2ui_interaction'; surfaceId: string; interactionId: string; kind: string; inputSchema: Record<string, unknown>; sessionId?: string | null }
   | {
       type: 'agui_activity';
+      /** Original logical run, distinct from a resume request's wire run id. */
+      runId?: string;
+      batchId?: string;
+      interactionId?: string;
       messageId: string;
       surfaceId: string;
       messages: Array<Record<string, unknown>>;
@@ -83,6 +90,7 @@ export type RunEvent =
     };
 
 export type RunEngineConfig = {
+  a2uiCatalogRegistry?: import('../a2ui/registry.js').A2uiCatalogRegistry;
   agentId: string;
   apiFormats: RuntimeApiFormat[];
   agentFramework: string;

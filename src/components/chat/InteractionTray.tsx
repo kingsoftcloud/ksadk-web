@@ -1,9 +1,12 @@
+import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
+import { jsonValue, type JsonValue } from '../../types/json-value.js';
 import { useState } from 'react';
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
   MessageCircleQuestion,
+  LoaderCircle,
   Pencil,
   X,
 } from 'lucide-react';
@@ -15,17 +18,18 @@ import type {
 } from '../../core/interaction/types.js';
 import {
   validateA2uiPresentation,
+  validatedApprovalA2ui,
   type A2uiRenderMode,
 } from '../../core/interaction/a2ui-validate.js';
 import { interactionIdempotencyKey } from '../../core/interaction/types.js';
-import { InteractionSchemaForm } from './InteractionSchemaForm';
+import { JsonSchemaInputForm } from './JsonSchemaInputForm';
 import { InteractionA2uiSurface } from './InteractionA2uiSurface';
 
 export type InteractionTrayRespondInput = {
   interactionId: string;
   expectedRevision: number;
   action: InteractionAction;
-  response: Record<string, unknown>;
+  response: JsonValue;
   idempotencyKey: string;
 };
 
@@ -39,19 +43,6 @@ export type InteractionTrayProps = {
   localCatalog?: unknown;
   className?: string;
 };
-
-function firstA2uiInputSchema(
-  a2ui: { messages: Array<Record<string, unknown>> } | null | undefined,
-): Record<string, unknown> | null {
-  for (const message of a2ui?.messages || []) {
-    const schema =
-      message.inputSchema ?? message.input_schema ?? message.schema;
-    if (typeof schema === 'object' && schema !== null) {
-      return schema as Record<string, unknown>;
-    }
-  }
-  return null;
-}
 
 function isExpired(interaction: Interaction): boolean {
   if (!interaction.expiresAt) return false;
@@ -145,8 +136,9 @@ export function InteractionTray({
   localCatalog,
   className,
 }: InteractionTrayProps) {
+  const registry = useA2uiCatalogRegistry();
   const [comment, setComment] = useState('');
-  const [formValues, setFormValues] = useState<Record<string, unknown>>({});
+  const [localError, setLocalError] = useState<{ id: string; message: string } | null>(null);
   const isImeComposing = useImeComposition();
 
   const active = interactions[Math.min(activeIndex, Math.max(interactions.length - 1, 0))];
@@ -155,41 +147,43 @@ export function InteractionTray({
   const expired = isExpired(active);
   const submitError = readSubmitError(active);
   const summary = approvalSummary(active);
-  const disabled = expired || active.status === 'resolving';
+  const approvalPreview = validatedApprovalA2ui(active, registry);
+  const disabled = expired || active.status === 'resolving' || ['resolved', 'cancelled', 'expired'].includes(active.status);
   const presentationMode = validateA2uiPresentation(
     active.presentation?.a2ui,
-    localCatalog,
+    localCatalog || registry,
   );
   // The canonical JSON schema form is also the safe fallback whenever the
   // A2UI presentation cannot be validated: the schema comes from the
-  // interaction's request_schema, or from the A2UI message payload.
+  // Runtime-saved request_schema; presentation messages cannot replace it.
   const fallbackSchema =
-    active.requestSchema
-    ?? firstA2uiInputSchema(active.presentation?.a2ui)
-    ?? null;
+    active.requestSchema;
   const mode: A2uiRenderMode =
     active.kind === 'approval'
       ? 'basic-controls'
       : presentationMode === 'a2ui'
         ? 'a2ui'
-      : presentationMode === 'json-schema-form' && fallbackSchema
+      : fallbackSchema
         ? 'json-schema-form'
-        : active.requestSchema && !active.presentation
-          ? 'json-schema-form'
-          : 'basic-controls';
+        : 'basic-controls';
   const schemaForForm =
     mode === 'json-schema-form'
       ? fallbackSchema || active.requestSchema
       : active.requestSchema;
 
-  const respond = (action: InteractionAction, response: Record<string, unknown>) => {
+  const respond = (action: InteractionAction, response: unknown) => {
     if (disabled) return;
+    let answer: JsonValue;
+    try { answer = jsonValue(response); } catch {
+      setLocalError({ id: active.interactionId, message: '答案必须是合法 JSON 值。' }); return;
+    }
+    setLocalError(null);
     void Promise.resolve(
       onRespond({
         interactionId: active.interactionId,
         expectedRevision: active.revision,
         action,
-        response,
+        response: answer,
         idempotencyKey: interactionIdempotencyKey(active.interactionId, active.revision),
       }),
     ).catch(() => {
@@ -205,7 +199,10 @@ export function InteractionTray({
       data-ui="interaction-tray"
       data-interaction-status={active.status}
       data-interaction-count={interactions.length}
-      className={cn('mx-auto mb-2 w-full max-w-[64rem] px-3 sm:px-4', className)}
+      role="region"
+      aria-label="待确认内容"
+      tabIndex={0}
+      className={cn('custom-scrollbar mx-auto mb-2 min-h-0 max-h-[min(60dvh,36rem)] w-full max-w-[64rem] overflow-y-auto overscroll-contain px-3 sm:px-4', className)}
     >
       <div
         data-slot="interaction-card"
@@ -297,6 +294,7 @@ export function InteractionTray({
           </p>
         ) : null}
 
+        {localError?.id === active.interactionId ? <p role="alert">{localError.message}</p> : null}
         {submitError ? (
           <p className="mt-2 text-xs font-medium text-rose-600 dark:text-rose-400" data-testid="interaction-tray-error">
             提交失败（{submitError.code}）：{submitError.message}
@@ -304,20 +302,32 @@ export function InteractionTray({
           </p>
         ) : null}
 
+        {approvalPreview ? (
+          <div data-testid="interaction-approval-preview">
+            <InteractionA2uiSurface
+              key={JSON.stringify([active.sessionId, active.interactionId, active.revision])}
+              a2ui={approvalPreview}
+              disabled
+              onSubmit={() => {}}
+              onCancel={() => {}}
+            />
+          </div>
+        ) : null}
+
         {mode === 'a2ui' && active.presentation?.a2ui ? (
           <InteractionA2uiSurface
+            key={JSON.stringify([active.sessionId, active.interactionId, active.revision])}
             a2ui={active.presentation.a2ui}
             disabled={disabled}
             onSubmit={(payload) => respond('submit', payload)}
             onCancel={() => respond('cancel', {})}
           />
         ) : mode === 'json-schema-form' && schemaForForm ? (
-          <InteractionSchemaForm
+          <JsonSchemaInputForm
+            key={JSON.stringify([active.sessionId, active.interactionId, active.revision])}
             schema={schemaForForm}
-            values={formValues}
-            onChange={setFormValues}
             disabled={disabled}
-            onSubmit={() => respond('submit', formValues)}
+            onSubmit={value => respond('submit', value)}
             onCancel={() => respond('cancel', {})}
           />
         ) : active.kind === 'approval' ? (
@@ -413,7 +423,12 @@ export function InteractionTray({
         )}
 
         {active.status === 'resolving' ? (
-          <p className="mt-2 text-xs text-[var(--ksadk-interaction-muted)]">正在提交，请稍候…</p>
+          <p role="status" data-testid="interaction-submit-progress" className="mt-2 flex items-center gap-1.5 text-xs text-[var(--ksadk-interaction-muted)]">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            {active.extensions.submit_command_id
+              ? '已提交，等待 Agent 处理。处理结果将显示在对话中。'
+              : '正在发送，请稍候…'}
+          </p>
         ) : null}
       </div>
     </div>

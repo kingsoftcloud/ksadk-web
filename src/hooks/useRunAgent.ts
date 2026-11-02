@@ -12,11 +12,12 @@ import { RunEngineImpl, dispatchRunEventToStores, resetDispatcherState } from '.
 import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
-import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
+import type { A2UIClientEventMessage } from '../core/a2ui/catalog.js';
 import type { PermissionMode, RuntimeExecutionMode, RunEngineConfig } from '../core/run/types.js';
 import { HttpConversationClient, type OutboxStore } from '../core/conversation/index.js';
 import type { ConversationClient } from '../core/conversation/types.js';
 import type { ConversationId } from '../core/conversation/studio-controller.js';
+import { useA2uiCatalogRegistry } from '../core/a2ui/provider.js';
 
 type QueuedDraft = {
   text: string;
@@ -64,7 +65,18 @@ type RunOwner = {
 
 const MAX_IDLE_RUN_OWNERS = 64;
 
+function bindNativeOwner(owners: Map<string, RunOwner>, owner: RunOwner, sessionId: string) {
+  owner.sessionId = sessionId;
+  if (owner.conversationId) return;
+  const nativeKey = JSON.stringify([owner.agentId, sessionId]);
+  owners.set(nativeKey, owner);
+  // Retain the native run, but free its draft alias for a later conversation.
+  if (owner.key !== nativeKey && owners.get(owner.key) === owner) owners.delete(owner.key);
+  owner.key = nativeKey;
+}
+
 export function useRunAgent(ctx: RunAgentContext) {
+  const a2uiCatalogRegistry = useA2uiCatalogRegistry();
   const ownersRef = useRef(new Map<string, RunOwner>());
   // Transient ownership distinguishes a live queue from restored pending intent.
   const outboxRequestsRef = useRef(new Set<string>());
@@ -105,6 +117,7 @@ export function useRunAgent(ctx: RunAgentContext) {
   } = ctx;
 
   const config = useMemo<RunEngineConfig>(() => ({
+    a2uiCatalogRegistry,
     agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata,
     thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto', permissionMode,
     runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
@@ -116,7 +129,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     kernelCommandEventsEnabled: uiCapabilities.KernelSessionEventsByCommand === true,
     presentationProfile: bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog),
     conversationClient: conversationClient || undefined,
-  }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient]);
+  }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient, a2uiCatalogRegistry]);
 
   const getOwner = useCallback((sessionId: string | null | undefined = currentSessionIdRef.current): RunOwner => {
     const conversationId = ctx.conversationIdRef?.current;
@@ -256,7 +269,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       }
       throw error;
     }
-    if (!owner.sessionId && pendingSessionId) owner.sessionId = pendingSessionId;
+    if (!owner.sessionId && pendingSessionId) bindNativeOwner(ownersRef.current, owner, pendingSessionId);
 
     let confirmDispatch: ((accepted: boolean) => void) | undefined;
     const dispatch = responsesInput !== undefined
@@ -289,12 +302,10 @@ export function useRunAgent(ctx: RunAgentContext) {
         onSessionCreated: sessionId => {
           const wasVisible = owner.isVisible();
           const previousKey = owner.sessionId || owner.conversationId;
-          owner.sessionId = sessionId;
+          bindNativeOwner(ownersRef.current, owner, sessionId);
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, { nativeSessionId: sessionId });
           useStreamingStore.getState().setSessionStreaming(sessionId, true);
           if (previousKey !== sessionId) useStreamingStore.getState().setSessionStreaming(previousKey, false);
-          // Legacy shells acquire a native ID without changing the execution owner.
-          if (!owner.conversationId) ownersRef.current.set(JSON.stringify([owner.agentId, sessionId]), owner);
           onSessionCreated?.(sessionId, owner.conversationId, owner.agentId);
           if (!onSessionCreated && wasVisible) {
             useSessionStore.getState().upsertSessions([{ SessionId: sessionId, UpdatedAt: new Date().toISOString() } as unknown as Session]);
@@ -409,6 +420,8 @@ export function useRunAgent(ctx: RunAgentContext) {
   const respondToAguiApproval = useCallback((options: {
     interruptId: string;
     approve: boolean;
+    status?: 'resolved' | 'cancelled';
+    payload?: unknown;
   }) => {
     if (!options.interruptId) return false;
     const sessionId = currentSessionIdRef.current;
@@ -421,8 +434,9 @@ export function useRunAgent(ctx: RunAgentContext) {
     const accepted = engine.resumeAguiInterrupt({
       sessionId,
       interruptId: options.interruptId,
-      status: 'resolved',
-      payload: { decision: options.approve ? 'approve' : 'reject' },
+      status: options.status || 'resolved',
+      payload: Object.hasOwn(options, 'payload')
+        ? options.payload : { decision: options.approve ? 'approve' : 'reject' },
       onSettled: id => {
         onRunSettled?.(id, owner.agentId);
         drainQueue(owner);

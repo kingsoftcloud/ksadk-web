@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress';
-import { projectConversationItems } from '../core/conversation/presentation';
+import { conversationTerminalStatus, projectConversationItems } from '../core/conversation/presentation';
 const events = readFileSync(
   new URL(
     './fixtures/a2a_remote_agent/v1/a2a_stream_tool_terminal.jsonl',
@@ -476,14 +476,16 @@ it('local cancellation is pre-send only and an identical terminal reconcile is a
 });
 
 it.each([
-  ['failed', 'error'],
-  ['completed', 'completed'],
-  ['running', 'running'],
-  ['unknown', 'unknown'],
+  ['failed', 'error', 'completed'],
+  ['completed', 'completed', 'completed'],
+  ['running', 'unknown', 'completed'],
+  ['unknown', 'unknown', 'completed'],
+  ['running', 'running', 'active'],
 ])(
-  'honors explicit tool executionStatus %s independently of item closure',
-  (executionStatus, expected) => {
+  'projects tool executionStatus %s as %s with enclosing run %s',
+  (executionStatus, expected, enclosingRun) => {
     const state = replay().snapshot();
+    if (enclosingRun === 'active') state.items = state.items.filter(item => !conversationTerminalStatus(item));
     const resultItem = state.items.find(
       (item) => item.payload.sourceKind === 'tool_result',
     )!;
@@ -496,9 +498,11 @@ it.each([
       output: 'execution result',
       orphan: true,
     };
+    const presentation = projectConversationItems(state);
+    expect(presentation.terminalStatus).toBe(enclosingRun === 'active' ? undefined : 'completed');
     const projected = projectConversationStreamForHostedUi({
       state,
-      presentation: projectConversationItems(state),
+      presentation,
       cursor: 22,
       runId: 'root-run-1',
     });

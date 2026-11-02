@@ -49,6 +49,13 @@ export type Message = {
   compactedUntilSeqId?: number;
   historical?: boolean;
   reasoning?: string;
+  reasoningSource?: import('../../core/run/blocks.js').ThinkingBlock['source'];
+  /** Public compaction activity, never a private prompt or context snapshot. */
+  contextActivity?: {
+    status: 'running' | 'completed' | 'cancelled' | 'failed' | 'paused' | 'unknown';
+    durationMs?: number;
+    durationSource?: 'studio_observed';
+  };
   /**
    * 有序 "思考-行动-思考-输出" 交错 blocks(照抄 Wegent wework)。
    * 存在时渲染层按数组顺序交错展示;为空则回退 reasoning/tools/content 旧渲染。
@@ -65,10 +72,20 @@ export type Message = {
     ended?: boolean;
   };
   aguiActivity?: {
+    /** The actual source message, including while rendered as a standalone card. */
+    originMessageId?: string;
+    /** Original logical run, retained across a resumed transport attempt. */
+    runId?: string;
+    batchIds?: string[];
+    interactionId?: string;
     surfaceId: string;
     messages: Array<Record<string, unknown>>;
   };
   aguiActivities?: Array<{
+    originMessageId?: string;
+    runId?: string;
+    batchIds?: string[];
+    interactionId?: string;
     surfaceId: string;
     messages: Array<Record<string, unknown>>;
   }>;

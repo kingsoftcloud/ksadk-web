@@ -16,6 +16,7 @@ test.beforeEach(async ({ page }) => {
 
 test('an empty new draft hides the previous unbound draft queue without discarding it', async ({ page }) => {
   await send(page, 'A first');
+  await expect(page.getByTestId('run-progress-indicator')).toHaveText('正在提交…');
   await send(page, 'A queued');
   await expect(page.getByText('发送队列 · 1', { exact: true })).toBeVisible();
   const draftA = (await selection(page)).conversationId;
@@ -23,6 +24,7 @@ test('an empty new draft hides the previous unbound draft queue without discardi
   const draftB = (await selection(page)).conversationId;
   expect(draftB).not.toBe(draftA);
   expect(await selection(page)).toMatchObject({ sessionId: null, isStreaming: false });
+  await expect(page.getByTestId('run-progress-indicator')).toHaveCount(0);
   await expect(page.getByText('A queued', { exact: true })).toHaveCount(0);
   expect((await audit(page)).creations).toHaveLength(1);
 

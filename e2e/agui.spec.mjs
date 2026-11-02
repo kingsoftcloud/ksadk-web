@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const SESSION_ID = 'session-agui-e2e';
-const CATALOG_ID = 'https://a2ui.org/specification/v0_9/basic_catalog.json';
+const CATALOG_ID = 'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json';
 
 function envelope(data) {
   return { Code: 0, Message: 'Success', Data: data };
@@ -198,7 +198,7 @@ test('projects AG-UI activity, resumes approval, and replays terminal state', as
   const fixture = await installFixture(page);
   await page.goto('/');
 
-  await expect(page.getByText('AG-UI Fixture')).toBeVisible();
+  await expect(page.getByText('AG-UI Fixture', { exact: true })).toBeVisible();
   const composer = page.locator('textarea[placeholder^="发送消息"]');
   await composer.fill('请写入 demo.txt');
   await composer.press('Enter');

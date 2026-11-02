@@ -267,6 +267,10 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
   }
 
   if (eventType === 'response.output_text.delta') {
+    if (data?.replace === true && (typeof data.delta === 'string' || typeof data.text === 'string')) {
+      state.sawTextDelta = true;
+      return [{ type: 'text_replace', text: typeof data.delta === 'string' ? data.delta : data.text }];
+    }
     const text = firstString(data?.delta, data?.text);
     if (text) state.sawTextDelta = true;
     return text ? [{ type: 'text_delta', text }] : [];

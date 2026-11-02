@@ -137,6 +137,7 @@ function normalizeHostedChatTransports(value) {
         A2UI: Boolean(capabilities.A2UI),
         Interrupt: Boolean(capabilities.Interrupt),
         Cancel: Boolean(capabilities.Cancel),
+        ...(capabilities.SessionEventReplay === true ? { SessionEventReplay: true } : {}),
       },
     }];
   });
@@ -272,7 +273,8 @@ export function resolveHostedChatTransport(capabilities, options = {}) {
   // AG-UI's direct HTTP stream is tied to the browser request. A run that
   // must survive F5/session navigation needs the detached Responses stream,
   // which the server can replay through SubscribeRunEvents.
-  if (options.requireResumableRun && responses) {
+  if (options.requireResumableRun && responses
+    && !(preferred?.Protocol === 'ag-ui' && preferred.Capabilities.SessionEventReplay === true)) {
     return responses;
   }
   return preferred || responses || {

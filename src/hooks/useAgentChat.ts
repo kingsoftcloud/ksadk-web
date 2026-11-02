@@ -232,8 +232,8 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     legacyResponsesApproval: (approvalRequestId, approve, previousResponseId) => {
       return respondToApprovalRef.current({ approvalRequestId, approve, previousResponseId });
     },
-    legacyAguiResume: (interruptId, status) => (
-      respondToAguiApprovalRef.current({ interruptId, approve: status === 'resolved' })
+    legacyAguiResume: (interruptId, status, payload) => (
+      respondToAguiApprovalRef.current({ interruptId, approve: status === 'resolved', status, payload })
     ),
   });
 
@@ -242,6 +242,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
   ) => {
     const receipt = await respondInteraction(input);
     const feedback = input.action === 'cancel'
+      && typeof input.response === 'object' && input.response !== null && !Array.isArray(input.response)
       ? String(input.response.feedback || '').trim()
       : '';
     if (receipt.status === 'accepted' && feedback) {

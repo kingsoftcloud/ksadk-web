@@ -10,6 +10,7 @@ import { safeRuntimeToolOutput, safeToolValue } from './safe-tool-value.js';
 import type { Message } from '../../components/chat/types.js';
 import type { ProcessingBlock } from '../run/blocks.js';
 import type { Interaction } from '../interaction/types.js';
+import { jsonValue } from '../../types/json-value.js';
 import type {
   ConversationItem,
   ConversationStreamResult,
@@ -80,6 +81,8 @@ function textMessage(item: ConversationItem): Message {
         type: 'thinking',
         content: text,
         status: blockStatus(item),
+        ...(item.payload.presentationSource === 'public_summary' || item.payload.presentationSource === 'provider_reasoning'
+          ? { source: item.payload.presentationSource } : {}),
       }
     : {
         id: `conversation-block:${item.itemId}`,
@@ -96,7 +99,7 @@ function textMessage(item: ConversationItem): Message {
   };
 }
 
-function toolMessage(item: ConversationItem): Message {
+function toolMessage(item: ConversationItem, runEnded = false): Message {
   const toolName = nonEmptyString(item.payload.tool) || (item.payload.sourceKind === 'tool_result' ? 'Tool result' : 'Tool');
   const callId = nonEmptyString(item.payload.callId);
   const args = displayValue(safeToolValue(item.payload.args));
@@ -110,11 +113,14 @@ function toolMessage(item: ConversationItem): Message {
     unknown: 'unknown',
   } as const;
   const explicit = item.payload.executionStatus;
-  const status = typeof explicit === 'string' && Object.hasOwn(executionStatuses, explicit)
+  const executionStatus = typeof explicit === 'string' && Object.hasOwn(executionStatuses, explicit)
     ? executionStatuses[explicit as keyof typeof executionStatuses]
     : item.lifecycle === 'failed' || item.payload.isError === true
       ? 'error'
       : item.lifecycle === 'completed' ? 'completed' : 'running';
+  // A completed containing run is not a tool receipt. Stop the spinner while
+  // preserving uncertainty for a call that never published its own result.
+  const status = runEnded && executionStatus === 'running' ? 'unknown' : executionStatus;
   return {
     ...messageBase(item),
     role: 'model',
@@ -162,6 +168,10 @@ function interactionFromItem(item: ConversationItem): Interaction | null {
   const prompt = nonEmptyString(item.payload.prompt) || detail;
   const kind = interactionKind(item.payload.interactionKind);
   const completed = item.lifecycle === 'completed';
+  let response: Pick<Interaction, 'response'> = {};
+  if (completed && Object.hasOwn(item.payload, 'response')) {
+    try { response = { response: jsonValue(item.payload.response) }; } catch { /* Invalid JSON is unavailable. */ }
+  }
   return {
     interactionId,
     sessionId: item.sessionId,
@@ -187,6 +197,7 @@ function interactionFromItem(item: ConversationItem): Interaction | null {
     responseSummary: completed
       ? nonEmptyString(item.payload.responseSummary)
       : null,
+    ...response,
     source: 'interaction_v1',
     extensions: {
       conversation_item_id: item.itemId,
@@ -265,7 +276,9 @@ function a2uiMessage(item: ConversationItem): Message | null {
     ...messageBase(item),
     role: 'a2ui',
     content: '',
-    aguiActivity: { surfaceId, messages },
+    aguiActivity: { surfaceId, messages,
+      ...(typeof item.payload.interactionId === 'string'
+        ? { interactionId: item.payload.interactionId } : {}) },
   };
 }
 
@@ -344,7 +357,8 @@ export function projectConversationStreamForHostedUi(
       continue;
     }
     if (toolIds.has(item.itemId)) {
-      messages.push(toolMessage(item));
+      messages.push(toolMessage(item, Boolean(presentation.terminalStatus)
+        && item.runId === result.runId));
       continue;
     }
     if (approvalIds.has(item.itemId) || structuredInputIds.has(item.itemId)) {

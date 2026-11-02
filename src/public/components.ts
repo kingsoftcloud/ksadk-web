@@ -40,3 +40,7 @@ export type * from '../components/chat/types.js';
 export { FilePreviewHost, FilePreviewModal } from '../components/workspace/FilePreviewModal.js';
 export { openWorkspaceFilePreview } from '../utils/workspace-file-preview-bus.js';
 export type { FilePreviewModalProps, WorkspaceFileFetcher, WorkspaceFilePayload } from '../components/workspace/FilePreviewModal.js';
+
+export { createA2uiCatalogRegistry } from '../core/a2ui/registry.js';
+export type { A2uiCatalogRegistry, A2uiCatalogRegistration, A2uiHistoryAdapter } from '../core/a2ui/registry.js';
+export { A2uiCatalogProvider } from '../core/a2ui/provider.js';

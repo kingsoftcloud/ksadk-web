@@ -43,6 +43,8 @@ import type { RuntimeExecutionMode } from './core/run/types.js';
 import type { BootstrapWorkspaceFiles } from './types/bootstrap.js';
 import type { RuntimeApiFormat } from './types/api.js';
 import type { ThinkingMode } from './stores/model.js';
+import { A2uiCatalogProvider } from './core/a2ui/provider.js';
+import { defaultA2uiCatalogRegistry, type A2uiCatalogRegistry } from './core/a2ui/registry.js';
 import {
   clampWorkspacePanelWidth,
   DESKTOP_SIDEBAR_WIDTH,
@@ -72,6 +74,7 @@ export type AgentWorkbenchProps = {
   featureFlags?: AgentWorkbenchFeatureFlags;
   initialSurface?: AgentWorkbenchInitialSurface;
   routeShell?: React.ComponentType<{ children: React.ReactNode }>;
+  a2uiCatalogRegistry?: A2uiCatalogRegistry;
 };
 
 export function AgentWorkbench(props: AgentWorkbenchProps = {}) {
@@ -92,7 +95,9 @@ export function AgentWorkbench(props: AgentWorkbenchProps = {}) {
   const serverScope = (bootstrap.data as { AuthorizationScopeKey?: unknown } | undefined)?.AuthorizationScopeKey;
   const scope = props.authorizationScopeKey ?? (typeof serverScope === 'string' && serverScope ? serverScope : undefined);
   return <AgentAuthorizationBoundary authorizationScopeKey={scope}>
-    <AgentWorkbenchContent {...props} bootstrapData={bootstrap.data} />
+    <A2uiCatalogProvider registry={props.a2uiCatalogRegistry || defaultA2uiCatalogRegistry}>
+      <AgentWorkbenchContent {...props} bootstrapData={bootstrap.data} />
+    </A2uiCatalogProvider>
   </AgentAuthorizationBoundary>;
 }
 
@@ -286,9 +291,10 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
       const engineAccepted = respondToAguiApprovalRef.current({
         interruptId,
         approve: status === 'resolved',
+        status,
+        payload,
       });
       void engineAccepted;
-      void payload;
       return engineAccepted;
     },
   });

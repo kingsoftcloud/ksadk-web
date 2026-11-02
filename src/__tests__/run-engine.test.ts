@@ -9,6 +9,8 @@ import { useSessionStore } from '../stores/session.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { dispatchRunEventToStores, resetDispatcherState } from '../core/run/dispatcher.js';
 import { sharedInteractionStore } from '../core/interaction/index.js';
+import { interactionFromAguiInterrupt } from '../core/interaction/adapters/agui.js';
+import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
 import {
   ConversationClientError,
   preflightConversationInput,
@@ -785,6 +787,41 @@ describe('RunEngineImpl', () => {
     });
   });
 
+  it('starts another AG-UI turn after SubmitInteraction resolves the original wait', async () => {
+    const sessionId = 'session-canonical-next-turn';
+    sharedInteractionStore.clearSession(sessionId);
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      const events = [
+        { type: 'RUN_STARTED', threadId: sessionId, runId: body.runId },
+        { type: 'RUN_FINISHED', threadId: sessionId, runId: body.runId, outcome: fetchMock.mock.calls.length === 1
+          ? { type: 'interrupt', interrupts: [{ id: 'canonical-wait', reason: 'structured_input',
+            metadata: { interaction_v1: true, revision: 1, run_id: 'original-run' } }] }
+          : { type: 'success' } },
+      ];
+      return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+        { headers: { 'content-type': 'text/event-stream' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    useSessionStore.getState().setCurrentSessionId(sessionId);
+    const engine = createRunEngine(createApiFacade([]));
+    engine.subscribe(dispatchRunEventToStores);
+    engine.updateConfig({ agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'langgraph',
+      selectedModel: '', thinkingMode: 'auto', hostedChatTransport: {
+        Protocol: 'ag-ui', Runtime: 'copilotkit', Endpoint: '/agui', Version: '1.0',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      } });
+    expect(engine.start({ text: 'first question', attachments: [], sessionId })).toBe(true);
+    await waitForEngineIdle(engine);
+    sharedInteractionStore.upsert(interactionFromSessionEvent({ family: 'interaction', session_id: sessionId,
+      run_id: 'original-run', event_type: 'interaction.resolved',
+      payload: { interaction_id: 'canonical-wait', revision: 2 } })!);
+    expect(engine.start({ text: 'next question', attachments: [], sessionId })).toBe(true);
+    await waitForEngineIdle(engine);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    sharedInteractionStore.clearSession(sessionId);
+  });
+
   it('resumes a rehydrated AG-UI approval through its durable session', async () => {
     const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
@@ -846,6 +883,52 @@ describe('RunEngineImpl', () => {
       }),
     ]);
     expect(resolved).toEqual(['approval-history-1']);
+  });
+
+  it.each(['rejected', 'next-wait', 'incomplete'] as const)('confirms native AG-UI submission from the stream: %s', async scenario => {
+    const sessionId = 'typed-confirmation';
+    sharedInteractionStore.clearSession(sessionId);
+    sharedInteractionStore.upsert(interactionFromAguiInterrupt({
+      interruptId: 'old-wait', sessionId, runId: 'original-run', requestSchema: { type: 'integer' },
+    })!);
+    sharedInteractionStore.markResolving(sessionId, 'old-wait');
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.resume[0].payload).toBe(3);
+      const frames: Array<Record<string, unknown>> = [{ type: 'RUN_STARTED', threadId: sessionId, runId: body.runId }];
+      if (scenario !== 'incomplete') frames.push({ type: 'RUN_FINISHED', threadId: sessionId, runId: body.runId,
+        outcome: { type: 'interrupt', interrupts: [{
+          id: scenario === 'rejected' ? 'old-wait' : 'new-wait', reason: 'structured_input',
+          message: 'Enter an integer', responseSchema: { type: 'integer' },
+        }] } });
+      return new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(''), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }));
+    const engine = createRunEngine(createApiFacade([]));
+    const events: RunEvent[] = [];
+    engine.subscribe(event => { events.push(event); dispatchRunEventToStores(event, { visible: true }); });
+    engine.updateConfig({ agentId: 'agent', apiFormats: ['responses'], agentFramework: 'langgraph',
+      selectedModel: '', thinkingMode: 'auto', hostedChatTransport: {
+        Protocol: 'ag-ui', Runtime: 'copilotkit', Endpoint: '/agentengine/agui', Version: '1.0',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      } });
+    expect(engine.resumeAguiInterrupt({ sessionId, interruptId: 'old-wait', status: 'resolved', payload: 3 })).toBe(true);
+    await waitForEngineIdle(engine);
+    const old = sharedInteractionStore.get(sessionId, 'old-wait')!;
+    if (scenario === 'rejected') {
+      expect(old.status).toBe('failed');
+      expect(old.requestSchema).toEqual({ type: 'integer' });
+    } else if (scenario === 'next-wait') {
+      expect(old.status).toBe('resolved');
+      expect(old.outcome).toBe('submitted');
+      expect(sharedInteractionStore.get(sessionId, 'new-wait')?.kind).toBe('structured_input');
+      expect(sharedInteractionStore.get(sessionId, 'new-wait')?.status).toBe('pending');
+    } else {
+      expect(old.status).toBe('resolving');
+    }
+    expect(events.filter(event => event.type === 'approval_resolved')).toHaveLength(scenario === 'next-wait' ? 1 : 0);
+    sharedInteractionStore.clearSession(sessionId);
   });
 
   it('uses the latest runtime config when starting a run', async () => {

@@ -3,6 +3,7 @@ const TOOL_STATUS_MAP = {
   completed: 'completed',
   failed: 'error',
   paused: 'paused',
+  unknown: 'unknown',
   approved: 'completed',
   denied: 'completed',
   rejected: 'completed',
@@ -78,6 +79,7 @@ function mapToolEvents(toolEvents) {
       if (te.ApprovalLevel) entry.approvalLevel = String(te.ApprovalLevel);
     }
     if (te.ToolCallId) {
+      entry.callId = te.ToolCallId;
       entry.previousResponseId = te.ToolCallId;
     }
     // 同名多次时按调用/审批 ID 分键；单工具保持 name 键兼容。
@@ -128,7 +130,7 @@ function mapPersistedBlocks(blocks) {
       args: stringifyBlockValue(block?.Args),
       ...(block?.Result !== undefined ? { output: stringifyBlockValue(block.Result) } : {}),
       status,
-      ...(block?.ToolCallId ? { extra: { previousResponseId: String(block.ToolCallId) } } : {}),
+      ...(block?.ToolCallId ? { extra: { callId: String(block.ToolCallId), previousResponseId: String(block.ToolCallId) } } : {}),
     }];
   });
 }
@@ -162,6 +164,7 @@ export function mapBackendMessage(msg) {
   // 反馈控件需要 responseId/eventId/traceId/rootSpanId(后端从 event Metadata 投出)
   if (msg.MessageId) result.eventId = msg.MessageId;
   if (msg.InvocationId) result.invocationId = msg.InvocationId;
+  if (msg.ScopeId) result.scopeId = msg.ScopeId;
   if (msg.ResponseId) result.responseId = msg.ResponseId;
   if (msg.TraceId) result.traceId = msg.TraceId;
   if (msg.RootSpanId) result.rootSpanId = msg.RootSpanId;
@@ -199,16 +202,26 @@ function mapBackendActivities(msg) {
       role: 'a2ui',
       content: '',
       timestamp: parseTimestamp(msg.Timestamp),
+      ...(msg.InvocationId ? { invocationId: String(msg.InvocationId) } : {}),
       ...(Number.isSafeInteger(msg.SeqId) && msg.SeqId > 0 ? { historyOrder: { seq: msg.SeqId, index: index + 1,
         ...(Number.isSafeInteger(msg.StartSeqId) && msg.StartSeqId > 0 ? { group: msg.StartSeqId } : {}),
       } } : {}),
-      aguiActivity: { surfaceId, messages: normalizeA2uiOperations(messages) },
+      aguiActivity: { surfaceId, messages: normalizeA2uiOperations(messages),
+        ...(typeof content?.interactionId === 'string' ? { interactionId: content.interactionId } : {}),
+      },
     }];
   });
 }
 
 export function mapBackendMessages(messages) {
-  return messages.flatMap((message) => [mapBackendMessage(message), ...mapBackendActivities(message)]);
+  // Messages are cumulative compatibility snapshots: two assistant rows may
+  // carry the same call. Keep its first position and its latest recorded facts.
+  // A name alone never identifies a call, and calls from different runs/scopes
+  // must remain independent.
+  const mapped = coalesceHistoryToolCalls(messages.map(mapBackendMessage));
+  return coalesceA2uiActivities(mapped.flatMap((message, index) => [message, ...mapBackendActivities(messages[index])]));
 }
+import { coalesceA2uiActivities } from '../core/a2ui/transcript.js';
 import { normalizeA2uiOperations } from '../core/run/a2ui.js';
 import { buildBlocksFromHistory } from '../core/run/blocks.js';
+import { coalesceHistoryToolCalls } from './history-tool-facts.js';

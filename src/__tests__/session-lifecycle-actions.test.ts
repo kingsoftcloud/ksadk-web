@@ -70,6 +70,34 @@ describe('shared session lifecycle actions', () => {
     expect(sharedInteractionStore.get('history-session', 'done')?.outcome).toBe('approved');
   });
 
+  it('hydrates visible input metadata outside the newest event window without advancing transcript pagination', async () => {
+    const source = { CursorSource: 'runtime', HistoryEpoch: 'epoch', SnapshotSeqId: 293 };
+    const requested = { EventType: 'interaction.requested', SessionId: 'history-session', SeqId: 158,
+      Content: { interaction_id: 'form-1', kind: 'structured_input', revision: 1,
+        request: { presentation: { title: '请输入业务线', a2ui: {
+          wire_version: '0.9.1', catalog_digest: 'digest', messages: [{ createSurface: { surfaceId: 'input' } }],
+        } }, request_schema: { type: 'object' } } } };
+    const resolved = { EventType: 'interaction.resolved', SessionId: 'history-session', SeqId: 289,
+      Content: { interaction_id: 'form-1', kind: 'structured_input', revision: 2, outcome: 'submitted' } };
+    const listSessionEvents = vi.fn()
+      .mockResolvedValueOnce({ ...source, Events: [resolved], Total: 293 })
+      .mockResolvedValueOnce({ ...source, Events: [resolved, requested], Total: 2, HasMore: false })
+      .mockResolvedValue({ ...source, Events: [], Total: 293 });
+    const actions = lifecycle({
+      listSessionMessages: vi.fn().mockResolvedValue({ ...source, Messages: [{ MessageId: 'form', Role: 'assistant',
+        SeqId: 291, StartSeqId: 128, ToolEvents: [{ Name: 'structured_input', Status: 'completed', ApprovalRequestId: 'form-1' }] }],
+      HasMore: false, NextCursor: null }),
+      listSessionEvents, getResponseFeedback: vi.fn().mockResolvedValue(null),
+    });
+    await actions.loadSession('history-session');
+    expect(sharedInteractionStore.get('history-session', 'form-1')).toMatchObject({
+      title: '请输入业务线', revision: 2, status: 'resolved', outcome: 'submitted', presentation: { a2ui: { wireVersion: '0.9.1' } },
+    });
+    expect(sharedInteractionStore.listPending('history-session')).toHaveLength(0);
+    await actions.loadOlderSessionMessages('history-session');
+    expect(listSessionEvents.mock.calls[2]?.[1]).toMatchObject({ offset: 1 });
+  });
+
   it('ignores a late session list from an Agent that has already been switched away from', async () => {
     let finish!: (value: unknown) => void;
     const actions = lifecycle({ listSessions: vi.fn(() => new Promise(resolve => { finish = resolve; })) });

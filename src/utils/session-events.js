@@ -709,6 +709,10 @@ function buildUnorderedMessageFromSessionEvent(event) {
           role: 'model',
           content: '',
           reasoning,
+          ...(event.Metadata?.presentation_source === 'public_summary'
+            ? { reasoningSource: 'public_summary' }
+            : event.Metadata?.presentation_source === 'provider_reasoning'
+              ? { reasoningSource: 'provider_reasoning' } : {}),
           timestamp: event.Timestamp || Date.now(),
           eventType,
           ...(runtimeIdentity || {}),

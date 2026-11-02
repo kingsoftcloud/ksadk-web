@@ -266,7 +266,7 @@ describe('chat message list contracts', () => {
     expect(dispatcherSource).toContain("event.event.EventType === 'run_checkpoint'");
     expect(dispatcherSource).toContain('upsertSessionCheckpoint(streamSessionId, event.event)');
     expect(lifecycleSource).toContain('setCurrentRunId(options.invocationId)');
-    expect(lifecycleSource).toContain('后台长任务运行中');
+    expect(lifecycleSource).toContain('正在同步任务进展');
   });
 
   it('marks background run activity terminal when subscription sees terminal status', () => {

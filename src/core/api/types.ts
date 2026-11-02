@@ -1,3 +1,4 @@
+import type { JsonValue } from '../../types/json-value.js';
 export type CancelRunOptions = {
   signal?: AbortSignal;
   scopeId?: string;
@@ -101,7 +102,7 @@ export interface ApiFacade {
     InteractionId: string;
     ExpectedRevision: number;
     Action: 'approve' | 'reject' | 'submit' | 'cancel';
-    Response: Record<string, unknown>;
+    Response: JsonValue;
     IdempotencyKey: string;
   }, opts?: { signal?: AbortSignal }): Promise<import('../../types/agent-control.js').AgentControlReceipt>;
   getAgentStatus(opts?: { signal?: AbortSignal }): Promise<unknown>;

@@ -10,6 +10,25 @@ const frame = (event_type: string, event_id: string, extra = {}) => ({
  parent_scope_id: 'graph', source: { framework: 'langgraph' }, event_type, event_id, ...extra,
 });
 describe('native graph scopes alongside managed experts', () => {
+ it('keeps internal state out of public text while preserving business JSON and tool output', () => {
+  const ingress = new RuntimeConversationIngress('parent-session');
+  ingress.apply(frame('run.started', 'begin', { scope_id: 'graph', parent_scope_id: undefined }));
+  for (const [id, visibility, text] of [
+   ['state', 'internal', '{"context":"private-state"}'],
+   ['answer', 'public', '{"businessResult":0,"enabled":false}'],
+  ]) {
+   ingress.apply(frame('item.completed', `${id}:done`, { item_id: id, item_kind: 'message',
+    source: { framework: 'langgraph', metadata: { visibility } },
+    snapshot: { parts: [{ part_id: 'text', content_type: 'text', text }] },
+   }));
+  }
+  const state = ingress.snapshot();
+  const projected = projectConversationStreamForHostedUi({ state,
+   presentation: projectConversationItems(state), cursor: 3, runId: 'parent-run' });
+  const display = JSON.stringify(projected.messages);
+  expect(display).not.toContain('private-state');
+  expect(display).toContain('businessResult');
+ });
  it('preserves large local tool text through live ingress and hosted history replay', () => {
   const output = 'TOOL_BEGIN\n' + 'data row\n'.repeat(3000) + 'TOOL_END';
   const events = [

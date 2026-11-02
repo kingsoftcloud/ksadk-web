@@ -1,8 +1,11 @@
 import type { RunEvent } from './types.js';
+import { mergeA2uiActivity } from '../a2ui/history.js';
+import { findA2uiActivityOwner } from '../a2ui/transcript.js';
 import {
   appendThinkingBlock,
   appendTextBlock,
   finalizeTextBlock,
+  replaceTextBlocks,
   finalizeThinkingBlocks,
   stripMirroredTerminalAnswerFromThinking,
   upsertToolBlock,
@@ -11,6 +14,7 @@ import { useMessageStore } from '../../stores/message.js';
 import {
   ingestApprovalRequestedEvent,
   ingestApprovalResolvedEvent,
+  ingestInteractionSubmitRejected,
   ingestSessionEventRecord,
 } from '../interaction/index.js';
 import { useStreamingStore } from '../../stores/streaming.js';
@@ -121,7 +125,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
   // returns.
   if (
     sessionIsOffscreen
-    && !['activity', 'stage_changed', 'stream_ended', 'error', 'rate_limited', 'terminal', 'approval_requested', 'approval_resolved', 'stream_event', 'conversation_snapshot'].includes(event.type)
+    && !['activity', 'stage_changed', 'stream_ended', 'error', 'rate_limited', 'terminal', 'approval_requested', 'approval_resolved', 'interaction_submit_rejected', 'stream_event', 'conversation_snapshot'].includes(event.type)
   ) {
     return;
   }
@@ -175,6 +179,18 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
             : msg,
         ),
       );
+      break;
+
+    case 'text_replace':
+      if (event.sessionId && useSessionStore.getState().currentSessionId
+        && event.sessionId !== useSessionStore.getState().currentSessionId
+        && event.sessionId !== projection?.draftId) break;
+      // This is an authoritative edit of one known message, not a transcript
+      // snapshot or a terminal answer (which has separate legacy semantics).
+      ms.patchMessages(prev => prev.map(message => message.id === event.messageId && message.role === 'model'
+        ? { ...message, content: event.text, blocks: replaceTextBlocks(message.blocks, event.text) }
+        : message));
+      bumpEventCount(event.sessionId);
       break;
 
     case 'text_final':
@@ -298,6 +314,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
       ingestApprovalRequestedEvent({
         approvalRequestId: event.approvalRequestId,
         protocol: event.protocol,
+        requestSchema: event.requestSchema,
         runId: event.runId,
         name: event.name,
         message: event.message,
@@ -347,6 +364,10 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
       );
       break;
     }
+
+    case 'interaction_submit_rejected':
+      ingestInteractionSubmitRejected(event);
+      break;
 
     case 'approval_resolved':
       ingestApprovalResolvedEvent({
@@ -701,18 +722,34 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
     }
 
     case 'agui_activity': {
-      const msgId = `agui-a2ui-${event.surfaceId}`;
       useMessageStore.getState().patchMessages((prev) => {
-        const activity = { surfaceId: event.surfaceId, messages: event.messages };
+        const target = prev.find(message => message.id === event.messageId);
+        const runId = event.runId || target?.runId || target?.invocationId;
+        const msgId = `agui-a2ui-${JSON.stringify([runId || event.messageId, event.interactionId || '', event.surfaceId])}`;
+        const incoming = { surfaceId: event.surfaceId, messages: event.messages,
+          originMessageId: event.messageId,
+          ...(runId ? { runId } : {}),
+          ...(event.interactionId ? { interactionId: event.interactionId } : {}) };
+        // A resumed wire attempt may have a new assistant message ID. The
+        // surface still belongs to its original logical interaction/history.
+        const owners = prev.flatMap(message => [
+          ...(message.aguiActivity ? [{ message, activity: message.aguiActivity }] : []),
+          ...(message.aguiActivities || []).map(activity => ({ message, activity })),
+        ]);
+        const owner = findA2uiActivityOwner(owners, { message: target || { id: event.messageId }, activity: incoming });
+        if (owner) return prev.map(message => message !== owner.message ? message : {
+          ...message,
+          ...(message.aguiActivity === owner.activity ? {
+            aguiActivity: mergeA2uiActivity(owner.activity, incoming, event.batchId),
+          } : { aguiActivities: message.aguiActivities?.map(activity => activity === owner.activity
+            ? mergeA2uiActivity(activity, incoming, event.batchId) : activity) }),
+        });
         let attached = false;
         const withAttachedActivity = prev.map((message) => {
           if (message.id !== event.messageId) return message;
           attached = true;
           const prior = message.aguiActivities || [];
-          const next = [
-            ...prior.filter((item) => item.surfaceId !== event.surfaceId),
-            activity,
-          ];
+          const next = [...prior, mergeA2uiActivity(undefined, incoming, event.batchId)];
           return { ...message, aguiActivities: next };
         });
         if (attached) return withAttachedActivity;
@@ -725,7 +762,8 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
           role: 'a2ui',
           content: '',
           timestamp: current?.timestamp || Date.now(),
-          aguiActivity: activity,
+          ...(runId ? { invocationId: runId } : {}),
+          aguiActivity: mergeA2uiActivity(current?.aguiActivity, incoming, event.batchId),
         };
         return current
           ? prev.map((message) => message.id === msgId ? nextMessage : message)

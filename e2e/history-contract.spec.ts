@@ -39,6 +39,67 @@ async function intercept(page: Page,
   return calls;
 }
 
+test('short-page history has an explicit bounded loader without scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1500 });
+  const calls = await intercept(page, (_body, index) => ({ body: ok(index === 1 ? first() : {
+    ...first(), Messages: [message(`older-${index}`, `Earlier page ${index}`, index === 2 ? 5 : 1)],
+    HasMore: index === 2, NextCursor: index === 2 ? 4 : null,
+  }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await expect(page.getByText('Old history')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(1);
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByText('Earlier page 2')).toBeVisible();
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')[1].body).toMatchObject({
+    BeforeSeqId: 8, HistoryEpoch: 'epoch-1', SnapshotSeqId: 0, CursorSource: 'control',
+  });
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByText('Earlier page 3')).toBeVisible();
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(3);
+  await expect(page.getByTestId('history-load-older')).toHaveCount(0);
+});
+
+test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (body, index) => {
+    if (body.SessionId === 't') return { body: ok(first('t')) };
+    if (index === 1) return { body: ok(first()) };
+    await held;
+    return { body: ok({ ...first(), Messages: [message('late', 'Late short page', 1)],
+      HasMore: false, NextCursor: null }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByTestId('history-load-older')).toBeDisabled();
+  await page.getByTestId('history-load-older').evaluate((button: HTMLButtonElement) => button.click());
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+  await page.getByRole('button', { name: 'Open T' }).click();
+  await expect(page.getByText('Other session')).toBeVisible();
+  release();
+  await expect(page.getByText('Late short page')).toHaveCount(0);
+  await expect(page.getByTestId('history-load-older')).toHaveCount(0);
+});
+
+test('short-page loader preserves messages on failure and retries the same cursor', async ({ page }) => {
+  const calls = await intercept(page, (_body, index) => index === 2
+    ? { status: 400, body: { Code: 400, Message: 'Older page unavailable', Data: null } }
+    : { body: ok(index === 1 ? first() : { ...first(),
+        Messages: [message('recovered', 'Recovered earlier page', 1)], HasMore: false, NextCursor: null }) });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByTestId('history-reload-error')).toBeVisible();
+  await expect(page.getByText('Old history')).toBeVisible();
+  await expect(page.getByTestId('history-load-older')).toBeEnabled();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByText('Recovered earlier page')).toBeVisible();
+  const continuations = calls.filter(call => call.action === 'ListSessionMessages').slice(1);
+  expect(continuations).toHaveLength(2);
+  expect(continuations.every(call => call.body.BeforeSeqId === 8 && call.body.SnapshotSeqId === 0)).toBe(true);
+});
+
 test('browser shows persistence warning and sends source, epoch and zero snapshot on an empty visible page', async ({ page }) => {
   const calls = await intercept(page, async (_body, index) => ({ body: ok(index === 1 ? first() : {
     Messages: [], LatestSeqId: 12, HasMore: true, NextCursor: 4,
@@ -46,7 +107,7 @@ test('browser shows persistence warning and sends source, epoch and zero snapsho
   }) }));
   await page.getByRole('button', { name: 'Open S' }).click();
   await expect(page.getByText('Old history')).toBeVisible();
-  await expect(page.getByTestId('history-persistence-warning')).toContainText('尚未持久化');
+  await expect(page.getByTestId('history-persistence-warning')).toContainText('持久恢复尚未确认');
   await page.getByRole('button', { name: 'Older S', exact: true }).click();
   await expect.poll(() => calls.filter(call => call.action === 'ListSessionMessages').length).toBe(2);
   expect(calls.filter(call => call.action === 'ListSessionMessages')[1].body).toMatchObject({

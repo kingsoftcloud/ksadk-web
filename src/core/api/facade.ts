@@ -1,3 +1,4 @@
+import type { JsonValue } from '../../types/json-value.js';
 import type { ApiFacade, CancelRunOptions } from './types.js';
 import {
   AgentEngineClient,
@@ -229,7 +230,7 @@ export class ApiFacadeImpl implements ApiFacade {
       InteractionId: string;
       ExpectedRevision: number;
       Action: 'approve' | 'reject' | 'submit' | 'cancel';
-      Response: Record<string, unknown>;
+      Response: JsonValue;
       IdempotencyKey: string;
     },
     opts?: { signal?: AbortSignal },

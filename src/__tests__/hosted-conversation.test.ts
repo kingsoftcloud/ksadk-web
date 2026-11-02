@@ -147,7 +147,7 @@ describe('Hosted UI canonical ConversationItem projection', () => {
             'event-3',
             'reasoning',
             'conversation.item.reasoning/v1',
-            { text: 'inspect the workspace' },
+            { text: 'inspect the workspace', presentationSource: 'provider_reasoning' },
           )),
           frame(4, item(
             'tool-1',
@@ -252,7 +252,7 @@ describe('Hosted UI canonical ConversationItem projection', () => {
     expect(messages.filter((message) => message.content === 'same text')).toHaveLength(2);
     expect(messages.filter((message) => message.itemId === 'answer-1')).toHaveLength(1);
     expect(messages.find((message) => message.itemId === 'reasoning-1')?.blocks)
-      .toEqual([expect.objectContaining({ type: 'thinking', content: 'inspect the workspace' })]);
+      .toEqual([expect.objectContaining({ type: 'thinking', content: 'inspect the workspace', source: 'provider_reasoning' })]);
     expect(messages.find((message) => message.itemId === 'tool-1')?.blocks)
       .toEqual([expect.objectContaining({
         type: 'tool',

@@ -105,7 +105,8 @@ export function interactionFromSessionEvent(
       interactionId,
       sessionId,
       runId: body.run_id ?? body.runId ?? envelope.run_id ?? envelope.InvocationId,
-      kind: eventType === 'approval.requested' ? 'approval' : body.kind ?? request.kind ?? 'approval',
+      kind: eventType === 'approval.requested' ? 'approval'
+        : body.kind === 'form' ? 'structured_input' : body.kind ?? request.kind ?? 'approval',
       title: body.title ?? presentation?.title,
       message: body.message ?? body.description ?? asRecord(body.detail)?.command ?? presentation?.description,
       requestSchema: body.request_schema ?? body.requestSchema ?? body.input_schema ?? body.inputSchema ?? body.RequestSchema ?? request.request_schema,
@@ -171,6 +172,10 @@ export function interactionFromSessionEvent(
         payload.response_summary ??
         body.response_summary ??
         (action ? `${action}` : undefined),
+      ...(Object.hasOwn(body, 'response') ? { response: body.response }
+        : Object.hasOwn(payload, 'response') ? { response: payload.response }
+          : !canonical && ['a2ui.action', 'interaction.resolved'].includes(eventType)
+            && Object.hasOwn(body, 'data') ? { response: body.data } : {}),
       source: 'interaction_v1',
       extensions,
     });

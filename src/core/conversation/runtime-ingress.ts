@@ -116,9 +116,8 @@ export class RuntimeConversationIngress {
       payload: {},
       nativeRef,
     };
-    const visibility = record(
-      record(frame.source).metadata,
-    ).conversation_visibility;
+    const sourceMetadata = record(record(frame.source).metadata);
+    const visibility = sourceMetadata.conversation_visibility ?? sourceMetadata.visibility;
     if (['public', 'internal', 'hidden'].includes(String(visibility)))
       base.visibility = visibility as ConversationItem['visibility'];
     else if (parent && frame.item_kind === 'reasoning')
@@ -333,6 +332,16 @@ export class RuntimeConversationIngress {
                 : 'running',
           sourceKind: item.itemKind,
         };
+      } else if (item.itemKind === 'data' && source.protocol === 'a2ui') {
+        const data = values.find(part => part.content_type === 'data')?.data;
+        base.kind = 'a2ui';
+        base.payloadSchemaRef = 'conversation.item.a2ui/v1';
+        base.payload = {
+          surfaceId: String(record(source.metadata).surface_id || ''),
+          ...(typeof record(source.metadata).interaction_id === 'string'
+            ? { interactionId: record(source.metadata).interaction_id } : {}),
+          data: Array.isArray(data) ? data : [],
+        };
       } else if (item.itemKind === 'message' || item.itemKind === 'reasoning' ||
         (item.itemKind === 'artifact' && item.parts.length > 0 && item.parts.every(p => p.contentType === 'text'))) {
         base.kind =
@@ -344,6 +353,10 @@ export class RuntimeConversationIngress {
               : 'assistant_text';
         base.payloadSchemaRef = `conversation.item.${base.kind}/v1`;
         base.payload = { text: item.parts.map((p) => p.text || '').join('') };
+        const metadata = record(source.metadata);
+        if (base.kind === 'reasoning' && (metadata.public_summary === true || metadata.provider_reasoning === true)) {
+          base.payload.presentationSource = metadata.public_summary === true ? 'public_summary' : 'provider_reasoning';
+        }
         if (type === 'item.updated' && frame.op === 'append') {
           base.operation = 'append';
           base.payload.text = record(frame.update).text || '';

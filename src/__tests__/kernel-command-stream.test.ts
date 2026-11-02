@@ -16,6 +16,44 @@ const framesFor = (run: string) => fixture.map((f, i) => ({ ...f, family: 'runti
   ...(f.parent_scope_id && f.item_kind === 'message' ? { item_kind: 'artifact' } : {}) }));
 
 describe('command-bound native hosted streaming', () => {
+  it.each([true, false])('does not turn exhausted reconnection into failure (pending input: %s)', async pending => {
+    vi.useFakeTimers();
+    try {
+      const frames = [{seq:501, family:'control', event_type:'control.run_transition',
+        run_id:'root-run-1', state:'running'}, ...(pending ? [{seq:502, family:'interaction',
+        event_type:'interaction.requested', run_id:'root-run-1', interaction_id:'input-1'}] : [])];
+      const api = {
+        runAgent:vi.fn(async()=>bytes(JSON.stringify({Data:{ReceiptStatus:'accepted',CommandId:commandId}}))),
+        subscribeSessionEvents:vi.fn().mockResolvedValueOnce(bytes(new TextDecoder().decode(encode(frames))))
+          .mockRejectedValue(new TypeError('connection unavailable')),
+      } as unknown as ApiFacade;
+      const engine=createRunEngine(api);const settled=vi.fn();const events: RunEvent[]=[];
+      engine.subscribe(event=>events.push(event));
+      engine.updateConfig({agentId:'agent',apiFormats:['responses'],agentFramework:'langgraph',
+        selectedModel:'',thinkingMode:'auto',kernelSessionEventsEnabled:true,kernelCommandEventsEnabled:true});
+      engine.start({text:'task',sessionId:'session',attachments:[],onSettled:settled});
+      await vi.waitFor(()=>expect(api.subscribeSessionEvents).toHaveBeenCalledTimes(1));
+      await vi.runAllTimersAsync();
+      expect(settled).toHaveBeenCalledWith('session', pending ? 'awaiting-input' : 'unknown');
+      expect(api.runAgent).toHaveBeenCalledTimes(1);
+      expect(api.subscribeSessionEvents).toHaveBeenCalledTimes(7);
+      expect(events.filter(event=>event.type==='activity' && event.status==='failed')).toHaveLength(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['failed', 'cancelled'])('keeps the authoritative terminal %s', async state => {
+    const api={runAgent:async()=>bytes(JSON.stringify({Data:{ReceiptStatus:'accepted',CommandId:commandId}})),
+      subscribeSessionEvents:async()=>bytes(new TextDecoder().decode(encode([
+        {seq:501,family:'control',event_type:'control.run_transition',run_id:'root-run-1',state},
+      ]))),
+    } as unknown as ApiFacade;
+    const engine=createRunEngine(api);const settled=vi.fn();
+    engine.updateConfig({agentId:'agent',apiFormats:['responses'],agentFramework:'langgraph',
+      selectedModel:'',thinkingMode:'auto',kernelSessionEventsEnabled:true,kernelCommandEventsEnabled:true});
+    engine.start({text:'task',sessionId:'session',attachments:[],onSettled:settled});
+    await vi.waitFor(()=>expect(settled).toHaveBeenCalledWith('session', state));
+  });
+
   it.each([200,409])('keeps the real GET transport reason for a queued admission (HTTP %s)',async status=>{
     let subscriptions=0;
     const fetcher=vi.fn(async(url:RequestInfo|URL)=>{
@@ -106,10 +144,14 @@ describe('command-bound native hosted streaming', () => {
         .mockResolvedValueOnce(bytes(new TextDecoder().decode(encode(framesFor('root-run-1'))))),
     } as unknown as ApiFacade;
     const engine=createRunEngine(api);const settled=vi.fn();
+    const phases: string[] = [];
+    engine.subscribe(event => { if (event.type === 'activity') phases.push(event.phase); });
     engine.updateConfig({agentId:'agent',apiFormats:['responses'],agentFramework:'langgraph',selectedModel:'',thinkingMode:'auto',kernelSessionEventsEnabled:true,kernelCommandEventsEnabled:true,presentationProfile:'agent-block-v1'});
     engine.start({text:'task',sessionId:'session',attachments:[],onSettled:settled});
     await vi.waitFor(()=>expect(settled).toHaveBeenCalledWith('session','completed'),{timeout:3000});
     expect(api.runAgent).toHaveBeenCalledTimes(1);
     expect(api.subscribeSessionEvents).toHaveBeenCalledTimes(2);
+    expect(phases.indexOf('运行已入队，等待执行')).toBeGreaterThanOrEqual(0);
+    expect(phases.indexOf('正在处理')).toBeGreaterThan(phases.indexOf('运行已入队，等待执行'));
   });
 });

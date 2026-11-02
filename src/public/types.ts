@@ -1,4 +1,5 @@
 export type * from '../types/api.js';
+export type { JsonValue } from '../types/json-value.js';
 export type * from '../types/bootstrap.js';
 export type * from '../types/capabilities.js';
 export type * from '../types/input.js';

@@ -1,0 +1,8 @@
+/* The official Icon renderer uses Material Icons ligatures. Keep the font local. */
+@font-face {
+  font-family: 'Material Icons';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('@fontsource/material-icons/files/material-icons-latin-400-normal.woff2') format('woff2');
+}

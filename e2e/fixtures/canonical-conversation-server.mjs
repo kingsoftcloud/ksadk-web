@@ -7,7 +7,7 @@ const SESSION_ID = 'canonical-fixture-session';
 const BUILD_ID = 'canonical-fixture-build';
 const APPROVAL_ID = 'approval-shell-1';
 const APPROVAL_REVISION = 7;
-const CATALOG_ID = 'https://a2ui.org/specification/v0_9/basic_catalog.json';
+const CATALOG_ID = 'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json';
 
 const delay = (milliseconds) => new Promise((resolve) => {
   setTimeout(resolve, milliseconds);

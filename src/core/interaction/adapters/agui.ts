@@ -30,7 +30,7 @@ export function interactionFromAguiInterrupt(
     interactionId: request.interruptId,
     sessionId: request.sessionId,
     runId: request.runId ?? null,
-    kind: 'approval',
+    kind: request.requestSchema ? 'structured_input' : 'approval',
     title: request.name ? `确认：${request.name}` : '人工确认',
     message: request.message || '本次运行需要人工确认后才能继续。',
     requestSchema: request.requestSchema ?? null,

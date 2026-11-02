@@ -7,7 +7,7 @@
  */
 
 import { ChevronDown, FileDiff, Globe2, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { MessageMarkdown } from '../MessageMarkdown';
 import { splitWorkspaceFilePaths } from '../../utils/workspace-file-paths.js';
@@ -17,7 +17,7 @@ import type { Message } from './types';
 import type { ProcessingBlock, ThinkingBlock, ToolBlock, TextBlock } from '../../core/run/blocks';
 import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
 import type { Interaction } from '../../core/interaction/types';
-import { interactionApprovalStatus } from './approval-status.js';
+import { interactionApprovalStatus, interactionInputOutcome } from './approval-status.js';
 
 type ToolData = NonNullable<Message['tools']>[string];
 
@@ -28,6 +28,8 @@ export interface ProcessingBlocksViewProps {
   onRespondToAguiApproval?: (p: { interruptId: string; approve: boolean }) => void;
   /** Interaction/v1 records enrich the read-only approval status. */
   interactionRecords?: readonly Interaction[];
+  /** undefined uses the shared renderer; null deliberately suppresses a block. */
+  renderProcessingBlock?: (block: ProcessingBlock, message: Message) => ReactNode | undefined;
   className?: string;
 }
 
@@ -122,15 +124,18 @@ function ToolRow({
   /** The composer tray owns all interaction decisions once normalized. */
   interactionRecord?: Interaction;
 }) {
-  const status = tool?.status ?? block.status;
+  const inputOutcome = interactionInputOutcome(interactionRecord);
+  const snapshotStatus = tool?.status ?? block.status;
+  const status = inputOutcome && snapshotStatus === 'paused' ? 'completed' : snapshotStatus;
   const args = tool?.args ?? block.args;
   const output = tool?.output ?? block.output;
   // 审批字段优先从 block.extra 读(approval_requested 同步写进 blocks,key=toolName 一致);
   // fallback 从 tool 读(旧路径,msg.tools 用 approvalRequestId 做 key 可能和 toolName 不一致。
   const extra = (block.extra || {}) as Record<string, unknown>;
-  const approvalStatus = interactionApprovalStatus(interactionRecord)
-    || (extra.approvalStatus as string)
-    || tool?.approvalStatus;
+  const approvalStatus = inputOutcome === 'submitted' ? undefined
+    : interactionApprovalStatus(interactionRecord)
+      || (extra.approvalStatus as string)
+      || tool?.approvalStatus;
   const approvalRequestId = (extra.approvalRequestId as string) || tool?.approvalRequestId;
   const running = status === 'running';
   const summary = String(extra.summary ?? tool?.summary ?? '').trim();
@@ -148,6 +153,10 @@ function ToolRow({
     ? '状态未知'
     : errored
     ? '执行失败'
+    : inputOutcome === 'submitted' && !running
+      ? '已提交'
+      : inputOutcome === 'expired'
+        ? '已过期'
     : approvalStatus === 'pending'
       ? '等待确认'
       : approvalStatus === 'rejected'
@@ -178,7 +187,7 @@ function ToolRow({
         <span className="flex items-center gap-1.5">
           <Wrench className={cn('h-3.5 w-3.5 shrink-0', tone)} />
           <span className={tone}>{prefix}</span>
-          <span className="truncate font-medium text-slate-600 dark:text-slate-300">{block.toolName}</span>
+          <span className="truncate font-medium text-slate-600 dark:text-slate-300">{interactionRecord?.kind === 'structured_input' ? interactionRecord.title || '补充信息' : block.toolName}</span>
           {summary ? <span className="truncate text-slate-400 dark:text-slate-500">· {summary}</span> : null}
           {Number.isFinite(durationMs) && durationMs >= 0 ? <span className="shrink-0 font-mono text-[11px] text-slate-400 dark:text-slate-500">· {formatToolDuration(durationMs)}</span> : null}
           {running && args && <span className="ml-0.5 animate-pulse text-slate-400">…</span>}
@@ -186,6 +195,7 @@ function ToolRow({
       }
     >
       <div className="flex flex-col gap-2.5 py-1 text-[13px]">
+        {inputOutcome === 'submitted' ? <div className="font-sans text-xs text-slate-500 dark:text-slate-400">表单已提交，Agent 已接收。</div> : null}
         {approvalRequestId && approvalStatus === 'pending' ? (
           <div data-slot="tool-approval-status" className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
@@ -393,12 +403,15 @@ function TextRow({ block }: { block: TextBlock }) {
 export function ProcessingBlocksView({
   message,
   interactionRecords,
+  renderProcessingBlock,
   className,
 }: ProcessingBlocksViewProps) {
   const blocks: ProcessingBlock[] = message.blocks ?? [];
   return (
     <div className={cn('mb-3 min-w-0', className)} data-slot="processing-blocks">
       {blocks.map((block) => {
+        const rendered = renderProcessingBlock?.(block, message);
+        if (rendered !== undefined) return <Fragment key={block.id}>{rendered}</Fragment>;
         if (block.type === 'thinking') {
           return <ThinkingRow key={block.id} block={block} />;
         }

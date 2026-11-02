@@ -227,6 +227,11 @@ export class KernelRunEventTranslator {
     }
 
     if (family !== 'runtime') return null;
+    const metadata = asRecord(asRecord(frame.source)?.metadata);
+    const visibility = metadata?.conversation_visibility ?? metadata?.visibility;
+    if (eventType.startsWith('item.') && ['internal', 'hidden'].includes(String(visibility))) {
+      return null;
+    }
 
     const runStatus = RUN_STATUS_BY_EVENT_TYPE[eventType];
     if (runStatus) {
@@ -239,6 +244,7 @@ export class KernelRunEventTranslator {
       const parts = frameParts(frame, 'initial');
       if (frame.item_kind === 'tool_call') {
         const call = toolCallPart(parts);
+        if (!call) return null;
         const callId = call?.callId || String(frame.item_id || '');
         const name = call?.name || 'tool';
         if (callId) this.toolNameByCallId.set(callId, name);

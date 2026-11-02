@@ -7,6 +7,11 @@ import {
   validateA2uiPresentation,
 } from '../core/interaction/a2ui-validate.js';
 import { schemaFields } from '../components/chat/schema-fields.js';
+import { a2uiCatalog, a2uiManifest } from '../core/a2ui/catalog.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { InteractionTray } from '../components/chat/InteractionTray.js';
+import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
 
 function readSource(relativePath: string): string {
   return readFileSync(
@@ -16,6 +21,21 @@ function readSource(relativePath: string): string {
 }
 
 describe('InteractionTray contract', () => {
+  it('distinguishes sending from durable acceptance while retaining disabled controls', () => {
+    const record = interactionFromSessionEvent({ family: 'interaction', session_id: 'session',
+      event_type: 'interaction.requested', payload: { interaction_id: 'wait', kind: 'approval' } })!;
+    for (const accepted of [false, true]) {
+      const html = renderToStaticMarkup(createElement(InteractionTray, {
+        interactions: [{ ...record, status: 'resolving', extensions: accepted ? { submit_command_id: 'command' } : {} }],
+        activeIndex: 0, onSelectIndex: () => {}, onRespond: () => {},
+      }));
+      expect(html).toContain(accepted ? '已提交，等待 Agent 处理' : '正在发送，请稍候');
+      expect(html).not.toContain(accepted ? '正在发送，请稍候' : '已提交，等待 Agent 处理');
+      expect(html).toContain('role="status"');
+      expect(html).toContain('disabled=""');
+    }
+  });
+
   it('renders above the composer inside ConnectedComposer', () => {
     const source = readSource('components/chat/ConnectedComposer.tsx');
     expect(source).toContain('InteractionTray');
@@ -142,13 +162,15 @@ describe('InteractionTray contract', () => {
 });
 
 describe('A2UI v0.9.1 validation and safe fallback', () => {
-  const catalog = { components: [{ id: 'root' }, { id: 'text' }] };
+  const catalog = a2uiCatalog;
 
   it('accepts the locked wire version with a matching catalog digest', () => {
     const matching = {
       wireVersion: A2UI_WIRE_VERSION,
       catalogDigest: computeA2uiCatalogDigest(catalog),
-      messages: [{ id: 'm1' }],
+      messages: [{ version: 'v0.9.1', createSurface: {
+        surfaceId: 'test', catalogId: a2uiManifest.catalog_id,
+      } }],
     };
     expect(validateA2uiPresentation(matching, catalog)).toBe('a2ui');
   });

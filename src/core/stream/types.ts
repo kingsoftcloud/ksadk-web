@@ -15,6 +15,7 @@ export interface A2UISurface {
 export type StreamAction =
   | { type: 'canonical_interaction'; interactionId: string; event: import('../../types/session-events.js').SessionEventRecord }
   | { type: 'text_delta'; text: string }
+  | { type: 'text_replace'; text: string }
   | { type: 'text_final'; text: string }
   | { type: 'reasoning_delta'; text: string }
   | { type: 'tool_upsert'; name: string; args: string; status: 'running' | 'completed' | 'error' | 'paused'; extra?: Record<string, unknown> }

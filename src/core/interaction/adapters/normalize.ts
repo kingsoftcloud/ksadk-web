@@ -11,6 +11,7 @@ import type {
   InteractionSource,
   InteractionStatus,
 } from '../types.js';
+import { jsonValue, type JsonValue } from '../../../types/json-value.js';
 
 export type RawInteractionFields = {
   interactionId: string;
@@ -29,6 +30,7 @@ export type RawInteractionFields = {
   actor?: unknown;
   outcome?: unknown;
   responseSummary?: unknown;
+  response?: unknown;
   extensions?: Record<string, unknown>;
   source: InteractionSource;
 };
@@ -67,22 +69,29 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+export const DEFAULT_INTERACTION_TITLE = '人工确认';
+export const DEFAULT_INTERACTION_MESSAGE = '本次运行需要人工处理后才能继续。';
+
 export function normalizeInteraction(fields: RawInteractionFields): Interaction {
   const kind = String(fields.kind || 'approval');
   const status = String(fields.status || 'pending');
   const outcome = String(fields.outcome || '');
   const presentation = asRecord(fields.presentation);
   const a2ui = presentation ? asRecord(presentation.a2ui) : null;
+  let response: { response: JsonValue } | undefined;
+  if (status === 'resolved' && Object.hasOwn(fields, 'response')) {
+    try { response = { response: jsonValue(fields.response) }; } catch { /* Invalid JSON is unavailable. */ }
+  }
 
   return {
     interactionId: fields.interactionId,
     sessionId: fields.sessionId,
     runId: stringOrNull(fields.runId),
     kind: (VALID_KINDS.has(kind) ? kind : 'custom') as InteractionKind,
-    title: typeof fields.title === 'string' && fields.title ? fields.title : '人工确认',
+    title: typeof fields.title === 'string' && fields.title ? fields.title : DEFAULT_INTERACTION_TITLE,
     message: typeof fields.message === 'string' && fields.message
       ? fields.message
-      : '本次运行需要人工处理后才能继续。',
+      : DEFAULT_INTERACTION_MESSAGE,
     requestSchema: asRecord(fields.requestSchema),
     presentation: a2ui
       ? {
@@ -105,6 +114,7 @@ export function normalizeInteraction(fields: RawInteractionFields): Interaction 
     actor: stringOrNull(fields.actor),
     outcome: (VALID_OUTCOMES.has(outcome) ? outcome : null) as InteractionOutcome | null,
     responseSummary: stringOrNull(fields.responseSummary),
+    ...response,
     source: fields.source,
     extensions: fields.extensions || {},
   };

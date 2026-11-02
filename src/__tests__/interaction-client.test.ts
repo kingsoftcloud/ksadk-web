@@ -421,6 +421,30 @@ describe('single submit path', () => {
 });
 
 describe('receipts are not terminal facts', () => {
+  it('notifies the UI when accepted, and clears the old acceptance hint before a corrected retry', async () => {
+    let finish!: (value: unknown) => void;
+    const submitInteraction = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const client = new InteractionClientImpl({ agentId: 'agent-1', submitInteraction });
+    client.ingest(interactionFromSessionEvent(FIXTURES.interactionV1)!);
+    const input = { interactionId: 'int-1', expectedRevision: 1, action: 'approve' as const,
+      response: true, idempotencyKey: 'retry-key' };
+    const observed: unknown[] = [];
+    client.subscribe(event => { if ('interaction' in event) observed.push(event.interaction.extensions.submit_command_id); });
+    const pending = client.respond(input);
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+    expect(client.store.get('session-1', 'int-1')!.extensions.submit_command_id).toBeUndefined();
+    finish(okReceipt());
+    await pending;
+    expect(observed).toContain('cmd-1');
+    expect(client.store.get('session-1', 'int-1')!.status).toBe('resolving');
+    client.store.rejectCommand('session-1', 'cmd-1', 'input_response_invalid');
+    const retry = client.respond(input);
+    expect(client.store.get('session-1', 'int-1')!.extensions.submit_command_id).toBeUndefined();
+    finish(okReceipt({ command_id: 'cmd-2' }));
+    await retry;
+    expect(client.store.get('session-1', 'int-1')!.extensions.submit_command_id).toBe('cmd-2');
+  });
+
   it('keeps the record resolving after an accepted receipt; only the SessionEvent resolves it', async () => {
     const submitInteraction = vi.fn().mockResolvedValue(okReceipt());
     const client = new InteractionClientImpl({

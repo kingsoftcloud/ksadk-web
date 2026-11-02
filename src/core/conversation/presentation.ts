@@ -8,6 +8,8 @@ import type {
   ConversationTextPresentation,
   ConversationTimelineEntry,
 } from './types.js';
+import { mergeA2uiMessages } from '../a2ui/history.js';
+import { findA2uiActivityOwner, type A2uiActivityOwner } from '../a2ui/transcript.js';
 
 const SUPPORTED_SCHEMAS: Partial<Record<ConversationItemKind, string>> = {
   user_message: 'conversation.item.user_message/v1',
@@ -129,7 +131,7 @@ function presentationKey(item: ConversationItem): string {
   }
   if (item.kind === 'a2ui') {
     const surfaceId = payloadString(item, 'surfaceId');
-    if (surfaceId) return `a2ui:${surfaceId}`;
+    if (surfaceId) return `a2ui:${JSON.stringify([item.runId, surfaceId])}`;
   }
   return `item:${item.itemId}`;
 }
@@ -139,13 +141,16 @@ function mergeTimelineItem(
   incoming: ConversationItem,
 ): ConversationItem {
   const preserveTerminal = itemLifecycleTerminal(previous) && !itemLifecycleTerminal(incoming);
+  const a2ui = previous.kind === 'a2ui' && incoming.kind === 'a2ui'
+    && Array.isArray(previous.payload.data) && Array.isArray(incoming.payload.data)
+    ? { data: mergeA2uiMessages(previous.payload.data, incoming.payload.data) } : {};
   return {
     ...previous,
     ...incoming,
     itemId: previous.itemId,
     parentItemId: previous.parentItemId,
     sourceEventIds: [...new Set([...previous.sourceEventIds, ...incoming.sourceEventIds])],
-    payload: { ...previous.payload, ...incoming.payload, ...(previous.payload.sourceKind === 'tool_result' && incoming.payload.sourceKind === 'tool_call' ? {executionStatus:previous.payload.executionStatus, sourceKind:'tool_result'} : {}) },
+    payload: { ...previous.payload, ...incoming.payload, ...a2ui, ...(previous.payload.sourceKind === 'tool_result' && incoming.payload.sourceKind === 'tool_call' ? {executionStatus:previous.payload.executionStatus, sourceKind:'tool_result'} : {}) },
     nativeRef: { ...previous.nativeRef, ...incoming.nativeRef },
     ...(preserveTerminal ? { lifecycle: previous.lifecycle, operation: previous.operation } : {}),
   };
@@ -154,17 +159,27 @@ function mergeTimelineItem(
 function projectFlatTimeline(items: ConversationItem[]): ConversationTimelineEntry[] {
   const entries: ConversationTimelineEntry[] = [];
   const indices = new Map<string, number>();
+  const a2uiOwners = new Map<string, Array<A2uiActivityOwner & { index: number }>>();
   for (const item of items) {
     const key = presentationKey(item);
-    const index = indices.get(key);
+    const activity = item.kind === 'a2ui' ? {
+      surfaceId: payloadString(item, 'surfaceId') || '', messages: [],
+      ...(payloadString(item, 'interactionId') ? { interactionId: payloadString(item, 'interactionId')! } : {}),
+    } : null;
+    const incoming = activity ? { message: { id: item.itemId, runId: item.runId }, activity } : null;
+    const owners = a2uiOwners.get(key) || [];
+    const owner = incoming ? findA2uiActivityOwner(owners, incoming) : undefined;
+    const index = incoming ? owner?.index : indices.get(key);
     if (index === undefined) {
-      indices.set(key, entries.length);
-      entries.push({ key, item, sourceItemIds: [item.itemId] });
+      if (incoming) a2uiOwners.set(key, [...owners, { ...incoming, index: entries.length }]);
+      else indices.set(key, entries.length);
+      entries.push({ key: incoming ? `${key}:${item.itemId}` : key, item, sourceItemIds: [item.itemId] });
       continue;
     }
+    if (owner && activity?.interactionId) owner.activity.interactionId = activity.interactionId;
     const previous = entries[index];
     entries[index] = {
-      key,
+      key: previous.key,
       item: mergeTimelineItem(previous.item, item),
       sourceItemIds: [...new Set([...previous.sourceItemIds, item.itemId])],
     };

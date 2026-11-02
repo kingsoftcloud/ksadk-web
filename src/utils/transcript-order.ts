@@ -1,4 +1,6 @@
 import type { Message } from '../components/chat/types.js';
+import { coalesceA2uiActivities } from '../core/a2ui/transcript.js';
+import { coalesceHistoryToolCalls } from './history-tool-facts.js';
 
 const runOf = (message: Message) => message.runId || message.invocationId;
 
@@ -70,7 +72,7 @@ export function mergeHistoryWithLive(
       ? { ...message, feedback: feedbackByResponse.get(key) } : message;
   });
   const changed = current.filter(message => contentChanged(message, before.get(message.id)));
-  if (!changed.length) return withFeedback(history);
+  if (!changed.length) return coalesceA2uiActivities(coalesceHistoryToolCalls(withFeedback(history)));
   const changedRuns = new Set(changed.map(runOf).filter(Boolean));
   const changedIds = new Set(changed.map(message => message.id));
   const live = current.filter(message => changedRuns.has(runOf(message)) || changedIds.has(message.id));
@@ -106,5 +108,5 @@ export function mergeHistoryWithLive(
     else result = result.map((row, i) => i === index
       ? { ...message, historyOrder: message.historyOrder || row.historyOrder } : row);
   }
-  return withFeedback(orderTranscript(result));
+  return coalesceA2uiActivities(coalesceHistoryToolCalls(withFeedback(orderTranscript(result))));
 }

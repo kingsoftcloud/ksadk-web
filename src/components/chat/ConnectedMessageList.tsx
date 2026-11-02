@@ -6,6 +6,7 @@ import { useMessageStore } from '../../stores/message.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useModelStore } from '../../stores/model.js';
 import { useCheckpointStore } from '../../stores/checkpoint.js';
+import { useBootstrapStore } from '../../stores/bootstrap.js';
 import { ChatMessageList } from './ChatMessageList';
 import { AttachmentPreview } from './AttachmentPreview';
 import { buildComposerContextIndicator } from '../../utils/context.js';
@@ -15,7 +16,7 @@ import type { ModelStore } from '../../stores/model.js';
 import type { SessionStore } from '../../stores/session.js';
 import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
-import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
+import type { A2UIClientEventMessage } from '../../core/a2ui/catalog.js';
 
 export type ConnectedMessageListProps = {
   agentName: string;
@@ -62,12 +63,24 @@ export function ConnectedMessageList({
   const messages = useMessageStore(s => s.messages);
   const currentSessionId = useSessionStore((s: SessionStore) => s.currentSessionId);
   const isLoadingSessions = useSessionStore((s: SessionStore) => s.isLoadingSessions);
-  const isStreaming = useStreamingStore((s: StreamingStore) => s.isSessionStreaming(currentSessionId));
-  const activity = useStreamingStore((s: StreamingStore) => s.getSessionActivity(currentSessionId));
+  const activity = useStreamingStore((s: StreamingStore) => currentSessionId
+    ? s.getSessionActivity(currentSessionId) : s.activity);
+  const isStreaming = useStreamingStore((s: StreamingStore) => currentSessionId
+    ? s.isSessionStreaming(currentSessionId)
+    // Visible draft activity is cleared on navigation; global isStreaming alone
+    // would incorrectly show an offscreen session's run on a new empty draft.
+    : Boolean(s.isStreaming && s.activity && ['connecting', 'running', 'waiting'].includes(s.activity.status)));
   const checkpoints = useCheckpointStore(s => s.getSessionCheckpoints(currentSessionId));
   const currentMessageHistory = useSessionStore((s: SessionStore) =>
     currentSessionId ? s.messageHistory[currentSessionId] : null,
   );
+  const hostedRuntime = useBootstrapStore(s => s.capabilities.HostedRuntime);
+  // Checkpoint storage does not establish whether session history is durable.
+  const persistenceWarning = hostedRuntime === false
+    ? '当前会话历史的持久恢复尚未确认。本地恢复取决于所用存储及数据文件是否保留，不保证跨实例恢复。'
+    : hostedRuntime === true
+      ? '当前会话历史处于持久化降级状态。刷新、重启或切换实例后，部分消息可能无法恢复。'
+      : '当前会话历史的持久恢复尚未确认。刷新或切换设备后，部分消息可能无法恢复。';
   const isLoadingInitialHistory = isLoadingSessions || Boolean(currentMessageHistory?.isLoadingInitial);
   const contextUsage = useSessionStore(s => s.sessions.find(item => item.SessionId === currentSessionId)?.ContextUsage);
   const availableModels = useModelStore((s: ModelStore) => s.availableModels);
@@ -177,6 +190,52 @@ export function ConnectedMessageList({
     }
   }, [messages, scrollToBottom]);
 
+  const loadOlderHistory = useCallback((revealOlder = false) => {
+    const scroller = scrollRef.current;
+    if (!scroller || !currentSessionId || !currentMessageHistory?.hasMore
+      || currentMessageHistory.isLoadingOlder || loadingOlderRef.current
+      || !onLoadOlderSessionMessages) return;
+    const previousScrollHeight = scroller.scrollHeight;
+    const requestedSessionId = currentSessionId;
+    const requestToken = Symbol(requestedSessionId);
+    loadingOlderRef.current = true;
+    olderLoadTokenRef.current = requestToken;
+    if (revealOlder) {
+      stickToBottomRef.current = false;
+      userDetachedFromBottomRef.current = true;
+    }
+    void onLoadOlderSessionMessages(requestedSessionId)
+      .then(() => {
+        if (!ownsOlderMessageScrollRequest({
+          requestedSessionId,
+          activeSessionId: useSessionStore.getState().currentSessionId,
+          requestToken,
+          activeRequestToken: olderLoadTokenRef.current,
+        })) return;
+        requestAnimationFrame(() => {
+          if (!ownsOlderMessageScrollRequest({
+            requestedSessionId,
+            activeSessionId: useSessionStore.getState().currentSessionId,
+            requestToken,
+            activeRequestToken: olderLoadTokenRef.current,
+          })) return;
+          const nextScroller = scrollRef.current;
+          if (!nextScroller) return;
+          const delta = nextScroller.scrollHeight - previousScrollHeight;
+          if (revealOlder) nextScroller.scrollTop = 0;
+          else nextScroller.scrollTop += delta;
+          previousScrollTopRef.current = nextScroller.scrollTop;
+          nextScroller.dispatchEvent(new Event('scroll'));
+        });
+      })
+      .finally(() => {
+        if (olderLoadTokenRef.current === requestToken) {
+          olderLoadTokenRef.current = null;
+          loadingOlderRef.current = false;
+        }
+      });
+  }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
+
   useEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return undefined;
@@ -197,39 +256,7 @@ export function ConnectedMessageList({
         !loadingOlderRef.current &&
         onLoadOlderSessionMessages
       ) {
-        const previousScrollHeight = scroller.scrollHeight;
-        const requestedSessionId = currentSessionId;
-        const requestToken = Symbol(requestedSessionId);
-        loadingOlderRef.current = true;
-        olderLoadTokenRef.current = requestToken;
-        void onLoadOlderSessionMessages(requestedSessionId)
-          .then(() => {
-            if (!ownsOlderMessageScrollRequest({
-              requestedSessionId,
-              activeSessionId: useSessionStore.getState().currentSessionId,
-              requestToken,
-              activeRequestToken: olderLoadTokenRef.current,
-            })) return;
-            requestAnimationFrame(() => {
-              if (!ownsOlderMessageScrollRequest({
-                requestedSessionId,
-                activeSessionId: useSessionStore.getState().currentSessionId,
-                requestToken,
-                activeRequestToken: olderLoadTokenRef.current,
-              })) return;
-              const nextScroller = scrollRef.current;
-              if (!nextScroller) return;
-              const delta = nextScroller.scrollHeight - previousScrollHeight;
-              nextScroller.scrollTop += delta;
-              previousScrollTopRef.current = nextScroller.scrollTop;
-            });
-          })
-          .finally(() => {
-            if (olderLoadTokenRef.current === requestToken) {
-              olderLoadTokenRef.current = null;
-              loadingOlderRef.current = false;
-            }
-          });
+        loadOlderHistory();
       }
 
       if (isStreamingRef.current && scrolledUp) {
@@ -251,7 +278,7 @@ export function ConnectedMessageList({
     updateStickiness();
     scroller.addEventListener('scroll', updateStickiness, { passive: true });
     return () => scroller.removeEventListener('scroll', updateStickiness);
-  }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
+  }, [currentMessageHistory, currentSessionId, loadOlderHistory, onLoadOlderSessionMessages]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -387,7 +414,7 @@ export function ConnectedMessageList({
     <>
       {currentMessageHistory?.persistenceDegraded && (
         <div role="status" data-testid="history-persistence-warning" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-amber-700 dark:text-amber-300">
-          当前会话历史尚未持久化。刷新或切换设备后，部分消息可能无法恢复。
+          {persistenceWarning}
         </div>
       )}
       {currentMessageHistory?.error && (
@@ -400,6 +427,16 @@ export function ConnectedMessageList({
       )}
       {currentMessageHistory?.preparing && (
         <div role="status" data-testid="history-preparing" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm">历史正在准备，请稍候。</div>
+      )}
+      {currentMessageHistory?.hasMore && onLoadOlderSessionMessages && !isLoadingInitialHistory && (
+        <div className="mx-auto w-full max-w-3xl px-6 py-2 text-center">
+          <button type="button" data-testid="history-load-older"
+            className="text-sm text-text-secondary underline disabled:opacity-50"
+            disabled={currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing}
+            onClick={() => loadOlderHistory(true)}>
+            {currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing ? '正在加载…' : '加载更早的消息'}
+          </button>
+        </div>
       )}
       <ChatMessageList
         revealMessage={revealMessage}

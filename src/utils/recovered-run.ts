@@ -26,6 +26,7 @@ export function mergeRecoveredRunMessages(
       blocks: buildBlocksFromHistory({
         content: message.content,
         reasoning: message.reasoning,
+        reasoningSource: message.reasoningSource,
         tools: message.tools,
       }),
     }));

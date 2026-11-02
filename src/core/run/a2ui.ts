@@ -1,18 +1,24 @@
-import {
-  A2UI_SCHEMA_CONTEXT_DESCRIPTION,
-  basicCatalog,
-  buildCatalogContextValue,
-} from '@copilotkit/a2ui-renderer';
+import { a2uiCatalog, a2uiManifest } from '../a2ui/catalog.js';
+import { defaultA2uiCatalogRegistry, type A2uiCatalogRegistry } from '../a2ui/registry.js';
 
-// The agent currently emits the official v0.9 basic catalog id.  Creating a
-// second catalog that happens to contain the same components changes that id,
-// which makes the renderer reject every createSurface operation.
-export const ksadkA2uiCatalog = basicCatalog;
+// Retain the original public default; applications select another catalog
+// through their own registry without changing these shared defaults.
+export const ksadkA2uiCatalog = a2uiCatalog;
 
 export const ksadkA2uiAgentContext = {
-  description: A2UI_SCHEMA_CONTEXT_DESCRIPTION,
-  value: buildCatalogContextValue(ksadkA2uiCatalog),
+  // Exact AG-UI toolkit marker: a free-form description is treated as ordinary
+  // chat context and silently loses dynamic tool catalog negotiation.
+  description: 'A2UI Component Schema — available components for generating UI surfaces. Use these component names and properties when creating A2UI operations.',
+  value: JSON.stringify({ ...a2uiCatalog, ksadkManifest: a2uiManifest }),
 };
+
+export function a2uiAgentContext(registry: A2uiCatalogRegistry = defaultA2uiCatalogRegistry) {
+  if (registry === defaultA2uiCatalogRegistry) return ksadkA2uiAgentContext;
+  const entry = registry.get(registry.defaultCatalogId)!;
+  return { description: ksadkA2uiAgentContext.description,
+    value: JSON.stringify({ ...entry.schema, ksadkResources: entry.resources, ksadkManifest: { catalog_id: registry.defaultCatalogId,
+      catalog_digest: entry.digest, supported_catalog_ids: registry.catalogIds } }) };
+}
 
 /**
  * CopilotKit's v0.9 React renderer always begins rendering at component id

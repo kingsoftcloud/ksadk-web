@@ -5,6 +5,7 @@ import { agentBlockRendererCatalog } from '../core/conversation/renderer-registr
 import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
 import { projectConversationItems } from '../core/conversation/presentation.js';
 import { hydrateKernelRunHistory } from '../utils/kernel-run-history.js';
+import { hydrateVisibleInteractionHistory } from '../utils/interaction-history.js';
 import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
@@ -335,8 +336,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         useStreamingStore.getState().setSessionStreaming(options.sessionId, true);
         useStreamingStore.getState().updateActivity({
           sessionId: options.sessionId,
+          runId: options.invocationId,
+          source: 'restore',
           status: 'running',
-          phase: '后台长任务运行中',
+          phase: '正在同步任务进展',
           detail: options.invocationId,
           countEvent: false,
         });
@@ -375,6 +378,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                     useStreamingStore.getState().updateActivity({
                       sessionId: options.sessionId,
                       status: 'running',
+                      phase: '正在处理',
                       countEvent: false,
                     });
                     continue;
@@ -388,6 +392,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                   const event = transportEvent.data as SessionEventRecord;
                   if (!isCurrentSubscription()) break;
                   if (event.InvocationId && event.InvocationId !== options.invocationId) continue;
+
+                  useStreamingStore.getState().updateActivity({
+                    sessionId: options.sessionId,
+                    status: 'running',
+                    phase: '正在处理',
+                    countEvent: false,
+                  });
 
                   const kernelSeq = (event as { seq?: unknown }).seq;
                   if (typeof kernelSeq === 'number') {
@@ -609,6 +620,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       useSessionStore
         .getState()
         .setSessionInitialMessageHistoryLoading(sessionId, !cachedHistory);
+      const streaming = useStreamingStore.getState();
+      if (streaming.isSessionStreaming(sessionId)) {
+        streaming.updateActivity({ sessionId, phase: '正在同步任务进展', countEvent: false });
+      }
       resetCompaction();
       let visibleBaseline = useMessageStore.getState().messages;
       runSubscriptionAbortRef.current?.abort();
@@ -725,6 +740,24 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             canonicalRunIds = rebuilt.canonicalRunIds;
             history = rebuilt.messages;
           }
+          if (compatible) {
+            const interactionHistory = await hydrateVisibleInteractionHistory(
+              api, sessionId, fallbackHistory, eventPage, isStillCurrentSession, signal,
+            );
+            if (!isStillCurrentSession()) return;
+            for (const record of interactionHistory.events) ingestSessionEventRecord(record, sessionId);
+            if (interactionHistory.incomplete) {
+              historyReadFailureRef.current = {
+                generation, message: '部分交互历史尚未恢复完整，旧卡片保持只读。请加载较早消息后重试。',
+              };
+              useSessionStore.getState().setSessionMessageHistory(sessionId, {
+                ...useSessionStore.getState().messageHistory[sessionId],
+                nextCursor: messagesData.NextCursor, hasMore: Boolean(messagesData.HasMore
+                  || eventHistory.loadedCount < eventHistory.total),
+                error: '部分交互历史尚未恢复完整，旧卡片保持只读。请加载较早消息后重试。',
+              });
+            }
+          }
         } catch (error) {
           if (isHistoryReloadRequired(error)) throw error;
           if (isStillCurrentSession()) historyReadFailureRef.current = {
@@ -803,12 +836,44 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                 && useStreamingStore.getState().isSessionStreaming(sessionId)
                 && activity?.source === 'run' && activity.runId === session.ActiveInvocationId
                 && ['connecting', 'running', 'waiting'].includes(activity.status);
+              if (nativeOwner) {
+                useStreamingStore.getState().updateActivity({
+                  sessionId, phase: '正在处理', countEvent: false,
+                });
+              }
               if (!nativeOwner) void subscribeRunEvents({
                 sessionId, invocationId: session.ActiveInvocationId!, afterSeqId: lastSeqId,
               });
+            } else {
+              const store = useStreamingStore.getState();
+              const activity = store.getSessionActivity(sessionId);
+              // An older session projection must not settle a newly submitted
+              // turn. A matching durable terminal (including history when the
+              // active pointer has already cleared) can settle its observer.
+              const terminal = session.ActiveInvocationId && activity?.runId === session.ActiveInvocationId
+                ? terminalActivityForRunEvent({ EventType: 'run_status', Content: { status } })
+                : null;
+              const historyTerminal = activity?.runId
+                ? [...(eventHistoryBySessionRef.current.get(sessionId)?.events || [])].reverse()
+                  .find(event => {
+                    const frame = (event.Content as { runtime_event?: Record<string, unknown> } | undefined)?.runtime_event;
+                    return event.InvocationId === activity.runId && !frame?.parent_scope_id && eventHasTerminalRunStatus(event);
+                  })
+                : undefined;
+              const settled = terminal || (historyTerminal && terminalActivityForRunEvent(historyTerminal));
+              if (settled) {
+                store.setSessionStreaming(sessionId, false);
+                store.updateActivity({ sessionId, ...settled, countEvent: false });
+              }
             }
           } catch (error) {
             console.warn('[SessionLifecycle] getSession for reconnect failed:', error);
+            if (isStillCurrentSession()) {
+              const store = useStreamingStore.getState();
+              if (store.isSessionStreaming(sessionId) && store.getSessionActivity(sessionId)?.phase === '正在同步任务进展') {
+                store.updateActivity({ sessionId, phase: '正在确认任务状态', countEvent: false });
+              }
+            }
           }
         }
       } catch (error) {
@@ -1187,7 +1252,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       if (messageResult.status === 'rejected') throw messageResult.reason;
       const messagePage = messageResult.value;
       const eventPage = eventResult.status === 'fulfilled' ? eventResult.value : null;
-      const detailWarning = detailUnavailable
+      let detailWarning = detailUnavailable
         ? '消息正文已加载，部分事件详情暂时读取失败，请重试加载更早记录。'
         : undefined;
       if (messagePage && !compatibleHistorySource({
@@ -1242,6 +1307,18 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         );
         for (const record of olderEvents) {
           ingestSessionEventRecord(record, sessionId);
+        }
+      }
+      if (olderMessages.length && cachedEvents) {
+        const interactionHistory = await hydrateVisibleInteractionHistory(api, sessionId, olderMessages, {
+          Events: mergedEvents, CursorSource: cachedEvents.cursorSource,
+          HistoryEpoch: cachedEvents.historyEpoch, SnapshotSeqId: cachedEvents.snapshotSeqId,
+        }, isCurrent, signal);
+        if (!isCurrent()) return;
+        for (const record of interactionHistory.events) ingestSessionEventRecord(record, sessionId);
+        if (interactionHistory.incomplete) {
+          detailWarning = '部分交互历史尚未恢复完整，旧卡片保持只读。请加载较早消息后重试。';
+          historyReadFailureRef.current = { generation, message: detailWarning };
         }
       }
 

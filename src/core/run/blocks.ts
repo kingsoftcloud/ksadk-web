@@ -14,6 +14,8 @@ export interface ThinkingBlock {
   type: 'thinking';
   content: string;
   status: BlockStatus;
+  /** Explicit public provenance retained for host presentation policies. */
+  source?: 'public_summary' | 'provider_reasoning' | 'runtime_progress' | 'reasoning';
 }
 
 export interface ToolBlock {
@@ -86,6 +88,38 @@ export function appendTextBlock(
     return next;
   }
   return [...next, { id: nextId('text'), type: 'text', content: delta, status: 'streaming' }];
+}
+
+/** Replace only the changed aggregate text range; retain non-text blocks and ids. */
+export function replaceTextBlocks(blocks: ProcessingBlock[] | undefined, text: string): ProcessingBlock[] {
+  const base = blocks ?? [];
+  const current = base.filter((block): block is TextBlock => block.type === 'text').map(block => block.content).join('');
+  if (current === text) return base;
+  const textIndexes = base.flatMap((block, index) => block.type === 'text' ? [index] : []);
+  if (!textIndexes.length) return [...base, { id: nextId('text'), type: 'text', content: text, status: 'streaming' }];
+  let prefix = 0;
+  while (prefix < current.length && prefix < text.length && current[prefix] === text[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < current.length - prefix && suffix < text.length - prefix
+    && current[current.length - suffix - 1] === text[text.length - suffix - 1]) suffix++;
+  const end = current.length - suffix;
+  const replacement = text.slice(prefix, text.length - suffix);
+  let offset = 0;
+  const target = textIndexes.find(index => {
+    const block = base[index] as TextBlock;
+    offset += block.content.length;
+    return offset > prefix;
+  }) ?? textIndexes[textIndexes.length - 1];
+  offset = 0;
+  return base.map((block, index) => {
+    if (block.type !== 'text') return block;
+    const start = offset;
+    offset += block.content.length;
+    const left = block.content.slice(0, Math.max(0, Math.min(block.content.length, prefix - start)));
+    const right = block.content.slice(Math.max(0, Math.min(block.content.length, end - start)));
+    const content = left + (index === target ? replacement : '') + right;
+    return content === block.content ? block : { ...block, content };
+  });
 }
 
 /** 正文收尾(text_final):把最后一个流式 text 块设为终值并关闭。 */
@@ -205,6 +239,7 @@ export function getProcessingBlocks(blocks: ProcessingBlock[] | undefined): Proc
  */
 export function buildBlocksFromHistory(input: {
   reasoning?: string;
+  reasoningSource?: ThinkingBlock['source'];
   tools?: Record<string, {
     name: string;
     callId?: string;
@@ -217,7 +252,8 @@ export function buildBlocksFromHistory(input: {
 }): ProcessingBlock[] {
   const blocks: ProcessingBlock[] = [];
   if (input.reasoning && input.reasoning.trim()) {
-    blocks.push({ id: nextId('thinking'), type: 'thinking', content: input.reasoning, status: 'done' });
+    blocks.push({ id: nextId('thinking'), type: 'thinking', content: input.reasoning, status: 'done',
+      ...(input.reasoningSource ? { source: input.reasoningSource } : {}) });
   }
   if (input.tools) {
     for (const tool of Object.values(input.tools)) {

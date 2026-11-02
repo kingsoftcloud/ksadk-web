@@ -1,3 +1,4 @@
+import type { JsonValue } from '../../types/json-value.js';
 /**
  * Headless InteractionClient implementation.
  *
@@ -25,6 +26,8 @@ import {
 } from './types.js';
 import { InteractionStore } from './store.js';
 import { decodeReceipt } from '../../types/agent-control.js';
+import { jsonValue } from '../../types/json-value.js';
+import { validateInput } from './schema.js';
 
 export type SubmitInteractionTransport = (params: {
   AgentId: string;
@@ -33,7 +36,7 @@ export type SubmitInteractionTransport = (params: {
   InteractionId: string;
   ExpectedRevision: number;
   Action: InteractionAction;
-  Response: Record<string, unknown>;
+  Response: JsonValue;
   IdempotencyKey: string;
 }) => Promise<unknown>;
 
@@ -162,6 +165,32 @@ export class InteractionClientImpl implements InteractionClient {
       return syntheticReceipt('duplicate', input.interactionId);
     }
 
+    try {
+      jsonValue(input.response);
+    } catch {
+      this.store.markFailed(record.sessionId, input.interactionId, {
+        code: 'input_response_invalid', message: '答案必须是合法 JSON 值。', retryable: true,
+      });
+      return syntheticReceipt('rejected', input.interactionId);
+    }
+    if (record.kind === 'structured_input' && input.action === 'submit' && record.requestSchema) {
+      const validation = validateInput(record.requestSchema, input.response);
+      if (!validation.valid) {
+        this.store.markFailed(record.sessionId, input.interactionId, {
+          code: 'input_response_invalid', message: validation.issues.join('；'), retryable: true,
+        });
+        return syntheticReceipt('rejected', input.interactionId);
+      }
+    }
+    if (record.source === 'agui' && !this.deps.interactionV1Enabled
+      && input.action !== 'cancel' && input.response === null) {
+      this.store.markFailed(record.sessionId, input.interactionId, {
+        code: 'input_transport_unsupported',
+        message: '当前 AG-UI 传输不能提交根 null，请使用 Interaction/v1。', retryable: false,
+      });
+      return syntheticReceipt('rejected', input.interactionId);
+    }
+
     const baseKey = input.idempotencyKey
       || interactionIdempotencyKey(input.interactionId, input.expectedRevision);
     // A definitively rejected Inbox command cannot be retried under its old key.
@@ -217,7 +246,9 @@ export class InteractionClientImpl implements InteractionClient {
           this.store.revertToPending(record.sessionId, input.interactionId);
           return syntheticReceipt('rejected', input.interactionId);
         }
-        this.resolveLocal(record, input, idempotencyKey);
+        // Dispatch is not native consumption. The resume stream confirms
+        // completion, the next wait, or a correctable validation rejection.
+        this.store.recordIdempotencyKey(record.sessionId, input.interactionId, idempotencyKey);
         return syntheticReceipt('accepted', input.interactionId);
       }
 
@@ -291,7 +322,9 @@ export class InteractionClientImpl implements InteractionClient {
       status: terminalStatus,
       outcome: ACTION_OUTCOME[input.action],
       actor: 'user',
-      responseSummary: summarizeResponse(input.action, input.response),
+      responseSummary: record.kind === 'structured_input'
+        ? input.action === 'cancel' ? '已取消' : '已提交'
+        : summarizeResponse(input.action, input.response),
       revision: input.expectedRevision,
     });
     // Keep the idempotency key recorded for replay correlation.

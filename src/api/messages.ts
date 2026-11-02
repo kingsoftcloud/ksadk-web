@@ -13,7 +13,7 @@ export type BackendMessage = {
     Name?: string;
     Args?: unknown;
     Result?: unknown;
-    Status?: 'running' | 'completed' | 'failed' | 'paused';
+    Status?: 'running' | 'completed' | 'failed' | 'paused' | 'unknown';
     ToolCallId?: string;
   }[];
   ToolEvents?: {
@@ -22,7 +22,7 @@ export type BackendMessage = {
     Name: string;
     Args?: unknown;
     Result?: unknown;
-    Status?: 'running' | 'completed' | 'failed' | 'paused' | 'approved' | 'denied' | 'rejected' | 'cancelled' | 'expired';
+    Status?: 'running' | 'completed' | 'failed' | 'paused' | 'unknown' | 'approved' | 'denied' | 'rejected' | 'cancelled' | 'expired';
     ToolCallId?: string;
     ApprovalRequestId?: string;
     ApprovalStatus?: 'pending' | 'paused' | 'approved' | 'denied' | 'rejected' | 'cancelled' | 'expired';
@@ -50,6 +50,7 @@ export type BackendMessage = {
   Timestamp?: string;
   SeqId?: number;
   InvocationId?: string;
+  ScopeId?: string;
   ResponseId?: string;
 };
 

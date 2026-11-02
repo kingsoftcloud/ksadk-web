@@ -1,3 +1,4 @@
+import type { JsonValue } from '../types/json-value.js';
 import { streamAction, postJsonAction } from './client.js';
 import { decodeActionReceipt, type AgentControlReceipt } from '../types/agent-control.js';
 
@@ -38,7 +39,7 @@ export type SubmitInteractionParams = {
   InteractionId: string;
   ExpectedRevision: number;
   Action: 'approve' | 'reject' | 'submit' | 'cancel';
-  Response: Record<string, unknown>;
+  Response: JsonValue;
   IdempotencyKey: string;
 };
 

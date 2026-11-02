@@ -1,0 +1,1462 @@
+{
+  "provenance": "Sanitized and reduced from two real preproduction LangGraph turns; identifiers and business content replaced while preserving sequence/call equivalence.",
+  "SessionId": "example-session",
+  "Messages": [
+    {
+      "MessageId": "message-1",
+      "Role": "user",
+      "SeqId": 89,
+      "StartSeqId": 89,
+      "InvocationId": "run-2",
+      "Content": {
+        "text": "Example turn."
+      },
+      "Timestamp": "1700000089"
+    },
+    {
+      "MessageId": "message-2",
+      "Role": "assistant",
+      "SeqId": 114,
+      "StartSeqId": 89,
+      "InvocationId": "run-2",
+      "Content": {
+        "text": ""
+      },
+      "Timestamp": "1700000114",
+      "ToolEvents": [
+        {
+          "SeqId": 114,
+          "Type": "approval",
+          "Status": "completed",
+          "Name": "structured_input",
+          "ApprovalRequestId": "interaction-18"
+        }
+      ]
+    },
+    {
+      "MessageId": "message-3",
+      "Role": "assistant",
+      "SeqId": 157,
+      "StartSeqId": 89,
+      "InvocationId": "run-2",
+      "Content": {
+        "text": "Example turn."
+      },
+      "Timestamp": "1700000157",
+      "ToolEvents": [
+        {
+          "SeqId": 96,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 102,
+          "Name": "design_form",
+          "ToolCallId": "call-5",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        },
+        {
+          "SeqId": 101,
+          "Type": "tool_call",
+          "Status": "unknown",
+          "Name": "show_form",
+          "ToolCallId": "call-6",
+          "Args": {
+            "query": "sample"
+          }
+        },
+        {
+          "SeqId": 108,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 126,
+          "Name": "collect_input",
+          "ToolCallId": "call-7",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        },
+        {
+          "SeqId": 130,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 134,
+          "Name": "preview_item",
+          "ToolCallId": "call-8",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        }
+      ]
+    },
+    {
+      "MessageId": "message-4",
+      "Role": "user",
+      "SeqId": 1,
+      "StartSeqId": 1,
+      "InvocationId": "run-1",
+      "Content": {
+        "text": "Example turn."
+      },
+      "Timestamp": "1700000001"
+    },
+    {
+      "MessageId": "message-5",
+      "Role": "assistant",
+      "SeqId": 28,
+      "StartSeqId": 1,
+      "InvocationId": "run-1",
+      "Content": {
+        "text": ""
+      },
+      "Timestamp": "1700000028",
+      "ToolEvents": [
+        {
+          "SeqId": 28,
+          "Type": "approval",
+          "Status": "completed",
+          "Name": "structured_input",
+          "ApprovalRequestId": "interaction-19"
+        }
+      ]
+    },
+    {
+      "MessageId": "message-6",
+      "Role": "assistant",
+      "SeqId": 54,
+      "StartSeqId": 1,
+      "InvocationId": "run-1",
+      "Content": {
+        "text": "Example turn."
+      },
+      "Timestamp": "1700000054",
+      "ToolEvents": [
+        {
+          "SeqId": 10,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 16,
+          "Name": "design_form",
+          "ToolCallId": "call-1",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        },
+        {
+          "SeqId": 15,
+          "Type": "tool_call",
+          "Status": "unknown",
+          "Name": "show_form",
+          "ToolCallId": "call-2",
+          "Args": {
+            "query": "sample"
+          }
+        },
+        {
+          "SeqId": 22,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 40,
+          "Name": "collect_input",
+          "ToolCallId": "call-3",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        },
+        {
+          "SeqId": 53,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 58,
+          "Name": "preview_item",
+          "ToolCallId": "call-4",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        }
+      ]
+    },
+    {
+      "MessageId": "message-7",
+      "Role": "assistant",
+      "SeqId": 82,
+      "StartSeqId": 1,
+      "InvocationId": "run-1",
+      "Content": {
+        "text": "Example turn."
+      },
+      "Timestamp": "1700000082",
+      "ToolEvents": [
+        {
+          "SeqId": 10,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 16,
+          "Name": "design_form",
+          "ToolCallId": "call-1",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        },
+        {
+          "SeqId": 15,
+          "Type": "tool_call",
+          "Status": "unknown",
+          "Name": "show_form",
+          "ToolCallId": "call-2",
+          "Args": {
+            "query": "sample"
+          }
+        },
+        {
+          "SeqId": 22,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 40,
+          "Name": "collect_input",
+          "ToolCallId": "call-3",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        },
+        {
+          "SeqId": 53,
+          "Type": "tool_call",
+          "Status": "completed",
+          "ResultSeqId": 58,
+          "Name": "preview_item",
+          "ToolCallId": "call-4",
+          "Args": {
+            "query": "sample"
+          },
+          "Result": {
+            "ok": true,
+            "description": "example result"
+          }
+        }
+      ]
+    }
+  ],
+  "Events": [
+    {
+      "SeqId": 5,
+      "EventId": "event-5",
+      "EventType": "run.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000005",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "run.started",
+          "event_id": "event-5",
+          "run_id": "run-1",
+          "scope_id": "scope-1",
+          "seq": 5,
+          "timestamp": 1700000005,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 9,
+      "EventId": "event-9",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000009",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-9",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 9,
+          "timestamp": 1700000009,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-1",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 10,
+      "EventId": "event-10",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000010",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-10",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 10,
+          "timestamp": 1700000010,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-1",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-10-0",
+                "call_id": "call-1",
+                "name": "design_form",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 13,
+      "EventId": "event-13",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000013",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-13",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 13,
+          "timestamp": 1700000013,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-2",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 14,
+      "EventId": "event-14",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000014",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-14",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 14,
+          "timestamp": 1700000014,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-3",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 15,
+      "EventId": "event-15",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000015",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-15",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 15,
+          "timestamp": 1700000015,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-3",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-15-0",
+                "call_id": "call-2",
+                "name": "show_form",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 16,
+      "EventId": "event-16",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000016",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-16",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 16,
+          "timestamp": 1700000016,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-2",
+          "item_kind": "tool_result",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_result",
+                "part_id": "part-16-0",
+                "call_id": "call-1",
+                "result": {
+                  "ok": true,
+                  "description": "example result"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 21,
+      "EventId": "event-21",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000021",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-21",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 21,
+          "timestamp": 1700000021,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-4",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 22,
+      "EventId": "event-22",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000022",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-22",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 22,
+          "timestamp": 1700000022,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-4",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-22-0",
+                "call_id": "call-3",
+                "name": "collect_input",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 25,
+      "EventId": "event-25",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000025",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-25",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 25,
+          "timestamp": 1700000025,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-5",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 26,
+      "EventId": "event-26",
+      "EventType": "item.failed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000026",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.failed",
+          "event_id": "event-26",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 26,
+          "timestamp": 1700000026,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-5",
+          "item_kind": "tool_result",
+          "error": {
+            "message": "Example interrupted tool."
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 39,
+      "EventId": "event-39",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000039",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-39",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 39,
+          "timestamp": 1700000039,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-5",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 40,
+      "EventId": "event-40",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000040",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-40",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 40,
+          "timestamp": 1700000040,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-5",
+          "item_kind": "tool_result",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_result",
+                "part_id": "part-40-0",
+                "call_id": "call-3",
+                "result": {
+                  "ok": true,
+                  "description": "example result"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 51,
+      "EventId": "event-51",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000051",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-51",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 51,
+          "timestamp": 1700000051,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-6",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 53,
+      "EventId": "event-53",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000053",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-53",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 53,
+          "timestamp": 1700000053,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-6",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-53-0",
+                "call_id": "call-4",
+                "name": "preview_item",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 54,
+      "EventId": "event-54",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000054",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-54",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 54,
+          "timestamp": 1700000054,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {
+              "native_item_kind": "agentMessage"
+            }
+          },
+          "item_id": "item-7",
+          "item_kind": "message",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "text",
+                "part_id": "part-54-0",
+                "text": "Example assistant response."
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 57,
+      "EventId": "event-57",
+      "EventType": "item.started",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000057",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-57",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 57,
+          "timestamp": 1700000057,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-8",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 58,
+      "EventId": "event-58",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000058",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-58",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 58,
+          "timestamp": 1700000058,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-8",
+          "item_kind": "tool_result",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_result",
+                "part_id": "part-58-0",
+                "call_id": "call-4",
+                "result": {
+                  "ok": true,
+                  "description": "example result"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 82,
+      "EventId": "event-82",
+      "EventType": "item.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000082",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-82",
+          "run_id": "run-1",
+          "scope_id": "scope-2",
+          "seq": 82,
+          "timestamp": 1700000082,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {
+              "native_item_kind": "agentMessage"
+            }
+          },
+          "item_id": "item-9",
+          "item_kind": "message",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "text",
+                "part_id": "part-82-0",
+                "text": "Example assistant response."
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 86,
+      "EventId": "event-86",
+      "EventType": "run.completed",
+      "InvocationId": "run-1",
+      "Timestamp": "1700000086",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "run.completed",
+          "event_id": "event-86",
+          "run_id": "run-1",
+          "scope_id": "scope-1",
+          "seq": 86,
+          "timestamp": 1700000086,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 93,
+      "EventId": "event-93",
+      "EventType": "run.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000093",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "run.started",
+          "event_id": "event-93",
+          "run_id": "run-2",
+          "scope_id": "scope-3",
+          "seq": 93,
+          "timestamp": 1700000093,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 95,
+      "EventId": "event-95",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000095",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-95",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 95,
+          "timestamp": 1700000095,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-10",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 96,
+      "EventId": "event-96",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000096",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-96",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 96,
+          "timestamp": 1700000096,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-10",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-96-0",
+                "call_id": "call-5",
+                "name": "design_form",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 99,
+      "EventId": "event-99",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000099",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-99",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 99,
+          "timestamp": 1700000099,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-11",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 100,
+      "EventId": "event-100",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000100",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-100",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 100,
+          "timestamp": 1700000100,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-12",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 101,
+      "EventId": "event-101",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000101",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-101",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 101,
+          "timestamp": 1700000101,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-12",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-101-0",
+                "call_id": "call-6",
+                "name": "show_form",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 102,
+      "EventId": "event-102",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000102",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-102",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 102,
+          "timestamp": 1700000102,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-11",
+          "item_kind": "tool_result",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_result",
+                "part_id": "part-102-0",
+                "call_id": "call-5",
+                "result": {
+                  "ok": true,
+                  "description": "example result"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 107,
+      "EventId": "event-107",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000107",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-107",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 107,
+          "timestamp": 1700000107,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-13",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 108,
+      "EventId": "event-108",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000108",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-108",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 108,
+          "timestamp": 1700000108,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-13",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-108-0",
+                "call_id": "call-7",
+                "name": "collect_input",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 111,
+      "EventId": "event-111",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000111",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-111",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 111,
+          "timestamp": 1700000111,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-14",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 112,
+      "EventId": "event-112",
+      "EventType": "item.failed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000112",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.failed",
+          "event_id": "event-112",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 112,
+          "timestamp": 1700000112,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-14",
+          "item_kind": "tool_result",
+          "error": {
+            "message": "Example interrupted tool."
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 125,
+      "EventId": "event-125",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000125",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-125",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 125,
+          "timestamp": 1700000125,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-14",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 126,
+      "EventId": "event-126",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000126",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-126",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 126,
+          "timestamp": 1700000126,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-14",
+          "item_kind": "tool_result",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_result",
+                "part_id": "part-126-0",
+                "call_id": "call-7",
+                "result": {
+                  "ok": true,
+                  "description": "example result"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 129,
+      "EventId": "event-129",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000129",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-129",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 129,
+          "timestamp": 1700000129,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-15",
+          "item_kind": "tool_call"
+        }
+      }
+    },
+    {
+      "SeqId": 130,
+      "EventId": "event-130",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000130",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-130",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 130,
+          "timestamp": 1700000130,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-15",
+          "item_kind": "tool_call",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_call",
+                "part_id": "part-130-0",
+                "call_id": "call-8",
+                "name": "preview_item",
+                "arguments": {
+                  "query": "sample"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 133,
+      "EventId": "event-133",
+      "EventType": "item.started",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000133",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.started",
+          "event_id": "event-133",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 133,
+          "timestamp": 1700000133,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-16",
+          "item_kind": "tool_result"
+        }
+      }
+    },
+    {
+      "SeqId": 134,
+      "EventId": "event-134",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000134",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-134",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 134,
+          "timestamp": 1700000134,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          },
+          "item_id": "item-16",
+          "item_kind": "tool_result",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "tool_result",
+                "part_id": "part-134-0",
+                "call_id": "call-8",
+                "result": {
+                  "ok": true,
+                  "description": "example result"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 157,
+      "EventId": "event-157",
+      "EventType": "item.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000157",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "item.completed",
+          "event_id": "event-157",
+          "run_id": "run-2",
+          "scope_id": "scope-2",
+          "seq": 157,
+          "timestamp": 1700000157,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {
+              "native_item_kind": "agentMessage"
+            }
+          },
+          "item_id": "item-17",
+          "item_kind": "message",
+          "snapshot": {
+            "parts": [
+              {
+                "content_type": "text",
+                "part_id": "part-157-0",
+                "text": "Example assistant response."
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "SeqId": 161,
+      "EventId": "event-161",
+      "EventType": "run.completed",
+      "InvocationId": "run-2",
+      "Timestamp": "1700000161",
+      "Content": {
+        "runtime_event": {
+          "schema_version": 2,
+          "family": "runtime",
+          "event_type": "run.completed",
+          "event_id": "event-161",
+          "run_id": "run-2",
+          "scope_id": "scope-3",
+          "seq": 161,
+          "timestamp": 1700000161,
+          "source": {
+            "framework": "langgraph",
+            "metadata": {}
+          }
+        }
+      }
+    }
+  ]
+}

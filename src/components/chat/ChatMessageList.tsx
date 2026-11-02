@@ -1,3 +1,4 @@
+import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import {
   useCallback,
@@ -14,6 +15,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  CircleHelp,
   Copy,
   Paperclip,
   RefreshCcw,
@@ -29,8 +31,10 @@ import { cn } from '@/lib/utils';
 
 import { MessageMarkdown } from '../MessageMarkdown';
 import { AgentBlockView } from './AgentBlockView';
-import { ProcessingBlocksView } from './ProcessingBlocksView';
+import { ProcessingBlocksView, type ProcessingBlocksViewProps } from './ProcessingBlocksView';
 import { StatusBanner } from './StatusBanner';
+import { RunProgressIndicator } from './RunProgressIndicator';
+import { runProgressLabel } from '../../utils/run-progress.js';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
@@ -42,14 +46,18 @@ import { continuesAssistantTurn } from '../../utils/chat-message-grouping.js';
 import type { RunActivity } from '../../stores/streaming.js';
 import type { SessionCheckpoint } from '../../stores/checkpoint.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
-import type { A2UIClientEventMessage } from '@copilotkit/a2ui-renderer';
+import type { A2UIClientEventMessage } from '../../core/a2ui/catalog.js';
 import { A2UIActivityMessage } from './A2UIActivityMessage';
 import { InteractionHistoryAnchor } from './InteractionHistoryAnchor';
 import type { Interaction } from '../../core/interaction/types.js';
-import { interactionApprovalStatus } from './approval-status.js';
+import { interactionApprovalStatus, interactionInputOutcome } from './approval-status.js';
+import { interactionForA2uiActivity, missingSubmittedInputHistory } from './submitted-interaction-history.js';
 
 export type ChatMessageListProps = {
   agentName: string;
+  /** Hosts that render their own turn heading may suppress the shared heading. */
+  showAgentHeader?: boolean;
+  renderProcessingBlock?: ProcessingBlocksViewProps['renderProcessingBlock'];
   /** Host-owned welcome surface; null suppresses it. */
   emptyState?: ReactNode;
   isMobile: boolean;
@@ -688,6 +696,7 @@ function ChatMessage({
   onSubmitAguiAction,
   interactionRecords,
   agentBlockActions,
+  renderProcessingBlock,
 }: {
   agentName: string;
   isMobile: boolean;
@@ -704,6 +713,7 @@ function ChatMessage({
   onRespondToAguiApproval?: ChatMessageListProps['onRespondToAguiApproval'];
   onSubmitFeedback: ChatMessageListProps['onSubmitFeedback'];
   onSubmitAguiAction?: ChatMessageListProps['onSubmitAguiAction'];
+  renderProcessingBlock?: ChatMessageListProps['renderProcessingBlock'];
 }) {
   if (message.role === 'user') {
     return (
@@ -723,10 +733,13 @@ function ChatMessage({
   }
 
   if (message.role === 'a2ui' && message.aguiActivity) {
+    const bound = interactionForA2uiActivity(message.aguiActivity, message, interactionRecords);
     return (
       <A2UIActivityMessage
         surfaceId={message.aguiActivity.surfaceId}
         messages={message.aguiActivity.messages}
+        disabled={Boolean(message.aguiActivity.interactionId || bound)}
+        boundInteraction={bound}
         onAction={onSubmitAguiAction}
       />
     );
@@ -758,6 +771,7 @@ function ChatMessage({
           onRespondToApproval={onRespondToApproval}
           interactionRecords={interactionRecords}
           onRespondToAguiApproval={onRespondToAguiApproval}
+          renderProcessingBlock={renderProcessingBlock}
         />
       ) : (
         <>
@@ -794,7 +808,14 @@ function ChatMessage({
       {message.tools
         ? Object.values(message.tools).map((snapshot, toolIndex) => {
           const record = interactionRecords?.find(entry => entry.interactionId === snapshot.approvalRequestId);
-          const tool = { ...snapshot, approvalStatus: interactionApprovalStatus(record) || snapshot.approvalStatus };
+          const inputOutcome = interactionInputOutcome(record);
+          const inputRequest = record?.kind === 'structured_input';
+          const tool = {
+            ...snapshot,
+            status: inputOutcome && snapshot.status === 'paused' ? 'completed' : snapshot.status,
+            approvalStatus: inputOutcome === 'submitted' ? undefined
+              : interactionApprovalStatus(record) || snapshot.approvalStatus,
+          };
           return (
             <details
               key={`${tool.name}-${toolIndex}`}
@@ -819,22 +840,28 @@ function ChatMessage({
                     <ShieldCheck className="h-4 w-4 text-neutral-500" />
                   ) : tool.status === 'error' ? (
                     <XCircle className="h-4 w-4 text-rose-500" />
+                  ) : tool.status === 'unknown' ? (
+                    <CircleHelp className="h-4 w-4 text-slate-400" />
                   ) : (
                     <Check className="h-4 w-4 text-slate-400" />
                   )}
                   <span>
-                    {tool.approvalStatus === 'pending'
-                      ? '等待审批：'
-                      : tool.approvalStatus === 'approved'
-                        ? '已批准：'
-                        : tool.approvalStatus === 'rejected'
-                          ? '已拒绝：'
-                          : tool.approvalStatus === 'cancelled'
-                            ? '已取消：'
+                    {tool.status === 'unknown'
+                      ? '状态未知：'
                       : tool.status === 'error'
                         ? '工具调用失败：'
-                        : '工具调用：'}
-                    {tool.name}
+                        : inputOutcome === 'submitted'
+                          ? '已提交：'
+                          : tool.approvalStatus === 'pending'
+                            ? inputRequest ? '等待填写：' : '等待审批：'
+                            : tool.approvalStatus === 'approved'
+                              ? '已批准：'
+                              : tool.approvalStatus === 'rejected'
+                                ? '已拒绝：'
+                                : tool.approvalStatus === 'cancelled'
+                                  ? '已取消：'
+                                  : '工具调用：'}
+                    {inputRequest ? record.title || '补充信息' : tool.name}
                   </span>
                 </div>
               </summary>
@@ -851,7 +878,9 @@ function ChatMessage({
                 {tool.approvalRequestId ? (
                   <div className="font-sans text-sm text-slate-700 dark:text-slate-200">
                     <div className="font-medium">
-                      {tool.approvalStatus === 'approved'
+                      {inputOutcome === 'submitted'
+                        ? '表单已提交，Agent 已接收。'
+                        : tool.approvalStatus === 'approved'
                         ? '已批准该工具调用。'
                         : tool.approvalStatus === 'rejected'
                           ? '已拒绝该工具调用。'
@@ -938,14 +967,18 @@ function ChatMessage({
         </>
       )}
 
-      {message.aguiActivities?.map((activity) => (
+      {message.aguiActivities?.map((activity) => {
+        const bound = interactionForA2uiActivity(activity, message, interactionRecords);
+        return (
         <A2UIActivityMessage
-          key={activity.surfaceId}
+          key={JSON.stringify([activity.runId || message.runId || message.invocationId || message.id, activity.interactionId, activity.surfaceId])}
           surfaceId={activity.surfaceId}
           messages={activity.messages}
+          disabled={Boolean(activity.interactionId || bound)}
+          boundInteraction={bound}
           onAction={onSubmitAguiAction}
         />
-      ))}
+      ); })}
 
       <FeedbackControls
         isLastMessage={isLastMessage}
@@ -960,6 +993,8 @@ function ChatMessage({
 
 export function ChatMessageList({
   agentName,
+  showAgentHeader = true,
+  renderProcessingBlock,
   emptyState,
   isMobile,
   isStreaming,
@@ -989,13 +1024,13 @@ export function ChatMessageList({
   void checkpoints;
   void onResumeCheckpoint;
   void CheckpointPanel;
-  // Retain the shared component props for 0.3.x consumers. Runtime progress
-  // belongs to the last assistant message, while token usage and stop controls
-  // are already rendered by ChatComposer.
-  void activity;
+  // Token usage and stop controls remain in ChatComposer. The passive footer
+  // supplements existing reasoning/tool rows without changing their renderers.
   void contextIndicator;
   void onStopGeneration;
   void onCancelRemote;
+  const catalogRegistry = useA2uiCatalogRegistry();
+  const progressLabel = runProgressLabel({ isStreaming, activity, messages, interactions: interactionRecords });
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [scrollHeight, setScrollHeight] = useState(0);
@@ -1041,6 +1076,10 @@ export function ChatMessageList({
   );
 
   const visibleItems = virtualWindow.visibleItems;
+  const unprojectedInputHistory = useMemo(
+    () => missingSubmittedInputHistory(messages, interactionRecords, catalogRegistry),
+    [messages, interactionRecords, catalogRegistry],
+  );
 
   useEffect(() => {
     if (!revealMessage) return;
@@ -1128,7 +1167,7 @@ export function ChatMessageList({
       <div data-slot="message-list-content" className="mx-auto flex w-full max-w-[64rem] flex-col pb-6 sm:pb-8">
         {messages.length === 0 && isLoadingInitialHistory ? (
         <InitialHistorySkeleton />
-        ) : messages.length === 0 && !showWaitingIndicator ? (
+        ) : messages.length === 0 && !showWaitingIndicator && !progressLabel ? (
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <>
@@ -1148,9 +1187,10 @@ export function ChatMessageList({
                     agentName={agentName}
                     isMobile={isMobile}
                     isStreaming={isStreaming}
-                    suppressWaitingIndicator={showWaitingIndicator}
+                    suppressWaitingIndicator={showWaitingIndicator || Boolean(progressLabel)}
                     isLastMessage={entry.index === messages.length - 1}
-                    showAgentHeader={!continuesAssistantTurn(messages[entry.index - 1], entry.item)}
+                    showAgentHeader={showAgentHeader && !continuesAssistantTurn(messages[entry.index - 1], entry.item)}
+                    renderProcessingBlock={renderProcessingBlock}
                     message={entry.item}
                     agentBlockActions={agentBlockActions}
                     onDeleteFeedback={onDeleteFeedback}
@@ -1162,14 +1202,22 @@ export function ChatMessageList({
                     onSubmitAguiAction={onSubmitAguiAction}
                   />
                 )}
+                {unprojectedInputHistory.get(entry.item.id)?.map(({ interaction, anchor, surfaceIds }) => (
+                  <div key={`submitted-input-${interaction.interactionId}`} className="mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
+                    {anchor ? <InteractionHistoryAnchor interaction={interaction} /> : null}
+                    {surfaceIds.map(surfaceId => <A2UIActivityMessage
+                      key={surfaceId} surfaceId={surfaceId} messages={interaction.presentation!.a2ui!.messages}
+                      boundInteraction={interaction} disabled />)}
+                  </div>
+                ))}
               </MeasuredMessageRow>
               ))}
             </div>}
-            {showWaitingIndicator && <div className="mx-auto w-full max-w-[60rem] px-2 sm:px-4" role="status" data-testid="waiting-first-token">
-              <span className="waiting-thinking-text">正在思考…</span>
-            </div>}
           </>
         )}
+        {progressLabel && <div data-testid={showWaitingIndicator ? 'waiting-first-token' : undefined}>
+          <RunProgressIndicator label={progressLabel} />
+        </div>}
       </div>
       <StatusBanner />
       {showScrollToBottom ? (

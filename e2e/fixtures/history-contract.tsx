@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import '../../src/index.css';
 import { useSessionLifecycle } from '../../src/hooks/useSessionLifecycle.js';
 import { ApiFacadeImpl } from '../../src/core/api/facade.js';
 import { ConnectedMessageList } from '../../src/components/chat/ConnectedMessageList.js';
@@ -12,14 +13,15 @@ const capabilities = { RunLifecycle: { Enabled: false } } as UiCapabilities;
 useBootstrapStore.getState().setAgentId('browser-fixture-agent');
 useBootstrapStore.getState().setCapabilities(capabilities);
 useSessionStore.getState().setCurrentSessionId('s');
+useSessionStore.getState().setLoadingSessions(false);
 const api = new ApiFacadeImpl();
 let olderAbortController: AbortController | null = null;
 
 function Harness() {
   const actions = useSessionLifecycle({ agentId: 'browser-fixture-agent', currentSessionId: 's',
     isMobile: false, uiCapabilities: capabilities, api, resetCompaction: () => {}, restoreSession: false });
-  return <main>
-    <div style={{ position: 'fixed', zIndex: 9999, top: 0, left: 0, background: 'white', padding: 8 }}>
+  return <main style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flexShrink: 0, background: 'white', padding: 8 }}>
       <button type="button" onClick={() => void actions.loadSession('s')}>Open S</button>
       <button type="button" onClick={() => void actions.loadSession('t')}>Open T</button>
       <button type="button" onClick={() => void actions.loadOlderSessionMessages('s')}>Older S</button>

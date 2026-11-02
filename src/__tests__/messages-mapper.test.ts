@@ -3,6 +3,17 @@ import { mapBackendMessage, mapBackendMessages } from '../utils/messages.js';
 import type { BackendMessage } from '../api/messages.js';
 
 describe('mapBackendMessage', () => {
+  it('preserves unknown tool outcomes in both history representations', () => {
+    const result = mapBackendMessage({
+      Role: 'assistant',
+      ToolEvents: [{ Name: 'lookup', ToolCallId: 'unsettled', Status: 'unknown' }],
+      Blocks: [{ Type: 'tool', Name: 'lookup', ToolCallId: 'unsettled', Status: 'unknown' }],
+    } satisfies BackendMessage);
+    expect(result.tools.lookup.status).toBe('unknown');
+    expect(result.blocks?.[0].status).toBe('unknown');
+    expect(result.tools.lookup.output).toBeUndefined();
+  });
+
   it('normalises numeric Unix-second strings from cloud message history', () => {
     const result = mapBackendMessage({
       MessageId: 'msg-time',

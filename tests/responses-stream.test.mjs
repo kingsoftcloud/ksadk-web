@@ -398,6 +398,18 @@ test('responses stream completion does not replay text already delivered as delt
   );
 });
 
+test('responses authoritative text edits include empty replacements', async () => {
+  const utils = await loadResponsesStreamUtils();
+  const state = utils.createResponsesStreamState();
+  for (const text of ['corrected', '']) {
+    assert.deepEqual(utils.normalizeResponsesStreamEvent({
+      eventName: 'response.output_text.delta',
+      data: { delta: text, replace: true },
+      state,
+    }), [{ type: 'text_replace', text }]);
+  }
+});
+
 test('responses stream utils normalize tools and reasoning from completed response output', async () => {
   const responsesStream = await loadResponsesStreamUtils();
 

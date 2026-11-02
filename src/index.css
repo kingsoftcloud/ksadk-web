@@ -1,3 +1,4 @@
+@import "./core/a2ui/icon-font.css";
 @import "./motion.css";
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";

@@ -62,6 +62,15 @@ describe('HostedChat transport selection', () => {
     expect(resolveHostedChatTransport(capabilities)).toMatchObject(responses);
   });
 
+  it('uses AG-UI only when the server explicitly advertises canonical replay', () => {
+    const durable = { ...agui, Capabilities: { ...agui.Capabilities, SessionEventReplay: true } };
+    const capabilities = normalizeCapabilities({ Data: {
+      HostedChat: { PreferredTransport: 'ag-ui', Transports: [durable, responses] },
+      Capabilities: { HostedChat: { Enabled: true } },
+    } });
+    expect(resolveHostedChatTransport(capabilities, { requireResumableRun: true })).toMatchObject(durable);
+  });
+
   it('keeps legacy bootstrap responses-compatible', () => {
     const capabilities = normalizeCapabilities({
       Data: { Agent: { Framework: 'langgraph' }, Capabilities: {} },

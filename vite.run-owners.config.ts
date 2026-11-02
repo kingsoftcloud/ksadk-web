@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'output/playwright/run-owners-dist',
-    rollupOptions: { input: path.resolve(import.meta.dirname, 'e2e/run-owners.html') },
+    rollupOptions: { input: ['run-owners', 'run-progress'].map(name => path.resolve(import.meta.dirname, `e2e/${name}.html`)) },
   },
 });

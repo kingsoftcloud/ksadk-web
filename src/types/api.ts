@@ -8,6 +8,8 @@ export type HostedChatTransport = {
   Endpoint: string;
   Version: string;
   Capabilities: {
+    /** The server-owned run survives its HTTP reader and has canonical replay. */
+    SessionEventReplay?: boolean;
     A2UI: boolean;
     Interrupt: boolean;
     Cancel: boolean;

@@ -9,10 +9,10 @@ const sources = directory => readdirSync(path.join(root, directory), { withFileT
   return entry.isDirectory() ? (entry.name === '__tests__' ? [] : sources(file)) : /\.(tsx?|css)$/.test(file) ? [file] : [];
 });
 const hash = createHash('sha256');
-for (const file of [...sources('src'), 'e2e/run-owners-fixture.tsx', 'vite.run-owners.config.ts'].sort()) hash.update(file).update(readFileSync(path.join(root, file)));
+for (const file of [...sources('src'), 'e2e/run-owners-fixture.tsx', 'e2e/run-progress-fixture.tsx', 'vite.run-owners.config.ts'].sort()) hash.update(file).update(readFileSync(path.join(root, file)));
 
 export default defineConfig({
-  testDir: './e2e', testMatch: 'run-owners.spec.mjs', workers: 1, timeout: 45_000,
+  testDir: './e2e', testMatch: ['run-owners.spec.mjs', 'run-progress.spec.mjs'], workers: 1, timeout: 45_000,
   outputDir: 'output/playwright/run-owners-results',
   reporter: [['list'], ['json', { outputFile: 'output/playwright/run-owners-report.json' }]],
   metadata: { fixture: 'production build; real hooks/composer/timeline; synthetic transport; no runtime or cloud execution', sourceSha256: hash.digest('hex') },

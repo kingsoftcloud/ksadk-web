@@ -1,0 +1,361 @@
+[
+  {
+    "name": "arbitrary-json",
+    "schema": {},
+    "valid": [
+      null,
+      false,
+      0,
+      "",
+      [],
+      {}
+    ],
+    "invalid": []
+  },
+  {
+    "name": "boolean",
+    "schema": {
+      "type": "boolean"
+    },
+    "valid": [
+      false,
+      true
+    ],
+    "invalid": [
+      0,
+      "false",
+      null,
+      {}
+    ]
+  },
+  {
+    "name": "zero-integer",
+    "schema": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "valid": [
+      0,
+      2
+    ],
+    "invalid": [
+      false,
+      -1,
+      0.5,
+      "0",
+      null
+    ]
+  },
+  {
+    "name": "empty-string",
+    "schema": {
+      "type": "string"
+    },
+    "valid": [
+      "",
+      " "
+    ],
+    "invalid": [
+      null,
+      false,
+      0,
+      []
+    ]
+  },
+  {
+    "name": "nonempty-string",
+    "schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "valid": [
+      " ",
+      "a"
+    ],
+    "invalid": [
+      "",
+      null
+    ]
+  },
+  {
+    "name": "array",
+    "schema": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "valid": [
+      [],
+      [
+        0,
+        2
+      ]
+    ],
+    "invalid": [
+      [
+        false
+      ],
+      [
+        "0"
+      ],
+      null
+    ]
+  },
+  {
+    "name": "nullable",
+    "schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid": [
+      null,
+      ""
+    ],
+    "invalid": [
+      0,
+      false,
+      []
+    ]
+  },
+  {
+    "name": "nested",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "required": [
+        "count",
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "valid": [
+      {
+        "count": 0,
+        "enabled": false,
+        "labels": [
+          null,
+          ""
+        ]
+      },
+      {
+        "count": 0,
+        "enabled": false,
+        "labels": []
+      }
+    ],
+    "invalid": [
+      {
+        "enabled": false
+      },
+      {
+        "count": false,
+        "enabled": false
+      },
+      {
+        "count": 0,
+        "enabled": null
+      },
+      {
+        "count": 0,
+        "enabled": false,
+        "extra": 0
+      }
+    ]
+  },
+  {
+    "name": "draft4-exclusive",
+    "schema": {
+      "$schema": "http://json-schema.org/draft-04/schema#",
+      "type": "number",
+      "minimum": 0,
+      "exclusiveMinimum": true
+    },
+    "valid": [
+      1
+    ],
+    "invalid": [
+      0,
+      false,
+      -1
+    ]
+  },
+  {
+    "name": "draft6",
+    "schema": {
+      "$schema": "http://json-schema.org/draft-06/schema#",
+      "type": "integer"
+    },
+    "valid": [
+      0
+    ],
+    "invalid": [
+      false,
+      "0"
+    ]
+  },
+  {
+    "name": "draft7-local-ref",
+    "schema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "definitions": {
+        "entry": {
+          "type": "string"
+        }
+      },
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/entry"
+      }
+    },
+    "valid": [
+      [],
+      [
+        "a"
+      ]
+    ],
+    "invalid": [
+      null,
+      [
+        0
+      ]
+    ]
+  },
+  {
+    "name": "2019-unevaluated",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2019-09/schema",
+      "type": "object",
+      "properties": {
+        "a": {
+          "type": "integer"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "valid": [
+      {},
+      {
+        "a": 0
+      }
+    ],
+    "invalid": [
+      {
+        "b": 0
+      }
+    ]
+  },
+  {
+    "name": "2020-tuple",
+    "schema": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "items": false,
+      "minItems": 2
+    },
+    "valid": [
+      [
+        0,
+        false
+      ]
+    ],
+    "invalid": [
+      [
+        0
+      ],
+      [
+        false,
+        false
+      ],
+      [
+        0,
+        false,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "local-defs",
+    "schema": {
+      "$defs": {
+        "entry": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "valid": [
+      [
+        null,
+        ""
+      ],
+      []
+    ],
+    "invalid": [
+      [
+        0
+      ]
+    ]
+  },
+  {
+    "name": "date",
+    "schema": {
+      "type": "string",
+      "format": "date"
+    },
+    "valid": [
+      "2026-10-20"
+    ],
+    "invalid": [
+      "2026-02-30",
+      "bad"
+    ]
+  },
+  {
+    "name": "business-ref-is-data",
+    "schema": {
+      "const": {
+        "$ref": "https://example.org/business"
+      }
+    },
+    "valid": [
+      {
+        "$ref": "https://example.org/business"
+      }
+    ],
+    "invalid": [
+      {}
+    ]
+  }
+]

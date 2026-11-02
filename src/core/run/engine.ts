@@ -24,6 +24,7 @@ import { KernelRunEventTranslator, peekKernelReceipt } from '../stream/kernel-ev
 import type { StreamProtocol } from '../stream/types.js';
 import type { RuntimeApiFormat } from '../../types/api.js';
 import { AguiRunClient } from './agui.js';
+import { sharedInteractionStore } from '../interaction/index.js';
 import {
   ConversationClientError,
   buildConversationInput,
@@ -38,7 +39,7 @@ import type {
   ConversationSurfaceBootstrap,
 } from '../conversation/types.js';
 
-type StreamConsumeResult = { terminalStatus?: string; awaitingInput?: boolean };
+type StreamConsumeResult = { terminalStatus?: string; awaitingInput?: boolean; outcomeUnknown?: boolean };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
 
@@ -265,14 +266,26 @@ export class RunEngineImpl implements RunEngine {
     const transport = this.config.hostedChatTransport;
     if (transport?.Protocol !== 'ag-ui' || !transport.Endpoint) return null;
     if (!this.aguiClient || this.aguiThreadSessionId !== sessionId) {
-      this.aguiClient = new AguiRunClient({
+      const client: AguiRunClient = new AguiRunClient({
         url: transport.Endpoint,
         agentId: this.config.agentId,
         threadId: sessionId,
-        onEvent: (event) => this.emit(event),
+        onEvent: (event) => {
+          if (event.type === 'text_replace' && (this.aguiClient !== client
+            || this.aguiThreadSessionId !== sessionId || this.activeSessionId !== sessionId)) return;
+          this.emit(event);
+        },
       });
+      this.aguiClient = client;
       this.aguiThreadSessionId = sessionId;
     }
+    this.aguiClient.reconcileInteractions(sharedInteractionStore.listAll(sessionId));
+    this.aguiClient.configure({
+      model: this.config.selectedModel || undefined,
+      modelMetadata: this.config.selectedModelMetadata || undefined,
+      modelOptions: buildModelOptionsFromThinkingMode(normalizeThinkingMode(this.config.thinkingMode)),
+      toolApprovalMode: this.config.permissionMode || 'risk',
+    }, this.config.a2uiCatalogRegistry);
     return this.aguiClient;
   }
 
@@ -318,6 +331,8 @@ export class RunEngineImpl implements RunEngine {
     this.invocationId = '';
     this.recordCursor(0);
     this.setStage(this.activeSessionId ? 'connecting' : 'creating-session');
+    this.emit({ type: 'activity', source: 'run', status: 'connecting',
+      phase: this.activeSessionId ? '连接运行时' : '创建会话', countEvent: false });
     const isResponsesResume = draft.responsesInput !== undefined;
     let dispatchReported = false;
     const reportDispatch = (accepted: boolean) => {
@@ -504,6 +519,14 @@ export class RunEngineImpl implements RunEngine {
           this.setStage('completing');
           this.emit({ type: 'activity', phase: '等待人工确认', status: 'waiting', countEvent: false });
           this.emit({ type: 'stream_ended' });
+          return;
+        }
+
+        if (streamResult.outcomeUnknown) {
+          settlement = 'unknown';
+          this.setStage('recovering');
+          this.emit({ type: 'activity', phase: '运行状态待确认', status: 'waiting',
+            detail: '事件连接暂不可用，请查看原任务状态；不会自动重新执行。', countEvent: false });
           return;
         }
 
@@ -900,6 +923,7 @@ export class RunEngineImpl implements RunEngine {
         this.setStage('streaming');
         const result = await aguiClient.resume(invocationId, {
           interruptId: params.interruptId,
+          logicalRunId: sharedInteractionStore.get(sessionId, params.interruptId)?.runId || undefined,
           status: params.status,
           payload: params.payload,
         });
@@ -907,15 +931,25 @@ export class RunEngineImpl implements RunEngine {
           ? params.payload as Record<string, unknown>
           : {};
         const rawDecision = String(payload.decision || payload.type || '').toLowerCase();
-        this.emit({
-          type: 'approval_resolved',
-          approvalRequestId: params.interruptId,
-          decision: params.status === 'cancelled'
-            ? 'cancelled'
-            : rawDecision === 'reject' || rawDecision === 'rejected'
-              ? 'rejected'
-            : 'approved',
-        });
+        const sameWait = result.pendingInterruptIds?.includes(params.interruptId);
+        if (result.status === 'interrupted' && sameWait) {
+          this.emit({ type: 'interaction_submit_rejected', interactionId: params.interruptId,
+            message: '答案未通过 Agent 校验，请修改后重新提交。' });
+        }
+        const consumed = result.status === 'completed' || (
+          result.status === 'interrupted' && result.pendingInterruptIds?.length && !sameWait
+        );
+        if (consumed) {
+          this.emit({
+            type: 'approval_resolved',
+            approvalRequestId: params.interruptId,
+            decision: params.status === 'cancelled'
+              ? 'cancelled'
+              : rawDecision === 'reject' || rawDecision === 'rejected'
+                ? 'rejected'
+              : 'approved',
+          });
+        }
         if (result.status === 'interrupted') {
           settlement = 'cancelled';
           this.setStage('completing');
@@ -930,7 +964,8 @@ export class RunEngineImpl implements RunEngine {
         }
         this.setStage('completing');
         settlement = 'completed';
-        this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
+        this.emit({ type: 'terminal', status: params.status === 'cancelled' ? 'cancelled' : 'completed' });
+        this.emit({ type: 'activity', phase: params.status === 'cancelled' ? '运行已取消' : '运行完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
         settlement = error instanceof DOMException && error.name === 'AbortError' ? 'cancelled' : 'failed';
@@ -1269,6 +1304,8 @@ export class RunEngineImpl implements RunEngine {
     let terminalStatus: string | undefined;
     let consecutiveErrors = 0;
     const maxConsecutiveErrors = 6;
+    let waitingForStream = false;
+    const pendingInteractions = new Set<string>();
 
     while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -1292,6 +1329,11 @@ export class RunEngineImpl implements RunEngine {
           for (const chunk of split.chunks) {
             if (!chunk.trim()) continue;
             for (const transportEvent of parseSseChunk(chunk)) {
+              if (waitingForStream && (transportEvent.eventName === '__ping__'
+                || (transportEvent.data && typeof transportEvent.data === 'object'))) {
+                waitingForStream = false;
+                this.emit({ type: 'activity', phase: '正在处理', status: 'running', countEvent: false });
+              }
               const frame = transportEvent.data as Record<string, unknown> | undefined;
               if (!frame || typeof frame !== 'object') continue;
               const seq = Number(frame.seq);
@@ -1310,6 +1352,11 @@ export class RunEngineImpl implements RunEngine {
                 onInvocationCreated?.(kernelRunId);
               }
               if (frameRunId && kernelRunId !== frameRunId) continue;
+              if (frame.family === 'interaction' && typeof frame.interaction_id === 'string') {
+                if (frame.event_type === 'interaction.requested') pendingInteractions.add(frame.interaction_id);
+                else if (['interaction.resolved', 'interaction.cancelled', 'interaction.expired']
+                  .includes(String(frame.event_type))) pendingInteractions.delete(frame.interaction_id);
+              }
               if (frame.schema_version === 2 && frame.family === 'runtime') {
                 const item = canonical.apply(frame);
                 if (item) {
@@ -1350,6 +1397,7 @@ export class RunEngineImpl implements RunEngine {
         }
         if (scopedCommand && error instanceof ApiError && error.code === 409
           && (error.detail as { Data?: { ReasonCode?: string } } | undefined)?.Data?.ReasonCode === 'KERNEL_COMMAND_PENDING') {
+          waitingForStream = true;
           this.emit({ type: 'activity', phase: '运行已入队，等待执行', status: 'waiting', countEvent: false });
           await new Promise((resolve) => setTimeout(resolve, 1000));
           if (this.abortController?.signal.aborted) return { terminalStatus: 'cancelled' };
@@ -1361,6 +1409,8 @@ export class RunEngineImpl implements RunEngine {
         }
         consecutiveErrors += 1;
         if (consecutiveErrors >= maxConsecutiveErrors) break;
+        waitingForStream = true;
+        this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
         await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveErrors));
       } finally {
         // A durable terminal or local disconnect must also release its HTTP
@@ -1368,8 +1418,10 @@ export class RunEngineImpl implements RunEngine {
         await reader?.cancel().catch(() => {});
       }
     }
-    if (terminalStatus === undefined) terminalStatus = 'interrupted';
-    return { terminalStatus };
+    if (terminalStatus !== undefined) return { terminalStatus };
+    // Exhausting transport retries is not an authoritative run failure.
+    // A saved actionable wait proves delivery; otherwise retain uncertainty.
+    return pendingInteractions.size ? { awaitingInput: true } : { outcomeUnknown: true };
   }
 
   private async consumeStream(
@@ -1478,6 +1530,9 @@ export class RunEngineImpl implements RunEngine {
         break;
       case 'text_delta':
         this.emit({ type: 'text_delta', messageId, delta: action.text });
+        break;
+      case 'text_replace':
+        this.emit({ type: 'text_replace', messageId, text: action.text });
         break;
       case 'text_final':
         this.emit({ type: 'text_final', messageId, text: action.text });

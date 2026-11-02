@@ -1,3 +1,4 @@
+import type { JsonValue } from '../types/json-value.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   InteractionClientImpl,
@@ -9,7 +10,7 @@ import type {
   InteractionReceipt,
 } from '../core/interaction/types.js';
 import type { ApiFacade } from '../core/api/types.js';
-import { ksadkA2uiCatalog } from '../core/run/a2ui.js';
+import { useA2uiCatalogRegistry } from '../core/a2ui/provider.js';
 
 type UseInteractionsContext = {
   agentId: string;
@@ -38,6 +39,7 @@ type UseInteractionsContext = {
 };
 
 export function useInteractions(ctx: UseInteractionsContext) {
+  const registry = useA2uiCatalogRegistry();
   const [client] = useState(
     () =>
       new InteractionClientImpl({
@@ -91,7 +93,7 @@ export function useInteractions(ctx: UseInteractionsContext) {
       interactionId: string;
       expectedRevision: number;
       action: InteractionAction;
-      response: Record<string, unknown>;
+      response: JsonValue;
       idempotencyKey: string;
     }): Promise<InteractionReceipt> => {
       const interaction = currentSessionId
@@ -99,7 +101,7 @@ export function useInteractions(ctx: UseInteractionsContext) {
         : null;
       if (!currentSessionId) return Promise.reject(new Error('请先选择会话。'));
       return client.respond({ ...input, sessionId: currentSessionId }).then((receipt) => {
-        if (interactionV1Enabled && interaction
+        if (interaction && (interactionV1Enabled || interaction.source === 'interaction_v1')
           && (receipt.status === 'accepted' || receipt.status === 'duplicate')) {
           onAcceptedInteraction?.(interaction);
         }
@@ -114,6 +116,6 @@ export function useInteractions(ctx: UseInteractionsContext) {
     pending,
     records,
     respond,
-    localCatalog: ksadkA2uiCatalog,
+    localCatalog: registry,
   };
 }

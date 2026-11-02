@@ -1,3 +1,4 @@
+@import "./core/a2ui/icon-font.css";
 /* Component-safe stylesheet for embedded hosts. No html/body/#root reset. */
 @import "./motion.css";
 @import "tailwindcss/theme";
