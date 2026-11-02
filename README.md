@@ -5,14 +5,14 @@ the KSADK embedded static UI.
 
 ## Consumers
 
-- `kingsoftcloud/ksadk-python` consumes the pinned `@kingsoftcloud/ksadk-web@0.3.13` and copies `dist-ksadk` into `ksadk/server/static`.
+- `kingsoftcloud/ksadk-python` consumes a reviewed, pinned `@kingsoftcloud/ksadk-web` version and copies `dist-ksadk` into `ksadk/server/static`.
 - `agentengine-hosted-ui` should pin a reviewed `@kingsoftcloud/ksadk-web` version
   and keeps private deployment shell files such as Docker, nginx, Helm, image
   tags, and runtime environment injection outside this repository.
 
-## Upgrade to 0.3.13
+## Upgrade to 0.3.14
 
-Use `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.13` for the KsADK 0.8.6 companion UI. Keep existing imports and React peer dependencies. History and scoped cancellation are capability negotiated; deploying this package alone does not upgrade an older Runtime or the Hosted UI service. See [CHANGELOG.md](CHANGELOG.md) for history, approval, and input fixes.
+Use `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.14`. Keep existing imports and React peer dependencies. Interactive forms, durable continuation, history and scoped cancellation use the capabilities advertised by the Runtime. Updating the Web package alone does not upgrade an older Runtime or deploy the Hosted UI service. See [CHANGELOG.md](CHANGELOG.md) for A2UI, form and conversation changes.
 
 ## Public Demo
 
