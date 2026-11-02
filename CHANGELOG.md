@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.14 - 2026-11-02
+
+### A2UI and structured input
+
+- Render validated A2UI v0.9.1 surfaces with the official renderer, incremental updates, local icon assets and application-registered component catalogs. Keep the legacy catalog path and fall back to the saved business Schema when a presentation cannot be rendered.
+- Support nested JSON forms without losing false, zero, null, empty arrays or objects. Keep correctable validation errors editable and wait for the Runtime to confirm answer consumption before completing an interaction.
+- Preserve submitted input, selections and checked values in read-only history, redact sensitive fields, and keep large forms scrollable on narrow or short screens.
+
+### Conversations and compatibility
+
+- Reconcile live cards and restored history without duplicate surfaces or tool results. Isolate recreated cards and delayed callbacks by their owning run and surface generation.
+- Apply authoritative streamed text replacements while retaining tool, reasoning and card history. Show waiting and uncertain connection states without reporting a normal input interrupt as an execution failure.
+- Preserve existing library entrypoints and host presentation hooks, add catalog registration exports, and keep Node/SSR imports usable. Interactive continuation and other advanced controls require matching Runtime capabilities; updating the UI does not upgrade the backend.
+
 ## 0.3.13 - 2026-10-15
 
 ### History and live conversations
