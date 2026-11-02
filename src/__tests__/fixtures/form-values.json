@@ -1,0 +1,771 @@
+[
+  {
+    "name": "integer 3",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "3",
+    "valid": true,
+    "expected": 3
+  },
+  {
+    "name": "integer 0",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "0",
+    "valid": true,
+    "expected": 0
+  },
+  {
+    "name": "integer -2",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "-2",
+    "valid": true,
+    "expected": -2
+  },
+  {
+    "name": "integer 3.0",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "3.0",
+    "valid": true,
+    "expected": 3
+  },
+  {
+    "name": "integer 3e0",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "3e0",
+    "valid": true,
+    "expected": 3
+  },
+  {
+    "name": "integer 003",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "003",
+    "valid": true,
+    "expected": 3
+  },
+  {
+    "name": "integer -0",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "-0",
+    "valid": true,
+    "expected": 0
+  },
+  {
+    "name": "integer .0",
+    "schema": {
+      "type": "integer"
+    },
+    "input": ".0",
+    "valid": true,
+    "expected": 0
+  },
+  {
+    "name": "integer 1e3",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "1e3",
+    "valid": true,
+    "expected": 1000
+  },
+  {
+    "name": "reject integer ''",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "",
+    "valid": false
+  },
+  {
+    "name": "reject integer ' '",
+    "schema": {
+      "type": "integer"
+    },
+    "input": " ",
+    "valid": false
+  },
+  {
+    "name": "reject integer ' 3'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": " 3",
+    "valid": false
+  },
+  {
+    "name": "reject integer '3 '",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "3 ",
+    "valid": false
+  },
+  {
+    "name": "reject integer '3.5'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "3.5",
+    "valid": false
+  },
+  {
+    "name": "reject integer 'NaN'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "NaN",
+    "valid": false
+  },
+  {
+    "name": "reject integer 'Infinity'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "Infinity",
+    "valid": false
+  },
+  {
+    "name": "reject integer '1e999'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "1e999",
+    "valid": false
+  },
+  {
+    "name": "reject integer '1e-999'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "1e-999",
+    "valid": false
+  },
+  {
+    "name": "reject integer '3.0000000000000001'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "3.0000000000000001",
+    "valid": false
+  },
+  {
+    "name": "reject integer '9007199254740993'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "9007199254740993",
+    "valid": false
+  },
+  {
+    "name": "reject integer '0x10'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "0x10",
+    "valid": false
+  },
+  {
+    "name": "reject integer '+3'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "+3",
+    "valid": false
+  },
+  {
+    "name": "reject integer 'true'",
+    "schema": {
+      "type": "integer"
+    },
+    "input": "true",
+    "valid": false
+  },
+  {
+    "name": "number 3.5",
+    "schema": {
+      "type": "number"
+    },
+    "input": "3.5",
+    "valid": true,
+    "expected": 3.5
+  },
+  {
+    "name": "number .5",
+    "schema": {
+      "type": "number"
+    },
+    "input": ".5",
+    "valid": true,
+    "expected": 0.5
+  },
+  {
+    "name": "number 0.1",
+    "schema": {
+      "type": "number"
+    },
+    "input": "0.1",
+    "valid": true,
+    "expected": 0.1
+  },
+  {
+    "name": "number 1e-7",
+    "schema": {
+      "type": "number"
+    },
+    "input": "1e-7",
+    "valid": true,
+    "expected": 1e-07
+  },
+  {
+    "name": "number 1e20",
+    "schema": {
+      "type": "number"
+    },
+    "input": "1e20",
+    "valid": true,
+    "expected": 1e+20
+  },
+  {
+    "name": "number 0.00000000001",
+    "schema": {
+      "type": "number"
+    },
+    "input": "0.00000000001",
+    "valid": true,
+    "expected": 1e-11
+  },
+  {
+    "name": "reject imprecise number 0.10000000000000001",
+    "schema": {
+      "type": "number"
+    },
+    "input": "0.10000000000000001",
+    "valid": false
+  },
+  {
+    "name": "reject imprecise number 9007199254740993",
+    "schema": {
+      "type": "number"
+    },
+    "input": "9007199254740993",
+    "valid": false
+  },
+  {
+    "name": "reject imprecise number 1e309",
+    "schema": {
+      "type": "number"
+    },
+    "input": "1e309",
+    "valid": false
+  },
+  {
+    "name": "reject imprecise number 1e-999",
+    "schema": {
+      "type": "number"
+    },
+    "input": "1e-999",
+    "valid": false
+  },
+  {
+    "name": "preserve JSON None",
+    "schema": {},
+    "input": null,
+    "valid": true,
+    "expected": null
+  },
+  {
+    "name": "preserve JSON False",
+    "schema": {},
+    "input": false,
+    "valid": true,
+    "expected": false
+  },
+  {
+    "name": "preserve JSON 0",
+    "schema": {},
+    "input": 0,
+    "valid": true,
+    "expected": 0
+  },
+  {
+    "name": "preserve JSON ''",
+    "schema": {},
+    "input": "",
+    "valid": true,
+    "expected": ""
+  },
+  {
+    "name": "preserve JSON []",
+    "schema": {},
+    "input": [],
+    "valid": true,
+    "expected": []
+  },
+  {
+    "name": "preserve JSON {'field': None}",
+    "schema": {},
+    "input": {
+      "field": null
+    },
+    "valid": true,
+    "expected": {
+      "field": null
+    }
+  },
+  {
+    "name": "preserve JSON '00123'",
+    "schema": {},
+    "input": "00123",
+    "valid": true,
+    "expected": "00123"
+  },
+  {
+    "name": "preserve JSON 'false'",
+    "schema": {},
+    "input": "false",
+    "valid": true,
+    "expected": "false"
+  },
+  {
+    "name": "explicit string ID",
+    "schema": {
+      "type": "string"
+    },
+    "input": "00123",
+    "valid": true,
+    "expected": "00123"
+  },
+  {
+    "name": "boolean false",
+    "schema": {
+      "type": "boolean"
+    },
+    "input": "false",
+    "valid": true,
+    "expected": false
+  },
+  {
+    "name": "boolean true",
+    "schema": {
+      "type": "boolean"
+    },
+    "input": "true",
+    "valid": true,
+    "expected": true
+  },
+  {
+    "name": "reject guessed boolean 'yes'",
+    "schema": {
+      "type": "boolean"
+    },
+    "input": "yes",
+    "valid": false
+  },
+  {
+    "name": "reject guessed boolean '0'",
+    "schema": {
+      "type": "boolean"
+    },
+    "input": "0",
+    "valid": false
+  },
+  {
+    "name": "reject guessed boolean 'FALSE'",
+    "schema": {
+      "type": "boolean"
+    },
+    "input": "FALSE",
+    "valid": false
+  },
+  {
+    "name": "reject guessed boolean ''",
+    "schema": {
+      "type": "boolean"
+    },
+    "input": "",
+    "valid": false
+  },
+  {
+    "name": "do not parse null",
+    "schema": {
+      "type": "null"
+    },
+    "input": "null",
+    "valid": false
+  },
+  {
+    "name": "nullable integer",
+    "schema": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "input": "0",
+    "valid": true,
+    "expected": 0
+  },
+  {
+    "name": "nullable null",
+    "schema": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "input": null,
+    "valid": true,
+    "expected": null
+  },
+  {
+    "name": "empty numeric is not null",
+    "schema": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "input": "",
+    "valid": false
+  },
+  {
+    "name": "valid union string wins",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "input": "3",
+    "valid": true,
+    "expected": "3"
+  },
+  {
+    "name": "nullable anyOf",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "input": "3",
+    "valid": true,
+    "expected": 3
+  },
+  {
+    "name": "numeric anyOf",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "input": "3",
+    "valid": true,
+    "expected": 3
+  },
+  {
+    "name": "ambiguous oneOf",
+    "schema": {
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "input": "3",
+    "valid": false
+  },
+  {
+    "name": "minimum remains strict",
+    "schema": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "input": "0",
+    "valid": false
+  },
+  {
+    "name": "enum remains strict",
+    "schema": {
+      "type": "integer",
+      "enum": [
+        2,
+        4
+      ]
+    },
+    "input": "3",
+    "valid": false
+  },
+  {
+    "name": "enum accepts adapted value",
+    "schema": {
+      "type": "integer",
+      "enum": [
+        2,
+        4
+      ]
+    },
+    "input": "4",
+    "valid": true,
+    "expected": 4
+  },
+  {
+    "name": "no default filling",
+    "schema": {
+      "type": "object",
+      "required": [
+        "n"
+      ],
+      "properties": {
+        "n": {
+          "type": "integer",
+          "default": 3
+        }
+      }
+    },
+    "input": {},
+    "valid": false
+  },
+  {
+    "name": "no field dropping",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "input": {
+      "n": "3",
+      "other": 1
+    },
+    "valid": false
+  },
+  {
+    "name": "nested ref",
+    "schema": {
+      "$id": "https://test.invalid/form",
+      "$defs": {
+        "n": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/n"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "input": {
+      "items": [
+        "3",
+        "0"
+      ],
+      "id": "00123",
+      "enabled": "false"
+    },
+    "valid": true,
+    "expected": {
+      "items": [
+        3,
+        0
+      ],
+      "id": "00123",
+      "enabled": false
+    }
+  },
+  {
+    "name": "allOf object fields",
+    "schema": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "n": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "b": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "input": {
+      "n": "3",
+      "b": "false"
+    },
+    "valid": true,
+    "expected": {
+      "n": 3,
+      "b": false
+    }
+  },
+  {
+    "name": "tuple",
+    "schema": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "input": [
+      "3",
+      "false",
+      "001"
+    ],
+    "valid": true,
+    "expected": [
+      3,
+      false,
+      "001"
+    ]
+  },
+  {
+    "name": "additional schema",
+    "schema": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "input": {
+      "x": "3"
+    },
+    "valid": true,
+    "expected": {
+      "x": 3
+    }
+  },
+  {
+    "name": "patterns",
+    "schema": {
+      "type": "object",
+      "patternProperties": {
+        "^n": {
+          "type": "integer"
+        }
+      }
+    },
+    "input": {
+      "number": "3",
+      "id": "001"
+    },
+    "valid": true,
+    "expected": {
+      "number": 3,
+      "id": "001"
+    }
+  },
+  {
+    "name": "union objects ambiguous",
+    "schema": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "a"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "b": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "b"
+          ]
+        }
+      ]
+    },
+    "input": {
+      "a": "3",
+      "b": "4"
+    },
+    "valid": false
+  },
+  {
+    "name": "draft7 tuple",
+    "schema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "array",
+      "items": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "input": [
+      "3",
+      "false"
+    ],
+    "valid": true,
+    "expected": [
+      3,
+      false
+    ]
+  }
+]

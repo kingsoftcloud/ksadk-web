@@ -27,7 +27,7 @@ import {
 import { InteractionStore } from './store.js';
 import { decodeReceipt } from '../../types/agent-control.js';
 import { jsonValue } from '../../types/json-value.js';
-import { validateInput } from './schema.js';
+import { normalizeFormAnswer } from './form-values.js';
 
 export type SubmitInteractionTransport = (params: {
   AgentId: string;
@@ -174,10 +174,12 @@ export class InteractionClientImpl implements InteractionClient {
       return syntheticReceipt('rejected', input.interactionId);
     }
     if (record.kind === 'structured_input' && input.action === 'submit' && record.requestSchema) {
-      const validation = validateInput(record.requestSchema, input.response);
-      if (!validation.valid) {
+      try {
+        input = { ...input, response: normalizeFormAnswer(record.requestSchema, input.response) };
+      } catch (error) {
         this.store.markFailed(record.sessionId, input.interactionId, {
-          code: 'input_response_invalid', message: validation.issues.join('；'), retryable: true,
+          code: 'input_response_invalid',
+          message: error instanceof Error ? error.message : '答案不符合表单约束。', retryable: true,
         });
         return syntheticReceipt('rejected', input.interactionId);
       }
