@@ -16,14 +16,15 @@ import { cn } from '@/lib/utils';
 import { useImeComposition } from '@/hooks/useImeComposition.js';
 import { useModelStore } from '@/stores/model.js';
 import type { ModelStore } from '@/stores/model.js';
-import type { ApprovalPolicyCapability } from '@/types/capabilities.js';
+import type { ApprovalPolicyCapability, ExecutionPolicyCapability } from '@/types/capabilities.js';
 import type { RuntimeExecutionMode } from '@/core/run/types.js';
 
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { ExecutionModeMenu } from './ExecutionModeMenu';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 import { ModelSettingsMenu } from './ModelSettingsMenu';
-import { PermissionMenu } from './PermissionMenu';
+import { PermissionMenu, permissionMenuVisible } from './PermissionMenu';
+import { ExecutionPermissionMenu } from './ExecutionPermissionMenu';
 import type { ComposerContextIndicator } from './types';
 
 export type ChatComposerProps = {
@@ -40,6 +41,7 @@ export type ChatComposerProps = {
   attachmentsEnabled?: boolean;
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
+  executionPolicy?: ExecutionPolicyCapability | null;
   thinkingEnabled?: boolean;
   executionMode?: RuntimeExecutionMode;
   executionModeSupport: RuntimeExecutionModeSupport;
@@ -69,6 +71,7 @@ export function ChatComposer({
   attachmentsEnabled = true,
   approvalEnabled = false,
   approvalPolicy,
+  executionPolicy,
   thinkingEnabled = false,
   executionMode,
   executionModeSupport,
@@ -282,7 +285,13 @@ export function ChatComposer({
                     onUpload={() => fileInputRef.current?.click()}
                   />
 
-                  {approvalEnabled ? <PermissionMenu approvalPolicy={approvalPolicy} /> : null}
+                  {executionPolicy && (executionPolicy.Modes?.length ?? 0) > 0 ? (
+                    <ExecutionPermissionMenu executionPolicy={executionPolicy} />
+                  ) : null}
+
+                  {approvalEnabled && permissionMenuVisible(approvalPolicy) ? (
+                    <PermissionMenu approvalPolicy={approvalPolicy} />
+                  ) : null}
                 </div>
 
                 <div data-slot="composer-toolbar-end" className="flex min-w-0 items-center gap-1.5">

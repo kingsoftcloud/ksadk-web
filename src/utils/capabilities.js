@@ -73,7 +73,23 @@ function normalizeApprovalPolicy(value) {
     Modes: modes,
     DefaultMode: defaultMode,
     RuntimeOverride: normalizeEnabled(policy.RuntimeOverride, true),
+    Selectable: policy.Selectable !== false,
   };
+}
+
+function normalizeExecutionPolicy(value) {
+  const policy = asObject(value);
+  const declared = Array.isArray(policy.Modes) ? policy.Modes : [];
+  const modes = [
+    ...new Set(
+      declared.filter((mode) =>
+        ['read-only', 'workspace-write', 'danger-full-access'].includes(mode),
+      ),
+    ),
+  ];
+  if (modes.length === 0) return null;
+  const defaultMode = modes.includes(policy.DefaultMode) ? policy.DefaultMode : modes[0];
+  return { Modes: modes, DefaultMode: defaultMode };
 }
 
 function normalizeRuntimeCapabilityMatrix(value) {
@@ -245,6 +261,7 @@ export function normalizeCapabilities(bootstrap) {
       CheckpointResumePreview: normalizeEnabled(runLifecycle.CheckpointResumePreview, false),
     },
     ApprovalPolicy: normalizeApprovalPolicy(rawCapabilities.ApprovalPolicy),
+    ExecutionPolicy: normalizeExecutionPolicy(rawCapabilities.ExecutionPolicy),
     BuiltinTools: normalizeBuiltinTools(rawCapabilities.BuiltinTools),
   };
 }

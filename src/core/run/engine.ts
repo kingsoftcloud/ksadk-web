@@ -8,6 +8,10 @@ import type {
   RunSettlement,
   SubmitControlCommand,
 } from './types.js';
+import {
+  executionPermissionMetadata,
+  useExecutionPermissionStore,
+} from '../../stores/execution-permission.js';
 import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
 import type { ApiFacade } from '../api/types.js';
 import type { StreamAction } from '../stream/types.js';
@@ -1128,6 +1132,12 @@ export class RunEngineImpl implements RunEngine {
       Metadata: {
         agentengine: {
           tool_approval_mode: this.config.permissionMode || 'risk',
+          // Execution sandbox tier: the runtime clamps it to its own declaration,
+          // Server admission validates it, and the Gateway carries it as a
+          // trusted header (never body metadata the runtime trusts directly).
+          ...executionPermissionMetadata(
+            useExecutionPermissionStore.getState().modeFor(this.config.agentId),
+          ),
           ...executionMetadata,
         },
       },
