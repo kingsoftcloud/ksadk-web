@@ -102,13 +102,17 @@ describe('consumed structured answer snapshots', () => {
     expect(submittedResponse(store.get('session', 'input')!)).toEqual({ value: { secret: null, answer: 0 } });
   });
 
-  it('does not leak structured-input secrets through a legacy optimistic summary', async () => {
-    const client = new InteractionClientImpl({ agentId: 'agent', submitInteraction: vi.fn(),
-      legacyResponsesApproval: vi.fn().mockResolvedValue(true) });
+  it('rejects unsupported legacy input without publishing an optimistic secret summary', async () => {
+    const legacyResponsesApproval = vi.fn().mockResolvedValue(true);
+    const submitInteraction = vi.fn();
+    const client = new InteractionClientImpl({ agentId: 'agent', submitInteraction,
+      legacyResponsesApproval });
     client.ingest({ ...request(), source: 'responses' });
     await client.respond({ interactionId: 'input', expectedRevision: 1, action: 'submit',
       response: { secret: 'private-summary-value' }, idempotencyKey: 'legacy' });
-    expect(client.store.get('session', 'input')?.responseSummary).toBe('已提交');
+    expect(client.store.get('session', 'input')?.responseSummary).toBeNull();
+    expect(legacyResponsesApproval).not.toHaveBeenCalled();
+    expect(submitInteraction).not.toHaveBeenCalled();
     expect(Object.hasOwn(client.store.get('session', 'input')!, 'response')).toBe(false);
   });
 });
