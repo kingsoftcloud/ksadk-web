@@ -60,7 +60,7 @@ export function resolveExecutionMode(
 
 /** RunAgent metadata fragment; absent when no mode was selected or declared. */
 export function executionPermissionMetadata(mode?: string | null): Record<string, string> {
-  return mode ? { permission_mode: mode } : {};
+  return mode && EXECUTION_PERMISSION_MODES.includes(mode as ExecutionPermissionMode) ? { permission_mode: mode } : {};
 }
 
 function storageKey(agentId: string): string {
@@ -87,6 +87,8 @@ function writePersisted(agentId: string, mode: string | null): void {
 
 export type ExecutionPermissionStore = {
   byAgent: Record<string, ExecutionPermissionMode | undefined>;
+  policies: Record<string, ExecutionPolicyCapability | undefined>;
+  scopes: Record<string, string | undefined>;
   /** Reconcile the stored choice with the runtime declaration. */
   configure: (agentId: string, policy?: ExecutionPolicyCapability | null) => void;
   select: (agentId: string, mode: ExecutionPermissionMode) => void;
@@ -95,17 +97,34 @@ export type ExecutionPermissionStore = {
 
 export const useExecutionPermissionStore = create<ExecutionPermissionStore>()((set, get) => ({
   byAgent: {},
+  policies: {},
+  scopes: {},
   configure: (agentId, policy) => {
-    if (!agentId) return;
-    const mode = resolveExecutionMode(policy, readPersisted(agentId));
-    if (mode && mode !== readPersisted(agentId)) writePersisted(agentId, mode);
-    if (!mode && readPersisted(agentId)) writePersisted(agentId, null);
-    set((state) => ({ byAgent: { ...state.byAgent, [agentId]: mode } }));
+    if (!agentId || authorizationCache.blocked) return;
+    const scope = storageKey(agentId);
+    const saved = readPersisted(agentId);
+    const current = get().scopes[agentId] === scope ? get().byAgent[agentId] : undefined;
+    const normalized = { Modes: normalizeExecutionModes(policy), DefaultMode: policy?.DefaultMode };
+    const mode = resolveExecutionMode(normalized, current ?? saved);
+    if (mode !== saved) writePersisted(agentId, mode ?? null);
+    set((state) => ({
+      byAgent: { ...state.byAgent, [agentId]: mode },
+      policies: { ...state.policies, [agentId]: normalized },
+      scopes: { ...state.scopes, [agentId]: scope },
+    }));
   },
   select: (agentId, mode) => {
-    if (!agentId) return;
+    if (!agentId || authorizationCache.blocked || get().scopes[agentId] !== storageKey(agentId)
+      || !normalizeExecutionModes(get().policies[agentId]).includes(mode)) return;
     writePersisted(agentId, mode);
     set((state) => ({ byAgent: { ...state.byAgent, [agentId]: mode } }));
   },
-  modeFor: (agentId) => get().byAgent[agentId],
+  // Called at dispatch time, including queued/resume requests. A stale menu or
+  // cached value never becomes request metadata after capability revocation.
+  modeFor: (agentId) => {
+    const state = get();
+    if (authorizationCache.blocked || state.scopes[agentId] !== storageKey(agentId)) return undefined;
+    const mode = state.byAgent[agentId];
+    return mode && normalizeExecutionModes(state.policies[agentId]).includes(mode) ? mode : undefined;
+  },
 }));
