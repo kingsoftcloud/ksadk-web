@@ -1406,6 +1406,23 @@ export class RunEngineImpl implements RunEngine {
           revision: action.revision,
         });
         break;
+      case 'question_request':
+        this.emit({
+          type: 'question_requested',
+          messageId,
+          questionId: action.questionId,
+          questions: action.questions,
+          runId: action.runId,
+        });
+        break;
+      case 'question_resolved':
+        this.emit({
+          type: 'question_resolved',
+          questionId: action.questionId,
+          answers: action.answers,
+          revision: action.revision,
+        });
+        break;
       case 'incomplete':
         // 审批暂停已由对应的 tool_upsert(status=paused) 呈现在工具行中。
         // 这里不再额外追加系统消息，以免把同一次审批拆成突兀的全宽提示卡。

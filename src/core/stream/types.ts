@@ -35,6 +35,19 @@ export type StreamAction =
       decision: 'approved' | 'rejected' | 'cancelled';
       revision?: number;
     }
+  | {
+      type: 'question_request';
+      questionId: string;
+      questions: Array<Record<string, unknown>>;
+      previousResponseId?: string;
+      runId?: string;
+    }
+  | {
+      type: 'question_resolved';
+      questionId: string;
+      answers: Record<string, unknown>;
+      revision?: number;
+    }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: A2UISurface }
   | { type: 'a2ui_surface_update'; surfaceId: string; surface: A2UISurface }
   | { type: 'a2ui_surface_end'; surfaceId: string }

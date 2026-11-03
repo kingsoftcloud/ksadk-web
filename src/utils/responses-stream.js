@@ -170,6 +170,19 @@ function normalizeOutputItem({ data, state, status }) {
     ];
   }
 
+  if (type === 'mcp_user_question') {
+    const questionId = String(item.id || item.question_id || '');
+    const questions = Array.isArray(item.questions) ? item.questions : [];
+    const runId = String(item.run_id || item.runId || data?.run_id || data?.runId || '');
+    return [{
+      type: 'question_request',
+      questionId,
+      questions,
+      previousResponseId: String(data?.response_id || state.currentResponseId || ''),
+      ...(runId ? { runId } : {}),
+    }];
+  }
+
   if (type === 'mcp_approval_request') {
     const name = String(item.name || 'approval');
     const args = stringifyPayload(item.arguments ?? item.args);
@@ -374,6 +387,15 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
         ...(runId ? { runId } : {}),
       },
     ];
+  }
+
+  if (eventType === 'response.question_resolved' || eventType === 'response.ksadk.question_resolved') {
+    return [{
+      type: 'question_resolved',
+      questionId: String(data?.question_id || data?.questionId || ''),
+      answers: data?.answers && typeof data.answers === 'object' ? data.answers : {},
+      revision: Number(data?.revision || 2),
+    }];
   }
 
   if (eventType === 'response.approval_resolved' || eventType === 'response.ksadk.approval_resolved') {
