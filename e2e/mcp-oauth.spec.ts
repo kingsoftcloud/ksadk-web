@@ -35,7 +35,7 @@ test('real Server + Kernel + LangGraph: popup consent resumes the original brows
       return route.fulfill({ response: result });
     }
   });
-  await page.goto('/');
+  await page.goto(process.env.MCP_LAB_START_PATH || '/');
   const input = page.locator('textarea').first();
   await input.fill('读取我的只读资料');
   await input.press('Enter');
