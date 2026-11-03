@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.16 - 2026-11-03
+
+### Execution tiers and runtime questions
+
+- Render the runtime-declared execution tiers as the single permission control, so the admitted mode stays visible and can be changed without a separate settings dialog.
+- Render Codex user questions as a structured-input card with typed options and a free-text answer, and keep the answered card in restored history.
+
 ## 0.3.15 - 2026-11-02
 
 ### Structured form submissions
