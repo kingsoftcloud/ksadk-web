@@ -21,6 +21,16 @@ export type ApprovalPolicyCapability = {
   Modes: Array<'ask' | 'risk' | 'full'>;
   DefaultMode: 'ask' | 'risk' | 'full';
   RuntimeOverride: boolean;
+  /** False when the deployment fixes the policy and the UI must not offer a selector. */
+  Selectable?: boolean;
+};
+
+/** Execution sandbox tiers declared by the runtime (a different axis from approval). */
+export type ExecutionPermissionMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+export type ExecutionPolicyCapability = {
+  Modes: ExecutionPermissionMode[];
+  DefaultMode?: ExecutionPermissionMode;
 };
 
 export type UiCapabilities = {
@@ -31,6 +41,8 @@ export type UiCapabilities = {
   Attachments?: boolean;
   Approval?: boolean;
   ApprovalPolicy?: ApprovalPolicyCapability;
+  /** Present only when the runtime declares execution sandbox tiers. */
+  ExecutionPolicy?: ExecutionPolicyCapability | null;
   Thinking?: boolean;
   ContextCompaction?: boolean;
   StopRun?: boolean;

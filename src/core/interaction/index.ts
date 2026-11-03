@@ -34,8 +34,10 @@ export { interactionFromSessionEvent } from './adapters/session-events.js';
 export {
   buildMcpApprovalResponse,
   interactionFromResponsesApproval,
+  interactionFromResponsesQuestion,
+  questionRequestSchema,
 } from './adapters/responses.js';
-export type { ResponsesApprovalRequest } from './adapters/responses.js';
+export type { ResponsesApprovalRequest, ResponsesUserQuestion } from './adapters/responses.js';
 export { interactionFromAguiInterrupt } from './adapters/agui.js';
 export type { AguiInterruptRequest } from './adapters/agui.js';
 export {
@@ -47,7 +49,7 @@ export type { A2uiRenderMode } from './a2ui-validate.js';
 
 import { InteractionStore } from './store.js';
 import { interactionFromSessionEvent } from './adapters/session-events.js';
-import { interactionFromResponsesApproval } from './adapters/responses.js';
+import { interactionFromResponsesApproval, interactionFromResponsesQuestion } from './adapters/responses.js';
 import { restoreLegacyApprovals } from './legacy-history.js';
 import { interactionFromLegacyRuntimeEvent } from './adapters/legacy-runtime-events.js';
 import type { Message } from '../../components/chat/types.js';
@@ -168,6 +170,49 @@ export function ingestApprovalRequestedEvent(event: {
     sharedInteractionStore.upsert(interaction);
   }
   return interaction;
+}
+
+/** Ingest an agent-initiated question card (its own channel, not an approval). */
+export function ingestQuestionRequestedEvent(event: {
+  questionId: string;
+  questions?: Array<Record<string, unknown>>;
+  runId?: string;
+  sessionId?: string | null;
+}): Interaction | null {
+  const sessionId = event.sessionId || '';
+  if (!sessionId || !event.questionId) return null;
+  const interaction = interactionFromResponsesQuestion({
+    questionId: event.questionId,
+    sessionId,
+    runId: event.runId,
+    questions: event.questions,
+  });
+  if (interaction) sharedInteractionStore.upsert(interaction);
+  return interaction;
+}
+
+/** Apply the answers the user submitted for a question card. */
+export function ingestQuestionResolvedEvent(event: {
+  questionId: string;
+  answers?: Record<string, unknown>;
+  revision?: number;
+  sessionId?: string | null;
+}): Interaction | null {
+  const sessionId = event.sessionId || '';
+  if (!sessionId || !event.questionId) return null;
+  const existing = sharedInteractionStore.get(sessionId, event.questionId);
+  if (!existing) return null;
+  const answers = event.answers && typeof event.answers === 'object' ? event.answers : {};
+  sharedInteractionStore.upsert({
+    ...existing,
+    status: 'resolved',
+    revision: event.revision ?? existing.revision + 1,
+    resolvedAt: new Date().toISOString(),
+    outcome: 'submitted',
+    responseSummary: JSON.stringify(answers).slice(0, 200),
+    extensions: { ...existing.extensions, answers },
+  });
+  return sharedInteractionStore.get(sessionId, event.questionId);
 }
 
 /** Ingest the authoritative terminal fact carried by a live approval stream. */

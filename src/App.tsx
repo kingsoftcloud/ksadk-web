@@ -531,6 +531,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
           attachmentsEnabled={uiCapabilities.Attachments !== false}
           approvalEnabled={Boolean(uiCapabilities.Approval) && uiCapabilities.ApprovalPolicy?.RuntimeOverride !== false}
           approvalPolicy={uiCapabilities.ApprovalPolicy}
+          executionPolicy={uiCapabilities.ExecutionPolicy}
           thinkingEnabled={thinkingEnabled}
           runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}
           pendingInteractions={pendingInteractions}
