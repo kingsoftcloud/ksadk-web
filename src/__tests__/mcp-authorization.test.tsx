@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { MCP_AUTHORIZATION_CAPABILITY as capability } from '../core/mcp-authorization/contract.js';
 import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
 import { InteractionStore } from '../core/interaction/store.js';
-import { McpAuthorizationCard } from '../components/chat/McpAuthorizationCard.js';
+import { McpAuthorizationCard, authorizationErrorMessage } from '../components/chat/McpAuthorizationCard.js';
 import { KernelRunEventTranslator } from '../core/stream/kernel-events.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
 const snapshot = { schema: 'mcp.authorization/v1' as const, capability_digest: capability.digest,
@@ -14,6 +14,15 @@ const snapshot = { schema: 'mcp.authorization/v1' as const, capability_digest: c
   deadline: 100, scopes: ['mcp:read'], allowed_actions: ['open', 'cancel', 'query'], requires_resume: true };
 const frame = { family: 'control', session_id: 'session', run_id: 'run', seq: 10, event_type: 'mcp.authorization.requested', payload: snapshot };
 describe('MCP authorization extension', () => {
+  it('shows the published service name and safe configuration diagnostics', () => {
+    const html = renderToStaticMarkup(createElement(McpAuthorizationCard, { sessionId: 'session', snapshot: { ...snapshot,
+      config_id: 'opaque-version-ref', display_name: 'cloud_resources', error: 'MCP_CLIENT_NOT_FOUND' } }));
+    expect(html).toContain('cloud_resources');
+    expect(html).not.toContain('opaque-version-ref');
+    expect(html).toContain('重新发布配置');
+    expect(authorizationErrorMessage(new Error('OAUTH_CLIENT_INCOMPATIBLE'))).toContain('客户端登记');
+    expect(authorizationErrorMessage(new Error('secret-provider-response'))).not.toContain('secret-provider-response');
+  });
   it('fingerprints its independent contract', () => {
     const contract = JSON.parse(readFileSync(new URL('../core/mcp-authorization/contract.json', import.meta.url), 'utf8'));
     expect(createHash('sha256').update(JSON.stringify(contract, Object.keys(contract).sort())).digest('hex')).toBe(capability.digest);

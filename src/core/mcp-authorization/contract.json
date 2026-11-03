@@ -22,5 +22,11 @@
   ],
   "credential_visibility": "runtime-only",
   "ordinary_interaction_completion": false,
-  "client_extension": "mcp.authorization"
+  "client_extension": "mcp.authorization",
+  "agent_configuration": "versioned-mcp-declaration/v1",
+  "public_snapshot_optional": [
+    "display_name"
+  ],
+  "credential_tool_rules": "json-schema-2020-12",
+  "browser_binding": "single-use-start-cookie"
 }
