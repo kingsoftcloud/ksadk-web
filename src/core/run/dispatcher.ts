@@ -10,6 +10,10 @@ import {
   stripMirroredTerminalAnswerFromThinking,
   upsertToolBlock,
 } from './blocks.js';
+import {
+  ingestQuestionRequestedEvent,
+  ingestQuestionResolvedEvent,
+} from '../interaction/index.js';
 import { useMessageStore } from '../../stores/message.js';
 import {
   ingestApprovalRequestedEvent,
@@ -368,6 +372,26 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
     case 'interaction_submit_rejected':
       ingestInteractionSubmitRejected(event);
       break;
+
+    case 'question_requested': {
+      ingestQuestionRequestedEvent({
+        questionId: event.questionId,
+        questions: event.questions,
+        runId: event.runId,
+        sessionId: event.sessionId,
+      });
+      break;
+    }
+
+    case 'question_resolved': {
+      ingestQuestionResolvedEvent({
+        questionId: event.questionId,
+        answers: event.answers,
+        revision: event.revision,
+        sessionId: event.sessionId,
+      });
+      break;
+    }
 
     case 'approval_resolved':
       ingestApprovalResolvedEvent({

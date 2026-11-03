@@ -65,6 +65,21 @@ export type RunEvent =
       revision?: number;
       sessionId?: string | null;
     }
+  | {
+      type: 'question_requested';
+      messageId: string;
+      questionId: string;
+      questions: Array<Record<string, unknown>>;
+      runId?: string;
+      sessionId?: string | null;
+    }
+  | {
+      type: 'question_resolved';
+      questionId: string;
+      answers: Record<string, unknown>;
+      revision?: number;
+      sessionId?: string | null;
+    }
   | { type: 'compaction'; phase: string; trigger?: string; compactedUntilSeqId?: number; sessionId?: string | null }
   | { type: 'system_message'; content: string; sessionId?: string | null }
   | { type: 'stream_ended'; sessionId?: string | null; runId?: string | null }

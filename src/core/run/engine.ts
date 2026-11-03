@@ -8,6 +8,10 @@ import type {
   RunSettlement,
   SubmitControlCommand,
 } from './types.js';
+import {
+  executionPermissionMetadata,
+  useExecutionPermissionStore,
+} from '../../stores/execution-permission.js';
 import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
 import type { ApiFacade } from '../api/types.js';
 import type { StreamAction } from '../stream/types.js';
@@ -1209,6 +1213,12 @@ export class RunEngineImpl implements RunEngine {
       Metadata: {
         agentengine: {
           tool_approval_mode: this.config.permissionMode || 'risk',
+          // Execution sandbox tier: the runtime clamps it to its own declaration,
+          // Server admission validates it, and the Gateway carries it as a
+          // trusted header (never body metadata the runtime trusts directly).
+          ...executionPermissionMetadata(
+            useExecutionPermissionStore.getState().modeFor(this.config.agentId),
+          ),
           ...executionMetadata,
         },
       },
@@ -1570,6 +1580,23 @@ export class RunEngineImpl implements RunEngine {
           type: 'approval_resolved',
           approvalRequestId: action.approvalRequestId,
           decision: action.decision,
+          revision: action.revision,
+        });
+        break;
+      case 'question_request':
+        this.emit({
+          type: 'question_requested',
+          messageId,
+          questionId: action.questionId,
+          questions: action.questions,
+          runId: action.runId,
+        });
+        break;
+      case 'question_resolved':
+        this.emit({
+          type: 'question_resolved',
+          questionId: action.questionId,
+          answers: action.answers,
           revision: action.revision,
         });
         break;

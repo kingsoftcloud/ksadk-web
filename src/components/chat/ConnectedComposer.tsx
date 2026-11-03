@@ -14,7 +14,7 @@ import type { SessionStore } from '../../stores/session.js';
 import type { StreamingStore } from '../../stores/streaming.js';
 import type { UIStore } from '../../stores/ui.js';
 import type { ComposerContextIndicator } from './types';
-import type { ApprovalPolicyCapability } from '../../types/capabilities.js';
+import type { ApprovalPolicyCapability, ExecutionPolicyCapability } from '../../types/capabilities.js';
 import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
 import type { RuntimeExecutionMode } from '../../core/run/types.js';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
@@ -42,6 +42,7 @@ export type ConnectedComposerProps = {
   attachmentsEnabled?: boolean;
   approvalEnabled?: boolean;
   approvalPolicy?: ApprovalPolicyCapability;
+  executionPolicy?: ExecutionPolicyCapability | null;
   thinkingEnabled?: boolean;
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   /** Pending interactions rendered in the tray above the composer. */
@@ -65,6 +66,7 @@ export function ConnectedComposer({
   attachmentsEnabled = true,
   approvalEnabled = false,
   approvalPolicy,
+  executionPolicy,
   thinkingEnabled = false,
   runtimeCapabilityMatrix,
   pendingInteractions,
@@ -214,6 +216,7 @@ export function ConnectedComposer({
       attachmentsEnabled={attachmentsEnabled}
       approvalEnabled={approvalEnabled}
       approvalPolicy={approvalPolicy}
+      executionPolicy={executionPolicy}
       thinkingEnabled={thinkingEnabled}
       executionMode={executionMode}
       executionModeSupport={executionModeSupport}

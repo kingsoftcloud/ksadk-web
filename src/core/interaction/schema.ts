@@ -8,9 +8,10 @@ import type { ValidateFunction } from 'ajv';
 import { jsonValue } from '../../types/json-value.js';
 
 export type InputValidation = { valid: boolean; issues: string[] };
-const validators = new Map<string, ValidateFunction>();
+type InputValidator = { root: ValidateFunction; at: (pointer: string, value: unknown) => boolean };
+const validators = new Map<string, InputValidator>();
 
-function validator(schema: Record<string, unknown>): ValidateFunction {
+function validator(schema: Record<string, unknown>): InputValidator {
   jsonValue(schema);
   const key = JSON.stringify(schema);
   const cached = validators.get(key);
@@ -30,15 +31,26 @@ function validator(schema: Record<string, unknown>): ValidateFunction {
   const compiled = engine.compile(schema);
   if ('$async' in compiled && compiled.$async) throw new TypeError('Async schemas are not supported');
   if (validators.size >= 128) validators.delete(validators.keys().next().value!);
-  validators.set(key, compiled);
-  return compiled;
+  const rootId = typeof schema.$id === 'string' ? schema.$id.replace(/#$/, '')
+    : typeof schema.id === 'string' ? schema.id.replace(/#$/, '') : '';
+  const result = { root: compiled, at: (pointer: string, value: unknown): boolean => {
+    const fragment = pointer === '' ? compiled : engine.getSchema(`${rootId}#${pointer}`);
+    return Boolean(fragment?.(value));
+  } };
+  validators.set(key, result);
+  return result;
+}
+
+/** Public AJV fragment lookup retains the root's local references and dialect. */
+export function inputSchemaPredicate(schema: Record<string, unknown>): InputValidator['at'] {
+  return validator(schema).at;
 }
 
 /** Client feedback uses the saved request Schema. Runtime validates again. */
 export function validateInput(schema: Record<string, unknown>, response: unknown): InputValidation {
   try {
     jsonValue(response);
-    const validate = validator(schema);
+    const validate = validator(schema).root;
     const valid = validate(response);
     return { valid: Boolean(valid), issues: valid ? [] : (validate.errors || []).slice(0, 10)
       .map(error => `${error.instancePath || '/'}：不符合 ${error.keyword} 约束`) };
