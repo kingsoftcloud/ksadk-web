@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ExternalLink, ShieldCheck } from 'lucide-react';
+import { Button } from '../ui/button.js';
 import type { McpAuthorizationAction, McpAuthorizationRequest, McpAuthorizationSnapshot } from '../../core/mcp-authorization/types.js';
 import { MCP_AUTHORIZATION_CAPABILITY } from '../../core/mcp-authorization/contract.js';
 import { authorizationInteraction } from '../../core/mcp-authorization/normalize.js';
@@ -24,6 +26,7 @@ const reasons: Record<string, string> = {
   INVALID_BROWSER_BINDING: '授权窗口已失效，请从原对话重新打开。',
   MCP_OAUTH_ADMISSION_CLOSED: '平台暂时停止接受新授权，请稍后重试。',
 };
+// eslint-disable-next-line react-refresh/only-export-components -- Also used by authorization consumers to sanitize provider errors.
 export function authorizationErrorMessage(value: unknown): string {
   if (typeof value === 'string') return reasons[value] || '操作未确认，请查询最新状态后重试。';
   if (value && typeof value === 'object') {
@@ -77,19 +80,34 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
     } catch (failure) { popup?.close(); setError(authorizationErrorMessage(failure)); }
     finally { setBusy(false); }
   };
-  return <section data-testid="mcp-authorization-card" className="rounded-xl border p-4 text-sm" aria-live="polite">
-    <strong>MCP 服务授权 · {current.display_name || current.config_id}</strong>
-    <p>{labels[current.status] || '等待服务端确认状态'}</p>
-    <p>访问范围：{current.scopes.join('、')}</p>
-    {current.error && <p>原因：{authorizationErrorMessage(current.error)}</p>}
-    {!supported && <p role="alert">当前客户端或服务端不支持此授权协议，请升级后继续。</p>}
-    {error && <p role="alert">{error}</p>}
-    <div className="mt-2 flex flex-wrap gap-3">
-      {current.allowed_actions.includes('open') && <button disabled={!supported || busy} onClick={() => void act('OpenMcpAuthorization')}>打开授权</button>}
-      {current.allowed_actions.includes('retry_authorization') && current.status === 'authorization_failed' && <button disabled={!supported || busy} onClick={() => void act('RetryMcpAuthorization')}>重新授权</button>}
-      {current.allowed_actions.includes('retry_connection') && <button disabled={!supported || busy} onClick={() => void act('RetryMcpConnection')}>重试连接</button>}
-      <button disabled={!supported || busy} onClick={() => void act('GetMcpAuthorizationWait')}>查询状态</button>
-      {current.allowed_actions.includes('cancel') && <button disabled={!supported || busy} onClick={() => void act('CancelMcpAuthorizationWait')}>取消任务</button>}
-    </div>
-  </section>;
+  return <div className="custom-scrollbar mx-auto mb-2 min-h-0 max-h-[min(60dvh,36rem)] w-full max-w-[64rem] overflow-y-auto overscroll-contain px-3 sm:px-4">
+    <section data-testid="mcp-authorization-card" aria-label="MCP 服务授权" aria-live="polite"
+      className="rounded-2xl border border-[var(--ksadk-interaction-border,hsl(var(--border)))] bg-[var(--ksadk-interaction-background,hsl(var(--card)))] px-4 py-5 text-center text-sm text-[var(--ksadk-interaction-foreground,hsl(var(--foreground)))] shadow-sm sm:px-6 sm:py-6">
+      <div className="mx-auto flex min-w-0 max-w-xl flex-col items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--ksadk-interaction-muted-background,hsl(var(--muted)))]">
+          <ShieldCheck className="h-5 w-5" strokeWidth={1.7} aria-hidden="true" />
+        </div>
+        <div className="w-full min-w-0 space-y-1.5">
+          <h3 className="break-words text-base font-semibold leading-6">MCP 服务授权 · {current.display_name || current.config_id}</h3>
+          <p className="break-words leading-5 text-[var(--ksadk-interaction-muted,hsl(var(--muted-foreground)))]">{labels[current.status] || '等待服务端确认状态'}</p>
+        </div>
+        {current.scopes.length > 0 && <div className="flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5 text-xs leading-5">
+          <span className="text-[var(--ksadk-interaction-muted,hsl(var(--muted-foreground)))]">访问范围：</span>
+          {current.scopes.map(scope => <span key={scope} className="max-w-full break-all rounded-md bg-[var(--ksadk-interaction-muted-background,hsl(var(--muted)))] px-2 py-0.5">{scope}</span>)}
+        </div>}
+        {current.error && <p className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">原因：{authorizationErrorMessage(current.error)}</p>}
+        {!supported && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">当前客户端或服务端不支持此授权协议，请升级后继续。</p>}
+        {error && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">{error}</p>}
+        <div className="mt-1 flex w-full flex-wrap items-center justify-center gap-2">
+          {current.allowed_actions.includes('open') && <Button type="button" size="sm" disabled={!supported || busy} onClick={() => void act('OpenMcpAuthorization')}>
+            <ExternalLink aria-hidden="true" />打开授权
+          </Button>}
+          {current.allowed_actions.includes('retry_authorization') && current.status === 'authorization_failed' && <Button type="button" size="sm" disabled={!supported || busy} onClick={() => void act('RetryMcpAuthorization')}>重新授权</Button>}
+          {current.allowed_actions.includes('retry_connection') && <Button type="button" size="sm" disabled={!supported || busy} onClick={() => void act('RetryMcpConnection')}>重试连接</Button>}
+          <Button type="button" size="sm" variant="outline" disabled={!supported || busy} onClick={() => void act('GetMcpAuthorizationWait')}>查询状态</Button>
+          {current.allowed_actions.includes('cancel') && <Button type="button" size="sm" variant="ghost" disabled={!supported || busy} onClick={() => void act('CancelMcpAuthorizationWait')}>取消任务</Button>}
+        </div>
+      </div>
+    </section>
+  </div>;
 }
