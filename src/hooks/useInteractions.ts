@@ -11,6 +11,7 @@ import type {
 } from '../core/interaction/types.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { useA2uiCatalogRegistry } from '../core/a2ui/provider.js';
+import { isUserPendingInteraction } from '../core/interaction/pending.js';
 
 type UseInteractionsContext = {
   agentId: string;
@@ -71,12 +72,7 @@ export function useInteractions(ctx: UseInteractionsContext) {
     return ctx.currentSessionId
       ? sharedInteractionStore
           .listAll(ctx.currentSessionId)
-          .filter(
-            (interaction) =>
-              interaction.status === 'pending'
-              || interaction.status === 'resolving'
-              || interaction.status === 'failed',
-          )
+          .filter(isUserPendingInteraction)
       : [];
   }, [version, ctx.currentSessionId]);
 

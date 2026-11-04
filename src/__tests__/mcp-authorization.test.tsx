@@ -9,11 +9,38 @@ import { InteractionStore } from '../core/interaction/store.js';
 import { McpAuthorizationCard, authorizationErrorMessage } from '../components/chat/McpAuthorizationCard.js';
 import { KernelRunEventTranslator } from '../core/stream/kernel-events.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
+import { isUserPendingInteraction } from '../core/interaction/pending.js';
 const snapshot = { schema: 'mcp.authorization/v1' as const, capability_digest: capability.digest,
   wait_id: 'wait', run_id: 'run', config_id: 'service', revision: 2, status: 'awaiting_authorization',
   deadline: 100, scopes: ['mcp:read'], allowed_actions: ['open', 'cancel', 'query'], requires_resume: true };
 const frame = { family: 'control', session_id: 'session', run_id: 'run', seq: 10, event_type: 'mcp.authorization.requested', payload: snapshot };
 describe('MCP authorization extension', () => {
+  it('keeps credential reuse facts without creating a user task, live or replayed', () => {
+    const store = new InteractionStore();
+    for (const [index, status] of ['credential_ready', 'connecting', 'resumed'].entries()) {
+      const event = { ...frame, payload: { ...snapshot, revision: index + 2, status } };
+      for (const value of [event, { Content: { session_event: event } }]) {
+        store.upsert(interactionFromSessionEvent(value)!);
+        expect(store.listAll('session')).toHaveLength(1);
+        expect(store.listAll('session').filter(isUserPendingInteraction)).toEqual([]);
+      }
+    }
+    expect(store.get('session', 'wait')?.status).toBe('resolved');
+  });
+  it('shows consent and actionable failures after an automatic connection attempt', () => {
+    const store = new InteractionStore();
+    for (const [index, status] of ['credential_ready', 'connection_failed', 'awaiting_authorization', 'authorization_failed'].entries()) {
+      store.upsert(interactionFromSessionEvent({ ...frame, payload: { ...snapshot, revision: index + 2, status } })!);
+      expect(store.listAll('session').filter(isUserPendingInteraction)).toHaveLength(index ? 1 : 0);
+    }
+    const initial = interactionFromSessionEvent(frame)!;
+    expect(isUserPendingInteraction(initial)).toBe(true);
+    expect(isUserPendingInteraction({ ...initial, extensions: {} })).toBe(true);
+    for (const extra of [{ error: 'CONNECTION_FAILED' }, { capability_digest: 'unsupported' }]) {
+      expect(isUserPendingInteraction(interactionFromSessionEvent({ ...frame,
+        payload: { ...snapshot, status: 'credential_ready', ...extra } })!)).toBe(true);
+    }
+  });
   it('shows the published service name and safe configuration diagnostics', () => {
     const html = renderToStaticMarkup(createElement(McpAuthorizationCard, { sessionId: 'session', snapshot: { ...snapshot,
       config_id: 'opaque-version-ref', display_name: 'cloud_resources', error: 'MCP_CLIENT_NOT_FOUND' } }));

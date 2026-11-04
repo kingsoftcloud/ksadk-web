@@ -285,7 +285,9 @@ export class AguiRunClient {
       events.push({ type: 'tool_result', messageId: this.runMessageIds.get(runId) || `${runId}:assistant`, name: tool.name, output: String(payload.content || '') });
     } else if (type === 'CUSTOM' && payload.name === 'ksadk.session_event') {
       const envelope = asObject(payload.value);
-      if (envelope.family === 'interaction' && envelope.family_version === 1
+      const isAuthorization = envelope.family === 'control'
+        && ['mcp.authorization.requested', 'mcp.authorization.updated'].includes(String(envelope.event_type));
+      if ((envelope.family === 'interaction' || isAuthorization) && envelope.family_version === 1
         && envelope.session_id === this.threadId && typeof envelope.event_type === 'string'
         && Number.isSafeInteger(envelope.seq)) {
         events.push({
