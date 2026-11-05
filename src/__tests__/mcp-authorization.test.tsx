@@ -85,8 +85,8 @@ describe('MCP authorization extension', () => {
   it('uses the instance authenticated fetch and preserves raw JSON', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ Code: 0, Data: snapshot }), { headers: { 'Content-Type': 'application/json' } }));
     const api = new ApiFacadeImpl({ fetch: fetcher, agentId: 'agent' });
-    const result = await api.mcpAuthorization('CancelMcpAuthorizationWait', 'wait', 2);
+    const result = await api.mcpAuthorization('CancelMcpAuthorizationWait', 'wait', 2, 'session');
     expect(result).toEqual(snapshot);
-    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ WaitId: 'wait', ExpectedRevision: 2, AgentId: 'agent' });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ WaitId: 'wait', ExpectedRevision: 2, AgentId: 'agent', SessionId: 'session' });
   });
 });

@@ -29,8 +29,8 @@ export class ApiFacadeImpl implements ApiFacade {
     this.client = new AgentEngineClient(options);
   }
 
-  mcpAuthorization: import('../mcp-authorization/types.js').McpAuthorizationRequest = async (action, waitId, revision) => {
-    return this.client.postJsonAction(action, { WaitId: waitId, ...(revision ? { ExpectedRevision: revision } : {}) });
+  mcpAuthorization: import('../mcp-authorization/types.js').McpAuthorizationRequest = async (action, waitId, revision, sessionId) => {
+    return this.client.postJsonAction(action, { WaitId: waitId, ...(sessionId ? { SessionId: sessionId } : {}), ...(revision ? { ExpectedRevision: revision } : {}) });
   };
 
   async compactSession(agentId: string, sessionId: string) {

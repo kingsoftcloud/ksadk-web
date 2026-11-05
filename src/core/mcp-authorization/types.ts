@@ -5,4 +5,4 @@ export type McpAuthorizationSnapshot = {
   status: string; deadline: number; error?: string | null;
   scopes: string[]; allowed_actions: string[]; requires_resume: boolean;
 };
-export type McpAuthorizationRequest = (action: McpAuthorizationAction, waitId: string, revision?: number) => Promise<McpAuthorizationSnapshot & { authorization_url?: string }>;
+export type McpAuthorizationRequest = (action: McpAuthorizationAction, waitId: string, revision?: number, sessionId?: string) => Promise<McpAuthorizationSnapshot & { authorization_url?: string }>;

@@ -53,14 +53,14 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
     if (!supported || !request) return;
     let disposed = false;
     const query = async () => {
-      try { const result = await request('GetMcpAuthorizationWait', snapshot.wait_id); if (!disposed) accept(result); }
+      try { const result = await request('GetMcpAuthorizationWait', snapshot.wait_id, undefined, sessionId); if (!disposed) accept(result); }
       catch { if (!disposed) setError('状态暂时无法确认，请稍后查询。'); }
     };
     void query();
     const timer = setInterval(() => { void query(); }, 3000);
     window.addEventListener('focus', query);
     return () => { disposed = true; clearInterval(timer); window.removeEventListener('focus', query); };
-  }, [supported, request, snapshot.wait_id, accept]);
+  }, [supported, request, snapshot.wait_id, sessionId, accept]);
   const act = async (action: McpAuthorizationAction) => {
     if (!request || busy) return;
     // Open synchronously in the click gesture; do not infer consent from close.
@@ -69,7 +69,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
     if (popup) popup.opener = null;
     setBusy(true); setError('');
     try {
-      const result = await request(action, current.wait_id, current.revision);
+      const result = await request(action, current.wait_id, current.revision, sessionId);
       accept(result);
       if (opening && result.authorization_url) {
         const url = new URL(result.authorization_url);

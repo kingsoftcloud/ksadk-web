@@ -6,23 +6,44 @@ test('real Server + Kernel + LangGraph: popup consent resumes the original brows
   const session = `browser-oauth-${Date.now()}`;
   let businessRequests = 0;
   const headers = { 'X-Ksc-Account-Id': 'tenant-1', 'X-Ksc-User-Uuid': 'alice' };
+  const gateway = process.env.MCP_LAB_GATEWAY_URL;
+  const gatewayRequests: string[] = [];
+  if (gateway) {
+    expect(new URL(gateway).hostname).toBe('127.0.0.1');
+    await context.addCookies([{ name: 'ae_ui_session', value: process.env.MCP_LAB_SESSION_COOKIE!,
+      url: gateway }]);
+    context.on('request', req => {
+      const url = new URL(req.url());
+      if (url.origin === gateway) gatewayRequests.push(url.pathname);
+    });
+    // Serve only the Hosted UI assets from the local package build. OAuth
+    // requests use the real Router and receive real HTTP redirects/cookies.
+    await page.route(gateway + '/hosted-ui/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      const response = await request.get('http://127.0.0.1:4178' + path);
+      return route.fulfill({ response });
+    });
+  }
   const state = async () => (await request.get(`http://127.0.0.1:19993/lab/state/${session}`)).json();
   await page.route('**/agentengine/**', async route => {
     const req = route.request(), url = new URL(req.url());
     const body = req.method() === 'POST' ? req.postDataJSON() || {} : Object.fromEntries(url.searchParams);
     const action = url.searchParams.get('Action') || url.pathname.split('/').at(-1)!;
     if (action.includes('McpAuthorization') || action === 'RetryMcpConnection') {
+      if (gateway) return route.continue();
       const result = await request.post(`http://127.0.0.1:19992/agentengine/${action}`, { data: body, headers });
       return route.fulfill({ response: result });
     }
     if (action === 'RunAgent') {
       businessRequests += 1;
+      if (gateway) return route.continue();
       const result = await request.post('http://127.0.0.1:19992/lab/run', { headers,
         data: { client_capability: body.Extensions?.['mcp.authorization']?.digest, session_id: session, request_id: `original-${session}`, content: '读取我的只读资料' } });
       const receipt = await result.json();
       return route.fulfill({ status: 202, json: { Code: 0, Data: { ReceiptStatus: receipt.status, CommandId: receipt.command_id, RunId: receipt.run_id, AcceptedSeq: receipt.accepted_seq } } });
     }
     if (action === 'SubscribeSessionEvents' || action === 'SubscribeRunEvents') {
+      if (gateway) return route.continue();
       return route.continue({ url: `http://127.0.0.1:19992/lab/events/${session}?after_seq=${body.after_seq || body.AfterSeqId || body.AfterSeq || 0}${action === 'SubscribeRunEvents' ? '&run_id=' + body.InvocationId : ''}` });
     }
     {
@@ -35,7 +56,7 @@ test('real Server + Kernel + LangGraph: popup consent resumes the original brows
       return route.fulfill({ response: result });
     }
   });
-  await page.goto(process.env.MCP_LAB_START_PATH || '/');
+  await page.goto((gateway || '') + (process.env.MCP_LAB_START_PATH || '/'));
   const input = page.locator('textarea').first();
   await input.fill('读取我的只读资料');
   await input.press('Enter');
@@ -82,6 +103,13 @@ test('real Server + Kernel + LangGraph: popup consent resumes the original brows
   await input.fill('恢复后的新草稿');
   await expect(page.getByRole('button', { name: '发送消息', exact: true })).toBeEnabled();
   await input.fill('');
+  if (gateway) {
+    for (const suffix of ['api/v1/RunAgent', 'api/v1/OpenMcpAuthorization', 'oauth/mcp/start/', 'oauth/mcp/callback/', 'oauth/mcp/result']) {
+      expect(gatewayRequests.some(path => path.startsWith('/agentengine/' + suffix))).toBe(true);
+    }
+    writeFileSync(`${process.env.MCP_LAB_EVIDENCE}/gateway-report.json`,
+      JSON.stringify({ actionsViaGateway: true, startViaGateway: true, callbackViaGateway: true, resultViaGateway: true }));
+  }
   await page.screenshot({ path: `${process.env.MCP_LAB_EVIDENCE}/browser.png`, fullPage: true });
   writeFileSync(`${process.env.MCP_LAB_EVIDENCE}/browser-report.json`, JSON.stringify({ businessRequests, steps: after.steps, waitId, refreshed: true, windowClosed: true, popupBlocked: true, keyboardAction: true, denialThenRetry: true, draftPreservedWhileWaiting: true, inputRestored: true }));
 });
