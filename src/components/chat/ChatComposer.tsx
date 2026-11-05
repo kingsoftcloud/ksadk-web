@@ -23,7 +23,8 @@ import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { ExecutionModeMenu } from './ExecutionModeMenu';
 import type { RuntimeExecutionModeSupport } from './ExecutionModeMenu';
 import { ModelSettingsMenu } from './ModelSettingsMenu';
-import { PermissionMenu, permissionMenuVisible } from './PermissionMenu';
+import { PermissionMenu } from './PermissionMenu';
+import { permissionMenuVisible } from './permission-menu-visibility';
 import { ExecutionPermissionMenu } from './ExecutionPermissionMenu';
 import type { ComposerContextIndicator } from './types';
 

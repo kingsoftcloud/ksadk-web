@@ -7,7 +7,7 @@ import {
   normalizeExecutionModes,
   resolveExecutionMode,
 } from '../stores/execution-permission.js';
-import { permissionMenuVisible } from '../components/chat/PermissionMenu.js';
+import { permissionMenuVisible } from '../components/chat/permission-menu-visibility.js';
 
 function capabilities(overrides: Record<string, unknown>) {
   return normalizeCapabilities({ Data: { Capabilities: overrides } });
