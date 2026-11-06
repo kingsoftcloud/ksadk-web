@@ -200,7 +200,8 @@ type SessionLifecycleContext = {
   uiCapabilities: UiCapabilities;
   api: ApiFacade;
   resetCompaction: () => void;
-  disconnectRun?: () => void;
+  /** `delete` lets the run owner drop its queued drafts instead of sending them. */
+  disconnectRun?: (reason?: 'switch' | 'delete') => void;
   restoreSession?: boolean;
 };
 
@@ -1161,7 +1162,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
           runSubscriptionAbortRef.current?.abort();
-          disconnectRun?.();
+          disconnectRun?.('delete');
           currentSessionIdRef.current = null;
           useMessageStore.getState().setMessages([]);
           useCheckpointStore.getState().clearSessionCheckpoints(sessionId);
