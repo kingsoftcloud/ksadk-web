@@ -102,7 +102,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     attachments: File[];
     executionMode?: RuntimeExecutionMode;
   }>>([]);
-  const disconnectRunRef = useRef<(() => void) | null>(null);
+  const disconnectRunRef = useRef<((reason?: 'switch' | 'delete') => void) | null>(null);
 
   const {
     fetchSessions,
@@ -126,7 +126,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     uiCapabilities,
     api,
     resetCompaction: () => {},
-    disconnectRun: () => disconnectRunRef.current?.(),
+    disconnectRun: (reason) => disconnectRunRef.current?.(reason),
     restoreSession: options.restoreSession,
   });
 

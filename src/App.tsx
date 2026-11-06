@@ -132,7 +132,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     attachments: File[];
     executionMode?: RuntimeExecutionMode;
   }>>([]);
-  const disconnectRunRef = useRef<(() => void) | null>(null);
+  const disconnectRunRef = useRef<((reason?: 'switch' | 'delete') => void) | null>(null);
 
   const { isMobile, viewportHeight } = useResponsiveViewport();
   const composerMaxHeight = resolveComposerMaxHeight({ isMobile, viewportHeight });
@@ -157,7 +157,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     uiCapabilities,
     api,
     resetCompaction: () => {},
-    disconnectRun: () => disconnectRunRef.current?.(),
+    disconnectRun: (reason) => disconnectRunRef.current?.(reason),
   });
 
   const refreshSettledRun = useCallback(

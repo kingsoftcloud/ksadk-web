@@ -258,16 +258,20 @@ describe('submitted conversation ownership', () => {
 
   it('does not enqueue a second copy of a request already owned by the live queue', async () => {
     const stream = outputStream();
+    const drained = outputStream();
+    const runAgent = vi.fn().mockResolvedValueOnce(stream.stream).mockResolvedValueOnce(drained.stream);
     const p = probe({ createSession: vi.fn().mockResolvedValue({ SessionId: 'native-a' }),
-      runAgent: vi.fn().mockResolvedValue(stream.stream), cancelRun: vi.fn().mockResolvedValue({}) });
+      runAgent, cancelRun: vi.fn().mockResolvedValue({}) });
     await p.actions.submitDraft('first', []);
     await p.actions.submitDraft('queued once', []);
     const entry = p.controller.outbox.list().find(item => item.text === 'queued once')!;
     await p.actions.submitDraft(entry.text, [], undefined, undefined, undefined, entry.requestId);
     const queued = useUIStore.getState().queuedDrafts.map(item => item.text);
     p.actions.disconnectRun();
-    stream.close();
+    // A disconnect resumes the owner queue instead of stranding the draft.
+    await vi.waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
     expect(queued).toEqual(['queued once']);
+    drained.close();
   });
 
   it('keeps a network submission unknown in the outbox and does not drain queued work', async () => {

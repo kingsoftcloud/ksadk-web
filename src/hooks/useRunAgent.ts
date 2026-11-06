@@ -13,7 +13,7 @@ import type { ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '../core/a2ui/catalog.js';
-import type { PermissionMode, RuntimeExecutionMode, RunEngineConfig } from '../core/run/types.js';
+import type { PermissionMode, RuntimeExecutionMode, RunEngineConfig, RunSettlement } from '../core/run/types.js';
 import { HttpConversationClient, type OutboxStore } from '../core/conversation/index.js';
 import type { ConversationClient } from '../core/conversation/types.js';
 import type { ConversationId } from '../core/conversation/studio-controller.js';
@@ -41,7 +41,7 @@ type RunAgentContext = {
   currentSessionIdRef: React.MutableRefObject<string | null>;
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
-  onRunSettled?: (sessionId: string | null, agentId?: string, outcome?: import('../core/run/types.js').RunSettlement) => void;
+  onRunSettled?: (sessionId: string | null, agentId?: string, outcome?: RunSettlement) => void;
   onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
   /** Stable owner before native creation. Omit for the legacy Hosted shell. */
   conversationIdRef?: React.MutableRefObject<ConversationId | undefined>;
@@ -53,17 +53,33 @@ type RunAgentContext = {
   outbox?: OutboxStore;
 };
 
+type QueuedRun = {
+  draft: QueuedDraft;
+  launch: () => boolean;
+  /** Durable feedback: mark the persisted outbox row when the draft is dropped. */
+  discard?: (reason: string) => void;
+};
+
 type RunOwner = {
   key: string;
   agentId: string;
   conversationId?: ConversationId;
   sessionId: string | null;
   engine: RunEngineImpl;
-  queue: Array<{ draft: QueuedDraft; launch: () => boolean }>;
+  queue: QueuedRun[];
+  /** Consecutive failed/unknown settlements that still had queued work waiting. */
+  failures: number;
+  /** Consecutive drain launches rejected by the engine. */
+  launchFailures: number;
+  retryTimer?: ReturnType<typeof setTimeout>;
   isVisible: () => boolean;
 };
 
 const MAX_IDLE_RUN_OWNERS = 64;
+/** Backoff base for a queue that could not start (multiplied by the attempt). */
+const QUEUE_RETRY_DELAY_MS = 300;
+/** Consecutive retries before the queue is dropped loudly instead of stalling. */
+const MAX_QUEUE_RETRIES = 3;
 
 function bindNativeOwner(owners: Map<string, RunOwner>, owner: RunOwner, sessionId: string) {
   owner.sessionId = sessionId;
@@ -143,7 +159,10 @@ export function useRunAgent(ctx: RunAgentContext) {
           : currentSessionIdRef.current === owner!.sessionId
       );
       const engine = new RunEngineImpl(ctx.api, { isVisible, draftId: conversationId });
-      owner = { key, agentId, conversationId, sessionId: sessionId || null, engine, queue: [], isVisible };
+      owner = {
+        key, agentId, conversationId, sessionId: sessionId || null, engine, queue: [],
+        failures: 0, launchFailures: 0, isVisible,
+      };
       engine.subscribe(event => dispatchRunEventToStores(event, { visible: isVisible(), draftId: conversationId }));
       ownersRef.current.set(key, owner);
     }
@@ -163,19 +182,91 @@ export function useRunAgent(ctx: RunAgentContext) {
     useUIStore.getState().setQueuedDrafts(drafts);
   }, [queuedDraftRef]);
 
-  const drainQueue = useCallback((owner: RunOwner) => {
-    const next = owner.queue[0];
-    if (!next || owner.engine.stage !== 'idle') return;
-    owner.queue.shift();
-    publishQueue(owner);
-    // The closure captured the submitting owner's target and configuration.
-    // Never resolve a queued command against the current navigation selection.
-    queueMicrotask(() => {
-      if (!next.launch()) {
+  const queueControl = useMemo(() => {
+    const clearRetry = (owner: RunOwner) => {
+      if (owner.retryTimer === undefined) return;
+      clearTimeout(owner.retryTimer);
+      owner.retryTimer = undefined;
+    };
+
+    /** Drop queued drafts only with explicit user-visible feedback. */
+    const abandon = (owner: RunOwner, reason: string) => {
+      clearRetry(owner);
+      owner.failures = 0;
+      owner.launchFailures = 0;
+      if (!owner.queue.length) return;
+      const count = owner.queue.length;
+      for (const item of owner.queue.splice(0, count)) item.discard?.(reason);
+      publishQueue(owner);
+      useUIStore.getState().pushToast(`队列已停止：${reason}，${count} 条待发消息已取消。`, 'error');
+    };
+
+    const scheduleRetry = (owner: RunOwner, attempt: number) => {
+      if (owner.retryTimer !== undefined) return;
+      owner.retryTimer = setTimeout(() => {
+        owner.retryTimer = undefined;
+        drain(owner);
+      }, QUEUE_RETRY_DELAY_MS * attempt);
+    };
+
+    function drain(owner: RunOwner) {
+      clearRetry(owner);
+      const next = owner.queue[0];
+      if (!next || owner.engine.stage !== 'idle') return;
+      owner.queue.shift();
+      publishQueue(owner);
+      // The closure captured the submitting owner's target and configuration.
+      // Never resolve a queued command against the current navigation selection.
+      queueMicrotask(() => {
+        if (next.launch()) {
+          owner.launchFailures = 0;
+          return;
+        }
         owner.queue.unshift(next);
         publishQueue(owner);
+        // A rejected launch used to strand the queue here until the next settlement.
+        retryLaunch(owner);
+      });
+    }
+
+    function retryLaunch(owner: RunOwner) {
+      owner.launchFailures += 1;
+      if (owner.launchFailures > MAX_QUEUE_RETRIES) {
+        abandon(owner, `待发消息连续 ${MAX_QUEUE_RETRIES} 次无法启动`);
+        return;
       }
-    });
+      scheduleRetry(owner, owner.launchFailures);
+    }
+
+    /**
+     * Continue one owner queue after its run settles. A settlement is the only
+     * reliable "engine idle again" signal, but it is not always a success:
+     * - completed / cancelled: the turn ended (cancel is user intent), send next.
+     * - awaiting-input: a pending approval/question can only be answered while
+     *   this engine is idle (respondToAguiApproval and the Responses resume both
+     *   reject otherwise), so the queue waits for that interaction round.
+     * - failed / unknown: back off and retry, then drop loudly after three tries.
+     */
+    function settle(owner: RunOwner, outcome?: RunSettlement) {
+      if (outcome === 'failed' || outcome === 'unknown') {
+        if (!owner.queue.length) {
+          owner.failures = 0;
+          return;
+        }
+        owner.failures += 1;
+        if (owner.failures > MAX_QUEUE_RETRIES) {
+          abandon(owner, `连续 ${MAX_QUEUE_RETRIES} 次发送失败`);
+          return;
+        }
+        scheduleRetry(owner, owner.failures);
+        return;
+      }
+      if (outcome === 'awaiting-input') return;
+      owner.failures = 0;
+      drain(owner);
+    }
+
+    return { drain, retryLaunch, settle, abandon };
   }, [publishQueue]);
 
   useEffect(() => {
@@ -323,7 +414,7 @@ export function useRunAgent(ctx: RunAgentContext) {
             status: outcome === 'completed' || outcome === 'awaiting-input' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : outcome === 'failed' ? 'failed' : 'unknown',
           });
           onRunSettled?.(sessionId, owner.agentId, outcome);
-          if (outcome === 'completed') drainQueue(owner);
+          queueControl.settle(owner, outcome);
         },
       });
       if (!accepted) useStreamingStore.getState().setSessionStreaming(owner.sessionId || owner.conversationId, false);
@@ -331,12 +422,22 @@ export function useRunAgent(ctx: RunAgentContext) {
     };
     const started = launch();
     if (!started && responsesInput === undefined) {
-      owner.queue.push({ draft, launch });
+      owner.queue.push({
+        draft,
+        launch,
+        discard: reason => {
+          if (!outboxEntry || !ledger) return;
+          outboxRequestsRef.current.delete(outboxEntry.requestId);
+          ledger.update(outboxEntry.requestId, { status: 'cancelled', error: reason });
+        },
+      });
       publishQueue(owner);
       // Ordinary user turns are accepted into the owner queue even when the
       // engine is busy.  Resume/approval inputs are deliberately never queued
       // because replaying them against a later run could approve the wrong
       // request; callers need the false result to keep the interaction retryable.
+      // A launch refused while already idle would otherwise never be retried.
+      if (owner.engine.stage === 'idle') queueControl.retryLaunch(owner);
       return true;
     }
     if (dispatch) {
@@ -344,17 +445,31 @@ export function useRunAgent(ctx: RunAgentContext) {
       return dispatch;
     }
     return started;
-  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunSettled, onSessionCreated, outbox, publishQueue, waitForPendingSessionCreation]);
+  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, getOwner, onRunSettled, onSessionCreated, outbox, publishQueue, queueControl, waitForPendingSessionCreation]);
 
   const stopGeneration = useCallback(() => {
     const engine = getEngine(currentSessionIdRef.current);
     engine.stop();
   }, [currentSessionIdRef, getEngine]);
 
-  const disconnectRun = useCallback(() => {
-    const engine = getEngine(currentSessionIdRef.current);
-    engine.disconnect();
-  }, [currentSessionIdRef, getEngine]);
+  /**
+   * Abandon this owner's live run. `disconnect()` bypasses `onSettled`, so the
+   * owner queue would otherwise be stranded silently:
+   * - `switch` (navigation/guard): the session still exists and each owner has
+   *   its own engine, so keep sending the queued drafts in the background.
+   * - `delete`: the native session is gone; drop the drafts with a visible toast
+   *   instead of launching runs against a deleted session.
+   */
+  const disconnectRun = useCallback((reason: 'switch' | 'delete' = 'switch') => {
+    const owner = getOwner(currentSessionIdRef.current);
+    owner.engine.disconnect();
+    if (!owner.queue.length) return;
+    if (reason === 'delete') {
+      queueControl.abandon(owner, '会话已删除');
+      return;
+    }
+    queueControl.drain(owner);
+  }, [currentSessionIdRef, getOwner, queueControl]);
 
   const resumeCheckpoint = useCallback(
     (params: { sessionId: string; runId: string; checkpointId: string }) => {
@@ -372,7 +487,7 @@ export function useRunAgent(ctx: RunAgentContext) {
         ...params,
         onSettled: (sessionId, outcome) => {
           onRunSettled?.(sessionId, owner.agentId, outcome);
-          if (outcome === 'completed') drainQueue(owner);
+          queueControl.settle(owner, outcome);
         },
       });
       if (!accepted) {
@@ -380,7 +495,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       }
       return accepted;
     },
-    [drainQueue, getEngine, getOwner, onRunSettled],
+    [getEngine, getOwner, onRunSettled, queueControl],
   );
 
   const resetCompaction = useCallback(() => {
@@ -410,12 +525,12 @@ export function useRunAgent(ctx: RunAgentContext) {
       interruptId,
       status,
       payload,
-      onSettled: id => {
+      onSettled: (id, outcome) => {
         onRunSettled?.(id, owner.agentId);
-        drainQueue(owner);
+        queueControl.settle(owner, outcome);
       },
     });
-  }, [currentSessionIdRef, drainQueue, getEngine, getOwner, onRunSettled]);
+  }, [currentSessionIdRef, getEngine, getOwner, onRunSettled, queueControl]);
 
   const respondToAguiApproval = useCallback((options: {
     interruptId: string;
@@ -437,16 +552,16 @@ export function useRunAgent(ctx: RunAgentContext) {
       status: options.status || 'resolved',
       payload: Object.hasOwn(options, 'payload')
         ? options.payload : { decision: options.approve ? 'approve' : 'reject' },
-      onSettled: id => {
+      onSettled: (id, outcome) => {
         onRunSettled?.(id, owner.agentId);
-        drainQueue(owner);
+        queueControl.settle(owner, outcome);
       },
     });
     if (!accepted) {
       useStreamingStore.getState().setSessionStreaming(sessionId, false);
     }
     return accepted;
-  }, [currentSessionIdRef, drainQueue, getEngine, getOwner, onRunSettled]);
+  }, [currentSessionIdRef, getEngine, getOwner, onRunSettled, queueControl]);
 
   return {
     submitDraft,
