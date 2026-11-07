@@ -13,6 +13,8 @@ import type { ApiFacade } from '../core/api/types.js';
 import { useA2uiCatalogRegistry } from '../core/a2ui/provider.js';
 import { isUserPendingInteraction } from '../core/interaction/pending.js';
 
+import { observeMcpConnections } from '../core/mcp-authorization/recovery.js';
+
 type UseInteractionsContext = {
   agentId: string;
   /** Read the current agent id at submit time (bootstrap may arrive late). */
@@ -24,6 +26,7 @@ type UseInteractionsContext = {
    * the 0.3.1 Responses/AG-UI fallback callbacks.
    */
   interactionV1Enabled: boolean;
+  reloadHistory: (sessionId: string) => void;
   onAcceptedInteraction?: (interaction: Interaction) => void;
   /** 0.3.1 fallback: official `mcp_approval_response` submission. */
   legacyResponsesApproval?: (
@@ -84,6 +87,14 @@ export function useInteractions(ctx: UseInteractionsContext) {
   }, [version, ctx.currentSessionId]);
 
   const { currentSessionId, interactionV1Enabled, onAcceptedInteraction } = ctx;
+  const requestAuthorization = ctx.api.mcpAuthorization;
+  const reloadHistory = ctx.reloadHistory;
+  useEffect(() => {
+    if (currentSessionId && requestAuthorization) {
+      return observeMcpConnections(sharedInteractionStore, currentSessionId, requestAuthorization, reloadHistory);
+    }
+  }, [ctx.agentId, currentSessionId, requestAuthorization, reloadHistory]);
+
   const followedAuthorization = useRef(new Set<string>());
   useEffect(() => {
     for (const interaction of records) {

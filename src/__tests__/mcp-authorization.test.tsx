@@ -1,3 +1,5 @@
+import { observeMcpConnections } from '../core/mcp-authorization/recovery.js';
+import { authorizationInteraction } from '../core/mcp-authorization/normalize.js';
 import { describe, it, expect, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -89,4 +91,29 @@ describe('MCP authorization extension', () => {
     expect(result).toEqual(snapshot);
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ WaitId: 'wait', ExpectedRevision: 2, AgentId: 'agent', SessionId: 'session' });
   });
+});
+
+it('recovers a hidden OAuth wait on the original session after the runtime disconnects', async () => {
+  vi.useFakeTimers();
+  const store = new InteractionStore();
+  const reload = vi.fn();
+  const request = vi.fn()
+    .mockRejectedValueOnce(new Error('Pod restarting'))
+    .mockResolvedValue({ ...snapshot, status: 'resumed', revision: 4 });
+  const stop = observeMcpConnections(store, 'session', request, reload);
+  try {
+    store.upsert(authorizationInteraction(snapshot, 'session')!);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(request).not.toHaveBeenCalled();
+    store.upsert(authorizationInteraction({ ...snapshot, status: 'credential_ready', revision: 3 }, 'session')!);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(request).toHaveBeenLastCalledWith('GetMcpAuthorizationWait', 'wait', undefined, 'session');
+    expect(store.get('session', 'wait')?.status).toBe('resolved');
+    expect(reload).toHaveBeenCalledExactlyOnceWith('session');
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
 });
