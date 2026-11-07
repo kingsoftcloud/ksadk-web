@@ -71,6 +71,7 @@ it.each(['credential_ready', 'connecting', 'resumed'])(
     useStreamingStore.getState().updateActivity({ sessionId: 's', runId: 'agui-wire-run',
       source: 'run', status: 'running', phase: '生成回复内容' });
     const auth = authorizationInteraction({ schema: MCP_AUTHORIZATION_CAPABILITY.schema,
+      capability_digest: MCP_AUTHORIZATION_CAPABILITY.digest, scopes: [], config_id: 'cloud', deadline: 100, requires_resume: true,
       wait_id: 'oauth', run_id: 'persisted-kernel-run', revision: 2, status, allowed_actions: [] }, 's')!;
     actions.followAcceptedInteraction(auth);
     expect(subscribe).not.toHaveBeenCalled();
@@ -86,6 +87,7 @@ it.each(['ended', 'restore', 'ordinary-input'])(
     useStreamingStore.getState().updateActivity({ sessionId: 's', runId: 'agui-wire-run',
       source: condition === 'restore' ? 'restore' : 'run', status: 'waiting' });
     const auth = authorizationInteraction({ schema: MCP_AUTHORIZATION_CAPABILITY.schema,
+      capability_digest: MCP_AUTHORIZATION_CAPABILITY.digest, scopes: [], config_id: 'cloud', deadline: 100, requires_resume: true,
       wait_id: 'oauth', run_id: 'persisted-kernel-run', revision: 2,
       status: 'credential_ready', allowed_actions: [] }, 's')!;
     actions.followAcceptedInteraction(condition === 'ordinary-input' ? { ...auth, extensions: {} } : auth);

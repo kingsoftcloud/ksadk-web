@@ -23,6 +23,7 @@ describe('minimal trailing run feedback', () => {
   it('does not describe internal credential reuse as waiting for the user', () => {
     const auth = authorizationInteraction({ schema: MCP_AUTHORIZATION_CAPABILITY.schema,
       capability_digest: MCP_AUTHORIZATION_CAPABILITY.digest, wait_id: 'wait', run_id: 'current',
+      config_id: 'cloud', deadline: 100, requires_resume: true, scopes: [],
       revision: 2, status: 'credential_ready', allowed_actions: ['query'] }, 'session')!;
     const waiting = { ...activity, phase: '等待人工确认' };
     expect(label({ activity: waiting, interactions: [auth] })).toBe('正在处理…');

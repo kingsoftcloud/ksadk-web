@@ -3,7 +3,7 @@ import { ExternalLink, ShieldCheck } from 'lucide-react';
 import { Button } from '../ui/button.js';
 import type { McpAuthorizationAction, McpAuthorizationRequest, McpAuthorizationSnapshot } from '../../core/mcp-authorization/types.js';
 import { MCP_AUTHORIZATION_CAPABILITY } from '../../core/mcp-authorization/contract.js';
-import { authorizationInteraction } from '../../core/mcp-authorization/normalize.js';
+import { authorizationInteraction, isMcpAuthorizationSnapshot } from '../../core/mcp-authorization/normalize.js';
 import { sharedInteractionStore } from '../../core/interaction/index.js';
 const labels: Record<string, string> = {
   preparing: '正在保存任务等待点', awaiting_authorization: '等待你授权 MCP 服务',
@@ -36,15 +36,28 @@ export function authorizationErrorMessage(value: unknown): string {
   }
   return '操作未确认，请查询最新状态后重试。';
 }
+const upgradeMessage = '当前客户端或服务端不支持此授权协议，请升级后继续。';
+
 export function McpAuthorizationCard({ snapshot, sessionId, request }: {
+  snapshot: unknown; sessionId: string; request?: McpAuthorizationRequest;
+}) {
+  if (!isMcpAuthorizationSnapshot(snapshot)) {
+    return <section data-testid="mcp-authorization-card" aria-label="MCP 服务授权" role="alert"
+      className="rounded-2xl border px-4 py-5 text-center text-sm">{upgradeMessage}</section>;
+  }
+  return <AuthorizationWait snapshot={snapshot} sessionId={sessionId} request={request} />;
+}
+
+function AuthorizationWait({ snapshot, sessionId, request }: {
   snapshot: McpAuthorizationSnapshot; sessionId: string; request?: McpAuthorizationRequest;
 }) {
   const [current, setCurrent] = useState(snapshot);
   const [error, setError] = useState('');
   const [queryFailed, setQueryFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const supported = snapshot.capability_digest === MCP_AUTHORIZATION_CAPABILITY.digest && Boolean(request);
+  const supported = current.capability_digest === MCP_AUTHORIZATION_CAPABILITY.digest && Boolean(request);
   const accept = useCallback((value: McpAuthorizationSnapshot) => {
+    if (!isMcpAuthorizationSnapshot(value)) throw new Error(upgradeMessage);
     if (value.wait_id !== snapshot.wait_id || value.run_id !== snapshot.run_id) throw new Error('授权任务不匹配');
     setCurrent(previous => value.revision >= previous.revision ? value : previous);
     const interaction = authorizationInteraction(value, sessionId, snapshot.run_id);
@@ -76,7 +89,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
     return () => { disposed = true; clearInterval(timer); window.removeEventListener('focus', query); };
   }, [supported, request, snapshot.wait_id, sessionId, accept]);
   const act = async (action: McpAuthorizationAction) => {
-    if (!request || busy) return;
+    if (!supported || !request || busy) return;
     // Open synchronously in the click gesture; do not infer consent from close.
     const opening = action === 'OpenMcpAuthorization' || action === 'RetryMcpAuthorization';
     const popup = opening ? window.open('about:blank', '_blank') : null;
@@ -86,6 +99,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
       const result = await request(action, current.wait_id, current.revision, sessionId);
       accept(result);
       setQueryFailed(false);
+      if (result.capability_digest !== MCP_AUTHORIZATION_CAPABILITY.digest) { popup?.close(); return; }
       if (opening && result.authorization_url) {
         const url = new URL(result.authorization_url);
         if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) throw new Error('授权地址不受支持');
@@ -110,7 +124,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
           {current.scopes.map(scope => <span key={scope} className="max-w-full break-all rounded-md bg-[var(--ksadk-interaction-muted-background,hsl(var(--muted)))] px-2 py-0.5">{scope}</span>)}
         </div>}
         {current.error && <p className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">原因：{authorizationErrorMessage(current.error)}</p>}
-        {!supported && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">当前客户端或服务端不支持此授权协议，请升级后继续。</p>}
+        {!supported && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">{upgradeMessage}</p>}
         {(error || queryFailed) && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">{error || '状态暂时无法确认，请稍后查询。'}</p>}
         <div className="mt-1 flex w-full flex-wrap items-center justify-center gap-2">
           {current.allowed_actions.includes('open') && <Button type="button" size="sm" disabled={!supported || busy} onClick={() => void act('OpenMcpAuthorization')}>

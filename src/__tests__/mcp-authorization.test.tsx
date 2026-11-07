@@ -82,6 +82,22 @@ describe('MCP authorization extension', () => {
     expect(render('old')).toContain('当前客户端或服务端不支持');
     expect(request).not.toHaveBeenCalled();
   });
+  it.each([
+    { scopes: undefined }, { scopes: [42] }, { allowed_actions: null },
+    { display_name: { broken: true } }, { capability_digest: 'next-version', scopes: undefined },
+  ])('renders a bound but incomplete event read-only without losing the wait', fields => {
+    const partial = { ...snapshot, ...fields };
+    const request = vi.fn();
+    const interaction = interactionFromSessionEvent({ ...frame, payload: partial })!;
+    expect(interaction.interactionId).toBe(snapshot.wait_id);
+    expect(interaction.runId).toBe(snapshot.run_id);
+    for (const value of [partial, interaction.extensions.mcpAuthorization]) {
+      const html = renderToStaticMarkup(createElement(McpAuthorizationCard, { snapshot: value, sessionId: 'session', request }));
+      expect(html).toContain('请升级后继续');
+      expect(html).not.toContain('<button');
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
   it('keeps queue navigation and OAuth cancellation separate with multiple pending cards', () => {
     const wait = interactionFromSessionEvent(frame, 'session')!;
     const approval = { ...wait, interactionId: 'other', kind: 'approval' as const, extensions: {} };
