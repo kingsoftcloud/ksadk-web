@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { MCP_AUTHORIZATION_CAPABILITY as capability } from '../core/mcp-authorization/contract.js';
 import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
 import { InteractionStore } from '../core/interaction/store.js';
+import { InteractionTray } from '../components/chat/InteractionTray.js';
 import { McpAuthorizationCard, authorizationErrorMessage } from '../components/chat/McpAuthorizationCard.js';
 import { KernelRunEventTranslator } from '../core/stream/kernel-events.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
@@ -80,6 +81,17 @@ describe('MCP authorization extension', () => {
     expect(render(capability.digest)).toContain('打开授权');
     expect(render('old')).toContain('当前客户端或服务端不支持');
     expect(request).not.toHaveBeenCalled();
+  });
+  it('keeps queue navigation and OAuth cancellation separate with multiple pending cards', () => {
+    const wait = interactionFromSessionEvent(frame, 'session')!;
+    const approval = { ...wait, interactionId: 'other', kind: 'approval' as const, extensions: {} };
+    const render = (activeIndex: number) => renderToStaticMarkup(createElement(InteractionTray, {
+      interactions: [wait, approval], activeIndex, onSelectIndex: vi.fn(), onRespond: vi.fn(), mcpAuthorization: vi.fn(),
+    }));
+    expect(render(0)).toContain('interaction-tray-next');
+    expect(render(0)).toContain('打开授权');
+    expect(render(0)).not.toContain('data-testid="interaction-cancel"');
+    expect(render(1)).toContain('interaction-tray-prev');
   });
   it('rejects a snapshot bound to another run', () => {
     expect(interactionFromSessionEvent({ ...frame, payload: { ...snapshot, run_id: 'other' } })).toBeNull();

@@ -23,6 +23,7 @@ const reasons: Record<string, string> = {
   BUSINESS_PERMISSION_DENIED: '当前账号没有执行该业务操作的权限。',
   ACCOUNT_AUTHORIZATION_DENIED: 'IAM 拒绝了当前账号的授权，请检查账号权限。',
   AUTHORIZATION_DENIED: '你已拒绝授权，可以重新授权或取消任务。',
+  AUTHORIZATION_ALREADY_OPEN: '请返回已打开的授权窗口继续。',
   INVALID_BROWSER_BINDING: '授权窗口已失效，请从原对话重新打开。',
   MCP_OAUTH_ADMISSION_CLOSED: '平台暂时停止接受新授权，请稍后重试。',
 };
@@ -94,8 +95,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
     } catch (failure) { popup?.close(); setError(authorizationErrorMessage(failure)); }
     finally { setBusy(false); }
   };
-  return <div className="custom-scrollbar mx-auto mb-2 min-h-0 max-h-[min(60dvh,36rem)] w-full max-w-[64rem] overflow-y-auto overscroll-contain px-3 sm:px-4">
-    <section data-testid="mcp-authorization-card" aria-label="MCP 服务授权" aria-live="polite"
+  return <section data-testid="mcp-authorization-card" aria-label="MCP 服务授权" aria-live="polite"
       className="rounded-2xl border border-[var(--ksadk-interaction-border,hsl(var(--border)))] bg-[var(--ksadk-interaction-background,hsl(var(--card)))] px-4 py-5 text-center text-sm text-[var(--ksadk-interaction-foreground,hsl(var(--foreground)))] shadow-sm sm:px-6 sm:py-6">
       <div className="mx-auto flex min-w-0 max-w-xl flex-col items-center gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--ksadk-interaction-muted-background,hsl(var(--muted)))]">
@@ -122,6 +122,5 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
           {current.allowed_actions.includes('cancel') && <Button type="button" size="sm" variant="ghost" disabled={!supported || busy} onClick={() => void act('CancelMcpAuthorizationWait')}>取消任务</Button>}
         </div>
       </div>
-    </section>
-  </div>;
+    </section>;
 }

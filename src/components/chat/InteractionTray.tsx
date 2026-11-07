@@ -150,9 +150,7 @@ export function InteractionTray({
 
   const active = interactions[Math.min(activeIndex, Math.max(interactions.length - 1, 0))];
   if (!active) return null;
-  if (active.extensions.mcpAuthorization) return <McpAuthorizationCard
-    key={active.interactionId} sessionId={active.sessionId}
-    snapshot={active.extensions.mcpAuthorization as McpAuthorizationSnapshot} request={mcpAuthorization} />;
+  const oauth = active.extensions.mcpAuthorization as McpAuthorizationSnapshot | undefined;
 
   const expired = isExpired(active);
   const submitError = readSubmitError(active);
@@ -222,9 +220,9 @@ export function InteractionTray({
     >
       <div
         data-slot="interaction-card"
-        className="rounded-2xl border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-background)] px-3 py-3 text-[var(--ksadk-interaction-foreground)] shadow-sm"
+        className={oauth ? undefined : "rounded-2xl border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-background)] px-3 py-3 text-[var(--ksadk-interaction-foreground)] shadow-sm"}
       >
-        <div className="flex items-center justify-between gap-2 text-xs text-[var(--ksadk-interaction-muted)]">
+        {(!oauth || interactions.length > 1) && <div className="flex items-center justify-between gap-2 text-xs text-[var(--ksadk-interaction-muted)]">
           <div className="flex min-w-0 items-center gap-1.5">
             <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" strokeWidth={1.7} aria-hidden="true" />
             <span data-testid="interaction-tray-title">
@@ -264,7 +262,7 @@ export function InteractionTray({
               </button>
               </>
             ) : null}
-            <button
+            {!oauth && <button
               type="button"
               data-testid="interaction-cancel"
               disabled={disabled}
@@ -273,10 +271,12 @@ export function InteractionTray({
               aria-label="取消本次确认"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            </button>}
           </div>
-        </div>
+        </div>}
 
+        {oauth ? <McpAuthorizationCard key={active.interactionId} sessionId={active.sessionId}
+          snapshot={oauth} request={mcpAuthorization} /> : <>
         {active.message !== summary.command ? (
           <p className="mt-2 whitespace-pre-wrap break-words text-sm font-medium leading-5 text-[var(--ksadk-interaction-foreground)]" data-testid="interaction-tray-message">
             {active.message}
@@ -452,6 +452,7 @@ export function InteractionTray({
               : '正在发送，请稍候…'}
           </p>
         ) : null}
+        </>}
       </div>
     </div>
   );
