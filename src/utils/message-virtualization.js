@@ -36,7 +36,7 @@ export function calculateVirtualMessageWindow({
   const heights = items.map((item, index) => {
     const key = getItemKey(item, index);
     const measured = Number(measuredHeights.get(key));
-    return Number.isFinite(measured) && measured > 0 ? measured : safeDefaultItemHeight;
+    return Number.isFinite(measured) && measured >= 0 ? measured : safeDefaultItemHeight;
   });
 
   const offsets = new Array(items.length);
@@ -75,7 +75,7 @@ export function calculateVirtualMessageWindow({
         index: absoluteIndex,
         item,
         top: offsets[absoluteIndex] || 0,
-        height: heights[absoluteIndex] || safeDefaultItemHeight,
+        height: heights[absoluteIndex] ?? safeDefaultItemHeight,
       };
     }),
   };

@@ -26,13 +26,14 @@ export function interactionFromAguiInterrupt(
   request: AguiInterruptRequest,
 ): Interaction | null {
   if (!request.interruptId || !request.sessionId) return null;
+  const isInput = request.requestSchema != null;
   return normalizeInteraction({
     interactionId: request.interruptId,
     sessionId: request.sessionId,
     runId: request.runId ?? null,
-    kind: request.requestSchema ? 'structured_input' : 'approval',
-    title: request.name ? `确认：${request.name}` : '人工确认',
-    message: request.message || '本次运行需要人工确认后才能继续。',
+    kind: isInput ? 'structured_input' : 'approval',
+    title: request.name ? `${isInput ? '补充信息' : '确认'}：${request.name}` : isInput ? '补充信息' : '人工确认',
+    message: request.message || (isInput ? '请填写后提交，Agent 将继续当前任务。' : '本次运行需要人工确认后才能继续。'),
     requestSchema: request.requestSchema ?? null,
     status: 'pending',
     revision: 1,

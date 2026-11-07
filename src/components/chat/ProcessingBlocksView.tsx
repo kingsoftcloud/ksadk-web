@@ -158,7 +158,7 @@ function ToolRow({
       : inputOutcome === 'expired'
         ? '已过期'
     : approvalStatus === 'pending'
-      ? '等待确认'
+      ? interactionRecord?.kind === 'structured_input' ? '等待填写' : '等待确认'
       : approvalStatus === 'rejected'
         ? '已拒绝'
         : approvalStatus === 'cancelled'
@@ -199,7 +199,7 @@ function ToolRow({
         {approvalRequestId && approvalStatus === 'pending' ? (
           <div data-slot="tool-approval-status" className="flex items-center gap-1.5 font-sans text-xs text-slate-500 dark:text-slate-400">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
-            请在输入区确认面板中操作。
+            {interactionRecord?.kind === 'structured_input' ? '请在输入区填写后提交。' : '请在输入区确认面板中操作。'}
           </div>
         ) : null}
         {approvalRequestId && approvalStatus && approvalStatus !== 'pending' && (

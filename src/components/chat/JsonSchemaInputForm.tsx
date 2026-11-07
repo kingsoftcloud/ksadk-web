@@ -83,6 +83,29 @@ function JsonEditor({ value, onChange, path, onInvalid, disabled, label }: Field
   </>;
 }
 
+function GenericInput(props: FieldProps) {
+  const [mode, setMode] = useState<'text' | 'json'>(() => typeof props.value === 'string' ? 'text' : 'json');
+  return <div className="space-y-2" data-testid="interaction-generic-input">
+    <label className="flex items-center gap-2 text-xs"><span className="shrink-0">答案格式</span>
+      <select aria-label="答案格式" disabled={props.disabled} value={mode}
+        className={controlClass} onChange={event => {
+          const next = event.target.value === 'text' ? 'text' : 'json';
+          props.onInvalid(props.path, false);
+          if (next === 'text' && typeof props.value !== 'string') {
+            props.onChange(props.value === undefined ? '' : pretty(props.value));
+          }
+          setMode(next);
+        }}>
+        <option value="text">文本</option><option value="json">JSON</option>
+      </select>
+    </label>
+    {mode === 'text' ? <textarea aria-label={props.label} data-testid="interaction-field-value"
+      className={controlClass} disabled={props.disabled} value={typeof props.value === 'string' ? props.value : ''}
+      rows={3} onChange={event => props.onChange(event.target.value)} /> : <JsonEditor {...props} />}
+    <p className="text-xs text-muted-foreground">文本按原样提交；对象、数组、数字或空值请使用 JSON。</p>
+  </div>;
+}
+
 function SchemaField(props: FieldProps) {
   const { value, onChange, path, disabled, label, onInvalid, depth } = props;
   const original = props.schema;
@@ -177,7 +200,8 @@ export function JsonSchemaInputSnapshot({ schema, value }: { schema: Schema; val
 export function JsonSchemaInputForm({ schema, disabled, onSubmit, onCancel }: {
   schema: Schema; disabled: boolean; onSubmit: (value: JsonValue) => void; onCancel: () => void;
 }) {
-  const [value, setValue] = useState(() => initialValue(schema));
+  const generic = Object.keys(schema).length === 0;
+  const [value, setValue] = useState(() => generic ? '' : initialValue(schema));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
   const composing = useImeComposition();
@@ -194,8 +218,10 @@ export function JsonSchemaInputForm({ schema, disabled, onSubmit, onCancel }: {
       if (!result.valid) { setError(result.issues.join('；')); return; }
       setError(''); onSubmit(jsonValue(value));
     }}>
-    <SchemaField schema={schema} rootSchema={schema} value={value} path="" label={typeof schema.title === 'string' ? schema.title : '请填写信息'}
+    {generic ? <GenericInput schema={schema} value={value} path="" label="请填写信息"
       disabled={disabled} depth={0} onChange={setValue} onInvalid={onInvalid} />
+      : <SchemaField schema={schema} rootSchema={schema} value={value} path="" label={typeof schema.title === 'string' ? schema.title : '请填写信息'}
+        disabled={disabled} depth={0} onChange={setValue} onInvalid={onInvalid} />}
     {error ? <p role="alert" className="text-xs text-rose-600">{error}</p> : null}
     <div className="flex gap-2">
       <button className="rounded-md bg-[var(--ksadk-interaction-primary-background)] px-3 py-1.5 text-xs text-[var(--ksadk-interaction-primary-foreground)] disabled:opacity-50"

@@ -2,6 +2,9 @@ import type { A2UIClientEventMessage } from '../../core/a2ui/catalog.js';
 import { A2UIActivityMessage } from './A2UIActivityMessage';
 import type { A2uiPresentation } from '../../core/interaction/types.js';
 import { jsonValue, type JsonValue } from '../../types/json-value.js';
+import { useState } from 'react';
+import { a2uiApprovalResponse, type A2uiApprovalAction, type A2uiApprovalBinding } from '../../core/interaction/a2ui-approval.js';
+import { legacyA2uiAnswer } from '../../core/interaction/legacy-a2ui.js';
 
 /**
  * Renders a validated A2UI v0.9.1 interaction surface. Only reached when
@@ -14,12 +17,21 @@ export function InteractionA2uiSurface({
   disabled,
   onSubmit,
   onCancel,
+  approvalBindings,
+  onDecision,
+  onRenderError,
+  legacyInput,
 }: {
   a2ui: A2uiPresentation;
   disabled: boolean;
   onSubmit: (payload: JsonValue) => void;
   onCancel: () => void;
+  approvalBindings?: readonly A2uiApprovalBinding[];
+  onDecision?: (action: A2uiApprovalAction) => void;
+  onRenderError?: () => void;
+  legacyInput?: boolean;
 }) {
+  const [actionError, setActionError] = useState('');
   const surfaces = new Set<string>();
   for (const message of a2ui.messages) {
     const create = message.createSurface as { surfaceId?: string } | undefined;
@@ -35,15 +47,27 @@ export function InteractionA2uiSurface({
         surfaceId={surfaceId}
         messages={a2ui.messages}
         disabled={disabled}
+        onRenderError={onRenderError}
         onAction={disabled ? undefined : (message: A2UIClientEventMessage) => {
+          if (approvalBindings) {
+            const decision = a2uiApprovalResponse(approvalBindings, message);
+            if (!decision) {
+              setActionError('该按钮未声明有效审批动作，请使用批准或拒绝按钮。');
+              return;
+            }
+            setActionError('');
+            onDecision?.(decision.action);
+            return;
+          }
           const context = (message.userAction?.context || {}) as Record<string, unknown>;
           if (message.userAction?.name === 'cancel') { onCancel(); return; }
           const payload = Object.prototype.hasOwnProperty.call(context, 'payload')
             ? context.payload : context;
-          onSubmit(jsonValue(payload));
+          onSubmit(jsonValue(legacyInput ? legacyA2uiAnswer(a2ui.messages, message) : payload));
         }}
       />)}
-      {disabled ? null : (
+      {actionError ? <p role="alert">{actionError}</p> : null}
+      {disabled || approvalBindings ? null : (
         <button
           type="button"
           data-testid="interaction-a2ui-cancel"
