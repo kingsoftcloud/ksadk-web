@@ -40,6 +40,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
 }) {
   const [current, setCurrent] = useState(snapshot);
   const [error, setError] = useState('');
+  const [queryFailed, setQueryFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const supported = snapshot.capability_digest === MCP_AUTHORIZATION_CAPABILITY.digest && Boolean(request);
   const accept = useCallback((value: McpAuthorizationSnapshot) => {
@@ -52,9 +53,21 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
   useEffect(() => {
     if (!supported || !request) return;
     let disposed = false;
+    let querying = false;
     const query = async () => {
-      try { const result = await request('GetMcpAuthorizationWait', snapshot.wait_id, undefined, sessionId); if (!disposed) accept(result); }
-      catch { if (!disposed) setError('状态暂时无法确认，请稍后查询。'); }
+      if (querying) return;
+      querying = true;
+      try {
+        const result = await request('GetMcpAuthorizationWait', snapshot.wait_id, undefined, sessionId);
+        if (!disposed) {
+          accept(result);
+          setQueryFailed(false);
+        }
+      } catch {
+        if (!disposed) setQueryFailed(true);
+      } finally {
+        querying = false;
+      }
     };
     void query();
     const timer = setInterval(() => { void query(); }, 3000);
@@ -71,6 +84,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
     try {
       const result = await request(action, current.wait_id, current.revision, sessionId);
       accept(result);
+      setQueryFailed(false);
       if (opening && result.authorization_url) {
         const url = new URL(result.authorization_url);
         if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) throw new Error('授权地址不受支持');
@@ -97,7 +111,7 @@ export function McpAuthorizationCard({ snapshot, sessionId, request }: {
         </div>}
         {current.error && <p className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">原因：{authorizationErrorMessage(current.error)}</p>}
         {!supported && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">当前客户端或服务端不支持此授权协议，请升级后继续。</p>}
-        {error && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">{error}</p>}
+        {(error || queryFailed) && <p role="alert" className="w-full break-words leading-5 text-rose-600 dark:text-rose-400">{error || '状态暂时无法确认，请稍后查询。'}</p>}
         <div className="mt-1 flex w-full flex-wrap items-center justify-center gap-2">
           {current.allowed_actions.includes('open') && <Button type="button" size="sm" disabled={!supported || busy} onClick={() => void act('OpenMcpAuthorization')}>
             <ExternalLink aria-hidden="true" />打开授权
