@@ -28,4 +28,3 @@ export function legacyA2uiAnswer(messages: Array<Record<string, unknown>>, actio
   return catalogId === 'a2ui.org/catalogs/basic/v1.0' && component === 'Form'
     ? { fields: payload, modified_data: payload, retry: true } : payload;
 }
-
