@@ -1,0 +1,131 @@
+import { observeMcpConnections } from '../core/mcp-authorization/recovery.js';
+import { authorizationInteraction } from '../core/mcp-authorization/normalize.js';
+import { describe, it, expect, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { MCP_AUTHORIZATION_CAPABILITY as capability } from '../core/mcp-authorization/contract.js';
+import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
+import { InteractionStore } from '../core/interaction/store.js';
+import { InteractionTray } from '../components/chat/InteractionTray.js';
+import { McpAuthorizationCard, authorizationErrorMessage } from '../components/chat/McpAuthorizationCard.js';
+import { KernelRunEventTranslator } from '../core/stream/kernel-events.js';
+import { ApiFacadeImpl } from '../core/api/facade.js';
+import { isUserPendingInteraction } from '../core/interaction/pending.js';
+const snapshot = { schema: 'mcp.authorization/v1' as const, capability_digest: capability.digest,
+  wait_id: 'wait', run_id: 'run', config_id: 'service', revision: 2, status: 'awaiting_authorization',
+  deadline: 100, scopes: ['mcp:read'], allowed_actions: ['open', 'cancel', 'query'], requires_resume: true };
+const frame = { family: 'control', session_id: 'session', run_id: 'run', seq: 10, event_type: 'mcp.authorization.requested', payload: snapshot };
+describe('MCP authorization extension', () => {
+  it('keeps credential reuse facts without creating a user task, live or replayed', () => {
+    const store = new InteractionStore();
+    for (const [index, status] of ['credential_ready', 'connecting', 'resumed'].entries()) {
+      const event = { ...frame, payload: { ...snapshot, revision: index + 2, status } };
+      for (const value of [event, { Content: { session_event: event } }]) {
+        store.upsert(interactionFromSessionEvent(value)!);
+        expect(store.listAll('session')).toHaveLength(1);
+        expect(store.listAll('session').filter(isUserPendingInteraction)).toEqual([]);
+      }
+    }
+    expect(store.get('session', 'wait')?.status).toBe('resolved');
+  });
+  it('shows consent and actionable failures after an automatic connection attempt', () => {
+    const store = new InteractionStore();
+    for (const [index, status] of ['credential_ready', 'connection_failed', 'awaiting_authorization', 'authorization_failed'].entries()) {
+      store.upsert(interactionFromSessionEvent({ ...frame, payload: { ...snapshot, revision: index + 2, status } })!);
+      expect(store.listAll('session').filter(isUserPendingInteraction)).toHaveLength(index ? 1 : 0);
+    }
+    const initial = interactionFromSessionEvent(frame)!;
+    expect(isUserPendingInteraction(initial)).toBe(true);
+    expect(isUserPendingInteraction({ ...initial, extensions: {} })).toBe(true);
+    for (const extra of [{ error: 'CONNECTION_FAILED' }, { capability_digest: 'unsupported' }]) {
+      expect(isUserPendingInteraction(interactionFromSessionEvent({ ...frame,
+        payload: { ...snapshot, status: 'credential_ready', ...extra } })!)).toBe(true);
+    }
+  });
+  it('shows the published service name and safe configuration diagnostics', () => {
+    const html = renderToStaticMarkup(createElement(McpAuthorizationCard, { sessionId: 'session', snapshot: { ...snapshot,
+      config_id: 'opaque-version-ref', display_name: 'cloud_resources', error: 'MCP_CLIENT_NOT_FOUND' } }));
+    expect(html).toContain('cloud_resources');
+    expect(html).not.toContain('opaque-version-ref');
+    expect(html).toContain('重新发布配置');
+    expect(authorizationErrorMessage(new Error('OAUTH_CLIENT_INCOMPATIBLE'))).toContain('客户端登记');
+    expect(authorizationErrorMessage(new Error('secret-provider-response'))).not.toContain('secret-provider-response');
+  });
+  it('fingerprints its independent contract', () => {
+    const contract = JSON.parse(readFileSync(new URL('../core/mcp-authorization/contract.json', import.meta.url), 'utf8'));
+    expect(createHash('sha256').update(JSON.stringify(contract, Object.keys(contract).sort())).digest('hex')).toBe(capability.digest);
+  });
+  it('preserves original run for history, raw envelope and flattened Kernel stream', () => {
+    const flat = { ...snapshot, ...frame, payload: undefined };
+    const translator = new KernelRunEventTranslator('session');
+    for (const value of [frame, { Content: { session_event: frame } }, translator.translate(flat)]) {
+      const result = interactionFromSessionEvent(value, 'session')!;
+      expect(result.interactionId).toBe('wait'); expect(result.runId).toBe('run');
+      expect(result.kind).toBe('custom'); expect(result.status).toBe('pending');
+    }
+  });
+  it('does not let duplicated or older events resurrect a terminal wait', () => {
+    const store = new InteractionStore();
+    store.upsert(interactionFromSessionEvent(frame)!);
+    store.upsert(interactionFromSessionEvent({ ...frame, payload: { ...snapshot, revision: 5, status: 'resumed' } })!);
+    store.upsert(interactionFromSessionEvent(frame)!);
+    expect(store.get('session', 'wait')?.status).toBe('resolved');
+  });
+  it('renders authorization as its own action and fails closed for missing capability', () => {
+    const request = vi.fn();
+    const render = (digest: string) => renderToStaticMarkup(createElement(McpAuthorizationCard, {
+      sessionId: 'session', request, snapshot: { ...snapshot, capability_digest: digest },
+    }));
+    expect(render(capability.digest)).toContain('打开授权');
+    expect(render('old')).toContain('当前客户端或服务端不支持');
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('keeps queue navigation and OAuth cancellation separate with multiple pending cards', () => {
+    const wait = interactionFromSessionEvent(frame, 'session')!;
+    const approval = { ...wait, interactionId: 'other', kind: 'approval' as const, extensions: {} };
+    const render = (activeIndex: number) => renderToStaticMarkup(createElement(InteractionTray, {
+      interactions: [wait, approval], activeIndex, onSelectIndex: vi.fn(), onRespond: vi.fn(), mcpAuthorization: vi.fn(),
+    }));
+    expect(render(0)).toContain('interaction-tray-next');
+    expect(render(0)).toContain('打开授权');
+    expect(render(0)).not.toContain('data-testid="interaction-cancel"');
+    expect(render(1)).toContain('interaction-tray-prev');
+  });
+  it('rejects a snapshot bound to another run', () => {
+    expect(interactionFromSessionEvent({ ...frame, payload: { ...snapshot, run_id: 'other' } })).toBeNull();
+  });
+  it('uses the instance authenticated fetch and preserves raw JSON', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ Code: 0, Data: snapshot }), { headers: { 'Content-Type': 'application/json' } }));
+    const api = new ApiFacadeImpl({ fetch: fetcher, agentId: 'agent' });
+    const result = await api.mcpAuthorization('CancelMcpAuthorizationWait', 'wait', 2, 'session');
+    expect(result).toEqual(snapshot);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ WaitId: 'wait', ExpectedRevision: 2, AgentId: 'agent', SessionId: 'session' });
+  });
+});
+
+it('recovers a hidden OAuth wait on the original session after the runtime disconnects', async () => {
+  vi.useFakeTimers();
+  const store = new InteractionStore();
+  const reload = vi.fn();
+  const request = vi.fn()
+    .mockRejectedValueOnce(new Error('Pod restarting'))
+    .mockResolvedValue({ ...snapshot, status: 'resumed', revision: 4 });
+  const stop = observeMcpConnections(store, 'session', request, reload);
+  try {
+    store.upsert(authorizationInteraction(snapshot, 'session')!);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(request).not.toHaveBeenCalled();
+    store.upsert(authorizationInteraction({ ...snapshot, status: 'credential_ready', revision: 3 }, 'session')!);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(request).toHaveBeenLastCalledWith('GetMcpAuthorizationWait', 'wait', undefined, 'session');
+    expect(store.get('session', 'wait')?.status).toBe('resolved');
+    expect(reload).toHaveBeenCalledExactlyOnceWith('session');
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
+});

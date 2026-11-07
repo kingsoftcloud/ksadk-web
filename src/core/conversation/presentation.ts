@@ -120,10 +120,10 @@ function payloadString(item: ConversationItem, field: string): string | null {
   return typeof value === 'string' && value ? value : null;
 }
 
-function presentationKey(item: ConversationItem): string {
+function presentationKey(item: ConversationItem, scopeOverride?: string): string {
   if (item.kind === 'tool_call') {
     const callId = payloadString(item, 'callId');
-    if (callId) return `tool:${JSON.stringify([item.runId, item.nativeRef.scopeId || item.nativeRef.scope_id || '', callId])}`;
+    if (callId) return `tool:${JSON.stringify([item.runId, scopeOverride ?? (item.nativeRef.scopeId || item.nativeRef.scope_id || ''), callId])}`;
   }
   if (item.kind === 'approval') {
     const interactionId = payloadString(item, 'interactionId');
@@ -160,8 +160,31 @@ function projectFlatTimeline(items: ConversationItem[]): ConversationTimelineEnt
   const entries: ConversationTimelineEntry[] = [];
   const indices = new Map<string, number>();
   const a2uiOwners = new Map<string, Array<A2uiActivityOwner & { index: number }>>();
+  // A native ToolNode reports its result one graph scope below the model
+  // call. Prefer exact matches. Join across that edge only when unambiguous.
+  const calls = new Map<string, number>();
+  const exactResults = new Set<string>();
+  const childResults = new Map<string, number>();
+  const parentKey = (item: ConversationItem) => {
+    const parent = item.nativeRef.parentScopeId;
+    return item.nativeRef.framework === 'langgraph' && item.kind === 'tool_call'
+      && item.payload.sourceKind === 'tool_result' && item.payload.callId && typeof parent === 'string'
+      ? presentationKey(item, parent) : undefined;
+  };
   for (const item of items) {
-    const key = presentationKey(item);
+    if (item.nativeRef.framework === 'langgraph' && item.payload.sourceKind === 'tool_call') {
+      const key = presentationKey(item);
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+    }
+    if (item.kind === 'tool_call' && item.payload.sourceKind === 'tool_result') exactResults.add(presentationKey(item));
+    const parent = parentKey(item);
+    if (parent) childResults.set(parent, (childResults.get(parent) ?? 0) + 1);
+  }
+  for (const item of items) {
+    const exact = presentationKey(item);
+    const parent = parentKey(item);
+    const key = parent && !calls.has(exact) && !exactResults.has(parent) && calls.get(parent) === 1 && childResults.get(parent) === 1
+      ? parent : exact;
     const activity = item.kind === 'a2ui' ? {
       surfaceId: payloadString(item, 'surfaceId') || '', messages: [],
       ...(payloadString(item, 'interactionId') ? { interactionId: payloadString(item, 'interactionId')! } : {}),

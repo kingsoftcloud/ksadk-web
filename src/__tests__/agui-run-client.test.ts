@@ -112,10 +112,14 @@ describe('AguiRunClient', () => {
     expect(bodies[0].forwardedProps).toEqual({ ...options, injectA2UITool: true });
   });
 
-  it('projects the durable interaction cursor and keeps the original run identity', async () => {
+  it.each([
+    ['interaction', 'interaction.requested'],
+    ['control', 'mcp.authorization.requested'],
+    ['control', 'mcp.authorization.updated'],
+  ])('projects the durable %s/%s cursor and keeps the original run identity', async (family, eventType) => {
     const envelope = {
-      family: 'interaction', family_version: 1, session_id: 'session-kernel', seq: 19,
-      event_id: 'event-wait', event_type: 'interaction.requested', run_id: 'original-run',
+      family, family_version: 1, session_id: 'session-kernel', seq: 19,
+      event_id: 'event-wait', event_type: eventType, run_id: 'original-run',
       payload: { interaction_id: 'wait', kind: 'structured_input', revision: 1,
         request: { request_schema: { type: 'integer' } } },
     };
@@ -135,7 +139,7 @@ describe('AguiRunClient', () => {
     expect(result.status).toBe('interrupted');
     expect(result.pendingInterruptIds).toEqual(['wait']);
     expect(projected).toContainEqual({ type: 'stream_event', sessionId: 'session-kernel', event: {
-      EventId: 'event-wait', EventType: 'interaction.requested', SessionId: 'session-kernel',
+      EventId: 'event-wait', EventType: eventType, SessionId: 'session-kernel',
       InvocationId: 'original-run', SeqId: 19, Content: { session_event: envelope },
     } });
     expect(projected.filter(event => event.type === 'approval_requested')).toHaveLength(0);

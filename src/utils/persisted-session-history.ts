@@ -27,6 +27,37 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/** For display, a native ToolNode result belongs to the call in its parent graph.
+ * Leave sibling calls, calls owned by the child itself, and stored events intact. */
+function toolHistoryFrames(records: PersistedSessionEventRecord[]): Array<KernelSessionEventFrame | null> {
+  const frames = records.map(persistedRuntimeFrame);
+  const calls = new Map<string, KernelSessionEventFrame | null>();
+  const results = new Map<string, string>();
+  const key = (run: unknown, scope: unknown, id: unknown) => JSON.stringify([run, scope, id]);
+  for (const frame of frames) {
+    if (!frame || record(frame.source)?.framework !== 'langgraph'
+      || (frame.item_kind !== 'tool_call' && frame.item_kind !== 'tool_result')) continue;
+    const parts = record(frame.snapshot ?? frame.initial)?.parts;
+    if (!Array.isArray(parts)) continue;
+    const id = parts.map(record).find(part => part?.content_type === frame.item_kind)?.call_id;
+    if (typeof id !== 'string' || !id) continue;
+    if (frame.item_kind === 'tool_result') {
+      results.set(key(frame.run_id, frame.scope_id, frame.item_id), id);
+    } else {
+      const owner = key(frame.run_id, frame.scope_id, id);
+      if (!calls.has(owner)) calls.set(owner, frame);
+      else if (calls.get(owner)?.item_id !== frame.item_id) calls.set(owner, null);
+    }
+  }
+  return frames.map(frame => {
+    if (!frame || frame.item_kind !== 'tool_result' || !frame.parent_scope_id) return frame;
+    const id = results.get(key(frame.run_id, frame.scope_id, frame.item_id));
+    if (!id || calls.has(key(frame.run_id, frame.scope_id, id))) return frame;
+    const parent = calls.get(key(frame.run_id, frame.parent_scope_id, id));
+    return parent ? { ...frame, scope_id: parent.scope_id, parent_scope_id: parent.parent_scope_id } : frame;
+  });
+}
+
 function eventTimestamp(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     // RuntimeEvent/v2 timestamps are Unix seconds while the legacy message
@@ -350,8 +381,9 @@ export function rebuildPersistedSessionHistory(
     (left, right) => Number(left.SeqId || 0) - Number(right.SeqId || 0),
   );
   const startsAtSessionBeginning = Number(orderedRecords[0]?.SeqId || 0) <= 1;
-  for (const persisted of orderedRecords) {
-    const frame = persistedRuntimeFrame(persisted);
+  const historyFrames = toolHistoryFrames(orderedRecords);
+  for (const [index, persisted] of orderedRecords.entries()) {
+    const frame = historyFrames[index];
     if (!frame) continue;
     const runId = String(frame.run_id || '').trim();
     if (runId) {
@@ -395,8 +427,7 @@ export function rebuildPersistedSessionHistory(
   // descriptor item starts have been loaded. Newest-first pages commonly
   // begin inside a child scope, even when its terminal descriptor is present.
   const framesByRun = new Map<string, KernelSessionEventFrame[]>();
-  for (const persisted of orderedRecords) {
-    const frame = persistedRuntimeFrame(persisted);
+  for (const frame of historyFrames) {
     if (frame?.schema_version !== 2 || !frame.run_id) continue;
     const runId = String(frame.run_id);
     const frames = framesByRun.get(runId) || [];

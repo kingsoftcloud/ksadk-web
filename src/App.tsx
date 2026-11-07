@@ -283,6 +283,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     currentSessionId,
     api,
     interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
+    reloadHistory: loadSession,
     onAcceptedInteraction: followAcceptedInteraction,
     legacyResponsesApproval: (approvalRequestId, approve, previousResponseId) => {
       return respondToApprovalRef.current({ approvalRequestId, approve, previousResponseId });
@@ -535,6 +536,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
           thinkingEnabled={thinkingEnabled}
           runtimeCapabilityMatrix={uiCapabilities.RuntimeCapabilityMatrix}
           pendingInteractions={pendingInteractions}
+          mcpAuthorization={api.mcpAuthorization}
           onRespondInteraction={(input) => {
             void respondInteraction(input);
           }}

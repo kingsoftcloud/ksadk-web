@@ -5,6 +5,8 @@ import { ChatMessageList } from '../components/chat/ChatMessageList.js';
 import type { Message } from '../components/chat/types.js';
 import type { RunActivity } from '../stores/streaming.js';
 import { runProgressLabel } from '../utils/run-progress.js';
+import { authorizationInteraction } from '../core/mcp-authorization/normalize.js';
+import { MCP_AUTHORIZATION_CAPABILITY } from '../core/mcp-authorization/contract.js';
 
 const activity: RunActivity = { runId: 'current', source: 'run', status: 'running',
   phase: '等待会话输出', startedAt: 1, lastEventAt: 1, eventCount: 0 };
@@ -18,6 +20,17 @@ const label = (overrides: Partial<Parameters<typeof runProgressLabel>[0]> = {}) 
   runProgressLabel({ isStreaming: true, activity, messages, ...overrides });
 
 describe('minimal trailing run feedback', () => {
+  it('does not describe internal credential reuse as waiting for the user', () => {
+    const auth = authorizationInteraction({ schema: MCP_AUTHORIZATION_CAPABILITY.schema,
+      capability_digest: MCP_AUTHORIZATION_CAPABILITY.digest, wait_id: 'wait', run_id: 'current',
+      revision: 2, status: 'credential_ready', allowed_actions: ['query'] }, 'session')!;
+    const waiting = { ...activity, phase: '等待人工确认' };
+    expect(label({ activity: waiting, interactions: [auth] })).toBe('正在处理…');
+    // An actual approval/input interaction still wins over internal handoff.
+    expect(label({ activity: waiting, interactions: [auth, { ...auth, interactionId: 'approval', extensions: {} }] }))
+      .toBe('等待你的确认…');
+    expect(label({ activity: waiting, interactions: [{ ...auth, runId: 'other' }] })).toBe('等待你的确认…');
+  });
   it('keeps a quiet tool visible without a timer or synthetic progress', () => {
     expect(label()).toBe('正在等待工具返回…');
     expect(label({ activity: { ...activity, startedAt: 0, lastEventAt: 0 } })).toBe(label());

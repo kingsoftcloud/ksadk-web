@@ -8,6 +8,7 @@ import {
   EXECUTION_PERMISSION_LABELS,
   EXECUTION_PERMISSION_TRIGGERS,
   normalizeExecutionModes,
+  resolveExecutionMode,
   useExecutionPermissionStore,
 } from '@/stores/execution-permission.js';
 import type { ExecutionPermissionMode, ExecutionPolicyCapability } from '@/types/capabilities.js';
@@ -27,26 +28,23 @@ type ExecutionPermissionMenuProps = {
  * touch. The approval policy is fixed by the deployment and is not user-facing.
  */
 export function ExecutionPermissionMenu({ executionPolicy }: ExecutionPermissionMenuProps) {
-  const [open, setOpen] = useState(false);
+  const [openFor, setOpenFor] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const agentId = useBootstrapStore((state) => state.agentId);
   const byAgent = useExecutionPermissionStore((state) => state.byAgent);
-  const configure = useExecutionPermissionStore((state) => state.configure);
   const select = useExecutionPermissionStore((state) => state.select);
   const modes = useMemo(() => normalizeExecutionModes(executionPolicy), [executionPolicy]);
-  const mode = byAgent[agentId] ?? modes[0];
-
-  useEffect(() => {
-    if (agentId && modes.length > 0) configure(agentId, executionPolicy);
-  }, [agentId, configure, executionPolicy, modes.length]);
+  const mode = resolveExecutionMode(executionPolicy, byAgent[agentId]);
+  const menuKey = JSON.stringify([agentId, modes, executionPolicy?.DefaultMode]);
+  const open = openFor === menuKey;
 
   useEffect(() => {
     if (!open) return;
     const closeOnOutsidePress = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpenFor(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') setOpenFor(null);
     };
     document.addEventListener('mousedown', closeOnOutsidePress);
     document.addEventListener('keydown', closeOnEscape);
@@ -63,7 +61,7 @@ export function ExecutionPermissionMenu({ executionPolicy }: ExecutionPermission
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpenFor((current) => current === menuKey ? null : menuKey)}
         className={cn(
           'flex h-8 items-center gap-1.5 rounded-xl px-2.5 text-[13px] transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25',
           mode === 'danger-full-access'
@@ -100,7 +98,7 @@ export function ExecutionPermissionMenu({ executionPolicy }: ExecutionPermission
                 aria-checked={selected}
                 onClick={() => {
                   if (agentId) select(agentId, candidate);
-                  setOpen(false);
+                  setOpenFor(null);
                 }}
                 className={cn(
                   'flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors',

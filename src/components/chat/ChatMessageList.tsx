@@ -903,7 +903,7 @@ function ChatMessage({
                     ) : null}
                     {tool.approvalStatus === 'pending' ? (
                       <div data-slot="tool-approval-status" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                        请在输入区确认面板中操作。
+                        {inputRequest ? '请在输入区填写后提交。' : '请在输入区确认面板中操作。'}
                       </div>
                     ) : tool.approvalStatus ? (
                       <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -1097,7 +1097,7 @@ export function ChatMessageList({
     // window settles, rather than assuming one animation frame is sufficient.
     const reveal = () => {
       const top = messages.slice(0, index).reduce((sum, message) =>
-        sum + (measuredHeightsRef.current.get(message.id) || DEFAULT_MESSAGE_ROW_HEIGHT), 0);
+        sum + (measuredHeightsRef.current.get(message.id) ?? DEFAULT_MESSAGE_ROW_HEIGHT), 0);
       scroller.scrollTop = Math.max(0, top - 24);
       setScrollTop(scroller.scrollTop);
       setViewportHeight(scroller.clientHeight);
@@ -1122,7 +1122,8 @@ export function ChatMessageList({
   }, [revealMessage, scrollRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateMeasuredHeight = useCallback((messageId: string, height: number, top: number) => {
-    if (!messageId || !Number.isFinite(height) || height <= 0) {
+    // Hidden A2UI rows are measured as zero; release their previous placeholder.
+    if (!messageId || !Number.isFinite(height) || height < 0) {
       return;
     }
     const current = measuredHeightsRef.current;

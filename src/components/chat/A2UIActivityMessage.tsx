@@ -17,15 +17,16 @@ import { projectA2uiHistoryResponse, type A2uiHistoryAnswer } from './a2ui-respo
 // only after mounting a real surface so library consumers retain SSR support.
 const OfficialRenderer = lazy(() => import('./OfficialA2uiRenderer'));
 
-class SurfaceErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class SurfaceErrorBoundary extends Component<{ children: ReactNode; onError?: () => void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onError?.(); }
   render() {
     return this.state.failed ? <div role="alert">卡片渲染失败，请使用输入表单。</div> : this.props.children;
   }
 }
 
-function OfficialSurface({ surfaceId, messages, onAction, disabled }: Props) {
+function OfficialSurface({ surfaceId, messages, onAction, disabled, onRenderError }: Props) {
   const registry = useA2uiCatalogRegistry();
   const action = useRef(onAction);
   const controller = useRef<A2uiSurfaces | null>(null);
@@ -41,6 +42,7 @@ function OfficialSurface({ surfaceId, messages, onAction, disabled }: Props) {
   }))]);
 
   useEffect(() => { action.current = onAction; }, [onAction]);
+  useEffect(() => { if (error) onRenderError?.(); }, [error, onRenderError]);
   useEffect(() => {
     let cancelled = false;
     let model: A2uiSurfaces | undefined;
@@ -76,7 +78,7 @@ function OfficialSurface({ surfaceId, messages, onAction, disabled }: Props) {
   if (!surface) return null;
   return (
     <fieldset disabled={disabled || !onAction} inert={disabled || !onAction} className="min-w-0 border-0 p-0">
-      <SurfaceErrorBoundary key={surfaceId}>
+      <SurfaceErrorBoundary key={surfaceId} onError={onRenderError}>
         <Suspense fallback={<div>正在加载界面</div>}>
           <OfficialRenderer surface={surface} />
         </Suspense>
@@ -92,6 +94,7 @@ type Props = {
   disabled?: boolean;
   boundInteraction?: Interaction;
   historyAnswer?: A2uiHistoryAnswer;
+  onRenderError?: () => void;
 };
 
 export function A2UIActivityMessage(props: Props) {
@@ -182,8 +185,10 @@ function A2uiSnapshot(props: Props) {
     }
     return <LegacyA2UISurface {...props} messages={messages} disabled={Boolean(props.disabled || !props.onAction)} onAction={props.onAction || (() => {})} />;
   }
+  // Match the workbench's class-based theme instead of the renderer's OS preference.
+  // Scope this to the card so its inputs, headings and dialogs agree with its background.
   return (
-    <div className="mb-3 w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900" data-testid="a2ui-surface">
+    <div className="mb-3 w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-sm [color-scheme:light] dark:border-slate-700 dark:bg-slate-900 dark:[color-scheme:dark]" data-testid="a2ui-surface">
       <OfficialSurface {...props} />
     </div>
   );

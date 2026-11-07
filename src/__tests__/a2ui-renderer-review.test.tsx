@@ -34,11 +34,11 @@ describe('A2UI approval and surface lifecycle regressions', () => {
     const html = renderToStaticMarkup(<InteractionTray interactions={[active]} activeIndex={0}
       onSelectIndex={() => {}} onRespond={() => {}} localCatalog={a2uiCatalog} />);
     expect(html.match(/Example operation details/g)).toHaveLength(1);
-    const preview = html.slice(html.indexOf('data-testid="interaction-approval-preview"'), html.indexOf('data-testid="interaction-tray-basic"'));
-    expect(preview.match(/<button/g)).toHaveLength(2);
-    expect(preview.match(/<button[^>]*disabled=""/g)).toHaveLength(2);
-    expect(html.match(/data-testid="interaction-approve"/g)).toHaveLength(1);
-    expect(html.match(/data-testid="interaction-reject"/g)).toHaveLength(1);
+    expect(html).toContain('data-testid="interaction-approval-a2ui"');
+    expect(html).not.toContain('data-testid="interaction-approve"');
+    expect(html).not.toContain('data-testid="interaction-reject"');
+    // A sent decision keeps the same controls disabled, rather than adding a second set.
+    if (status === 'resolving') expect(html.match(/<button[^>]*disabled=""/g)).toHaveLength(3);
   });
 
   it.each(['pending', 'resolving', 'failed'] as const)('preserves %s legacy Activity details when the saved record has no A2UI', status => {

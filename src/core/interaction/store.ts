@@ -11,7 +11,7 @@ import {
   type Interaction,
   type InteractionEvent,
 } from './types.js';
-import { DEFAULT_INTERACTION_MESSAGE, DEFAULT_INTERACTION_TITLE } from './adapters/normalize.js';
+import { DEFAULT_INTERACTION_MESSAGE, DEFAULT_INTERACTION_TITLE, DEFAULT_INPUT_MESSAGE, DEFAULT_INPUT_TITLE } from './adapters/normalize.js';
 
 export type InteractionStoreListener = (event: InteractionEvent) => void;
 
@@ -99,8 +99,8 @@ export class InteractionStore {
       // First-wins: keep the terminal record, only fill missing facts.
       next = {
         ...existing,
-        title: existing.title === DEFAULT_INTERACTION_TITLE ? interaction.title : existing.title,
-        message: existing.message === DEFAULT_INTERACTION_MESSAGE ? interaction.message : existing.message,
+        title: [DEFAULT_INTERACTION_TITLE, DEFAULT_INPUT_TITLE].includes(existing.title) ? interaction.title : existing.title,
+        message: [DEFAULT_INTERACTION_MESSAGE, DEFAULT_INPUT_MESSAGE].includes(existing.message) ? interaction.message : existing.message,
         kind: existing.kind === 'approval' && !existing.requestSchema
           ? interaction.kind : existing.kind,
         requestSchema: existing.requestSchema ?? interaction.requestSchema,

@@ -1,3 +1,4 @@
+import { MCP_AUTHORIZATION_CAPABILITY } from '../mcp-authorization/contract.js';
 import type { JsonValue } from '../../types/json-value.js';
 import type { ApiFacade, CancelRunOptions } from './types.js';
 import {
@@ -27,6 +28,10 @@ export class ApiFacadeImpl implements ApiFacade {
   constructor(options: AgentEngineClientOptions = {}) {
     this.client = new AgentEngineClient(options);
   }
+
+  mcpAuthorization: import('../mcp-authorization/types.js').McpAuthorizationRequest = async (action, waitId, revision, sessionId) => {
+    return this.client.postJsonAction(action, { WaitId: waitId, ...(sessionId ? { SessionId: sessionId } : {}), ...(revision ? { ExpectedRevision: revision } : {}) });
+  };
 
   async compactSession(agentId: string, sessionId: string) {
     return this.client.postJsonAction<{ Status: string }>('CompactSession', {
@@ -180,7 +185,10 @@ export class ApiFacadeImpl implements ApiFacade {
   }
 
   async runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }) {
-    return this.client.streamAction('RunAgent', body, opts);
+    return this.client.streamAction('RunAgent', { ...body, Extensions: {
+      ...(body.Extensions as Record<string, unknown> | undefined),
+      'mcp.authorization': MCP_AUTHORIZATION_CAPABILITY,
+    } }, opts);
   }
 
   async resumeRun(

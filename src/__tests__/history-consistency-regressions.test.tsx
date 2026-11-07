@@ -5,12 +5,16 @@ import { useSessionLifecycle } from '../hooks/useSessionLifecycle.js';
 import { ApiError } from '../api/client.js';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
+import { useStreamingStore } from '../stores/streaming.js';
 import { useBootstrapStore } from '../stores/bootstrap.js';
 import { mergeHistoryWithLive } from '../utils/transcript-order.js';
 import type { ApiFacade } from '../core/api/types.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { Message } from '../components/chat/types.js';
 import type { ListSessionMessagesResponse } from '../api/messages.js';
+import type { Interaction } from '../core/interaction/types.js';
+import { authorizationInteraction } from '../core/mcp-authorization/normalize.js';
+import { MCP_AUTHORIZATION_CAPABILITY } from '../core/mcp-authorization/contract.js';
 const first: ListSessionMessagesResponse = {
   Messages: [
     {
@@ -28,14 +32,14 @@ const first: ListSessionMessagesResponse = {
   SnapshotSeqId: 12,
 };
 const events = { Events: [], Total: 0 };
-function mount(api: Partial<ApiFacade>) {
+function mount(api: Partial<ApiFacade>, lifecycleEnabled = false) {
   let actions!: ReturnType<typeof useSessionLifecycle>;
   function Probe() {
     actions = useSessionLifecycle({
       agentId: 'a',
       currentSessionId: 's',
       isMobile: false,
-      uiCapabilities: { RunLifecycle: { Enabled: false } } as UiCapabilities,
+      uiCapabilities: { RunLifecycle: { Enabled: lifecycleEnabled } } as UiCapabilities,
       api: {
         getSession: async () => ({
           SessionId: 's',
@@ -56,6 +60,57 @@ beforeEach(() => {
   useSessionStore.getState().clearSessionMessageHistory();
   useSessionStore.getState().setCurrentSessionId('s');
   useMessageStore.getState().setMessages([]);
+  useStreamingStore.getState().resetRun();
+});
+
+it.each(['credential_ready', 'connecting', 'resumed'])(
+  'keeps the live AG-UI stream as the only output owner during OAuth %s', status => {
+    const subscribe = vi.fn(() => new Promise<ReadableStream<Uint8Array>>(() => {}));
+    const actions = mount({ subscribeRunEvents: subscribe }, true);
+    useStreamingStore.getState().setSessionStreaming('s', true);
+    useStreamingStore.getState().updateActivity({ sessionId: 's', runId: 'agui-wire-run',
+      source: 'run', status: 'running', phase: '生成回复内容' });
+    const auth = authorizationInteraction({ schema: MCP_AUTHORIZATION_CAPABILITY.schema,
+      wait_id: 'oauth', run_id: 'persisted-kernel-run', revision: 2, status, allowed_actions: [] }, 's')!;
+    actions.followAcceptedInteraction(auth);
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(useStreamingStore.getState().getSessionActivity('s')?.source).toBe('run');
+  },
+);
+
+it.each(['ended', 'restore', 'ordinary-input'])(
+  'still follows completion after %s instead of suppressing needed recovery', condition => {
+    const subscribe = vi.fn(() => new Promise<ReadableStream<Uint8Array>>(() => {}));
+    const actions = mount({ subscribeRunEvents: subscribe }, true);
+    useStreamingStore.getState().setSessionStreaming('s', condition !== 'ended');
+    useStreamingStore.getState().updateActivity({ sessionId: 's', runId: 'agui-wire-run',
+      source: condition === 'restore' ? 'restore' : 'run', status: 'waiting' });
+    const auth = authorizationInteraction({ schema: MCP_AUTHORIZATION_CAPABILITY.schema,
+      wait_id: 'oauth', run_id: 'persisted-kernel-run', revision: 2,
+      status: 'credential_ready', allowed_actions: [] }, 's')!;
+    actions.followAcceptedInteraction(condition === 'ordinary-input' ? { ...auth, extensions: {} } : auth);
+    expect(subscribe).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([
+  ['run.completed', undefined, false],
+  ['run.failed', undefined, false],
+  ['run.interrupted', undefined, true],
+  ['run.completed', 'parent', true],
+] as const)('historical OAuth completion respects %s (parent=%s)', async (eventType, parent, shouldFollow) => {
+  const subscribe = vi.fn(() => new Promise<ReadableStream<Uint8Array>>(() => {}));
+  const actions = mount({
+    listSessionMessages: vi.fn().mockResolvedValue({ ...first, HasMore: false, NextCursor: null }),
+    listSessionEvents: vi.fn().mockResolvedValue({ CursorSource: 'runtime', HistoryEpoch: 'e1', SnapshotSeqId: 12, Events: [{
+      SessionId: 's', InvocationId: 'r', SeqId: 9, EventType: eventType,
+      Content: { runtime_event: { event_type: eventType, run_id: 'r', parent_scope_id: parent } },
+    }], Total: 1 }),
+    subscribeRunEvents: subscribe,
+  }, true);
+  await actions.loadSession('s');
+  actions.followAcceptedInteraction({ sessionId: 's', runId: 'r', interactionId: 'old-oauth' } as Interaction);
+  expect(subscribe).toHaveBeenCalledTimes(shouldFollow ? 1 : 0);
 });
 it('retains new live input and reply received while automatic epoch reload is in flight', async () => {
   let finish!: (value: typeof first) => void;

@@ -51,7 +51,7 @@ async function startRuntime(project, kind, logFile, port = 0, overrides = {}) {
     'KSADK_LANGGRAPH_AUTO_CHECKPOINT',
     'KSADK_TEST_A2UI_PROJECT', 'KSADK_TEST_A2UI_WEB', 'KSADK_TEST_A2UI_AGENT',
     'KSADK_TEST_A2UI_MCP', 'KSADK_TEST_A2UI_SUBGRAPH',
-    'KSADK_TEST_A2UI_PRESENTATION', 'KSADK_TEST_A2UI_BAD_CATALOG']) {
+    'KSADK_TEST_A2UI_PRESENTATION', 'KSADK_TEST_A2UI_BAD_CATALOG', 'KSADK_TEST_A2UI_INTERRUPT_MODE']) {
     if (environment[key] !== undefined) dockerArgs.push('-e', `${key}=${environment[key]}`);
   }
   dockerArgs.push(dockerImage || '', 'python', '-m', 'uvicorn', 'a2ui_runtime_app:create_app',
@@ -244,6 +244,113 @@ for (const [kind, question, value] of [
       expect(executions(project).filter(row => row.phase === 'tool')).toHaveLength(1);
       expect(pageErrors).toEqual([]);
       await attachEvidence(info, project, waitingCheckpoints, submissions);
+    } finally { await page.close(); await runtime.stop(); }
+  });
+}
+
+test('untyped native input: plain text and explicit JSON resume without approval or value wrapping', async ({ page }, info) => {
+  const project = info.outputPath('project');
+  const runtime = await startRuntime(project, 'resource', info.outputPath('runtime.log'), 0,
+    { KSADK_TEST_A2UI_INTERRUPT_MODE: 'untyped' });
+  const submissions = trackSubmissions(page);
+  try {
+    await page.goto(runtime.url);
+    await page.getByText('a2ui-e2e', { exact: true }).first().waitFor();
+    for (const [index, answer] of ['00123', 0, null].entries()) {
+      await page.getByPlaceholder('发送消息…').fill(`请补充第 ${index + 1} 项信息`);
+      await page.getByPlaceholder('发送消息…').press('Enter');
+      const form = page.getByTestId('interaction-schema-form');
+      await expect(page.getByTestId('interaction-generic-input')).toBeVisible();
+      await expect(page.getByTestId('interaction-approve')).toHaveCount(0);
+      await expect(page.locator('body')).not.toContainText('等待确认');
+      await expect(page.locator('body')).not.toContainText('sdk-internal-context-must-not-be-chat');
+      const before = checkpoints(project);
+      if (index === 0) {
+        await page.reload();
+        await expect(page.getByTestId('interaction-generic-input')).toBeVisible();
+        await info.attach('untyped-input', { body: await page.screenshot(), contentType: 'image/png' });
+      } else {
+        await form.getByLabel('答案格式').selectOption('json');
+        await form.getByTestId('interaction-field-value').fill('{invalid');
+        await page.getByTestId('interaction-submit').click();
+        await expect(form.getByRole('alert').first()).toBeVisible();
+        expect(submissions).toHaveLength(index);
+      }
+      await form.getByTestId('interaction-field-value').fill(typeof answer === 'string' ? answer : JSON.stringify(answer));
+      await page.getByTestId('interaction-submit').click();
+      await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+      expect(submissions).toHaveLength(index + 1);
+      expect(submissions[index].Action).toBe('submit');
+      expect(submissions[index].Response).toEqual(answer);
+      expect(executions(project).filter(row => row.phase === 'native_input').map(row => row.answer))
+        .toEqual(['00123', 0, null].slice(0, index + 1));
+      expect(executions(project).filter(row => row.phase === 'initialize')).toHaveLength(index + 1);
+      expect(executions(project).filter(row => row.phase === 'tool')).toHaveLength(index + 1);
+      verifyOriginalThread(before, checkpoints(project));
+      await page.reload();
+      await expect(page.getByText('a2ui-e2e', { exact: true }).first()).toBeVisible();
+      await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+    }
+    await attachEvidence(info, project, checkpoints(project), submissions);
+  } finally { await page.close(); await runtime.stop(); }
+});
+
+test('untyped native A2UI: one card resumes its original wait and remains read-only after refresh', async ({ page }, info) => {
+  const project = info.outputPath('project');
+  const runtime = await startRuntime(project, 'resource', info.outputPath('runtime.log'), 0,
+    { KSADK_TEST_A2UI_INTERRUPT_MODE: 'untyped-a2ui' });
+  const submissions = trackSubmissions(page);
+  try {
+    const form = await openAndAsk(page, runtime.url, '请显示输入卡片');
+    await expect(page.getByTestId('interaction-approve')).toHaveCount(0);
+    await expect(page.getByTestId('interaction-schema-form')).toHaveCount(0);
+    const before = checkpoints(project);
+    await form.locator('input').fill('native-a2ui');
+    await form.getByRole('button', { name: 'Submit request', exact: true }).click();
+    await expect(page.getByText('Completed: native-a2ui', { exact: true })).toHaveCount(1);
+    await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+    expect(executions(project).filter(row => row.phase === 'native_input').map(row => row.answer))
+      .toEqual([{ resource: 'native-a2ui' }]);
+    expect(executions(project).filter(row => row.phase === 'initialize')).toHaveLength(1);
+    expect(executions(project).filter(row => row.phase === 'tool')).toHaveLength(1);
+    verifyOriginalThread(before, checkpoints(project));
+    await page.reload();
+    await expect(page.getByText('Completed: native-a2ui', { exact: true })).toHaveCount(1);
+    await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+    expect(submissions).toHaveLength(1);
+    await attachEvidence(info, project, before, submissions);
+  } finally { await page.close(); await runtime.stop(); }
+});
+
+for (const action of ['approve', 'reject']) {
+  test(`explicit native approval: ${action} retains approval semantics and original checkpoint`, async ({ page }, info) => {
+    const project = info.outputPath('project');
+    const runtime = await startRuntime(project, 'resource', info.outputPath('runtime.log'), 0,
+      { KSADK_TEST_A2UI_INTERRUPT_MODE: 'approval' });
+    const submissions = trackSubmissions(page);
+    try {
+      await page.goto(runtime.url);
+      await page.getByText('a2ui-e2e', { exact: true }).first().waitFor();
+      await page.getByPlaceholder('发送消息…').fill('请执行需要审批的操作');
+      await page.getByPlaceholder('发送消息…').press('Enter');
+      await expect(page.getByTestId('interaction-approve')).toBeVisible();
+      await expect(page.getByTestId('interaction-reject')).toBeVisible();
+      await expect(page.getByTestId('interaction-schema-form')).toHaveCount(0);
+      const before = checkpoints(project);
+      await page.getByTestId(`interaction-${action}`).click();
+      await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+      await expect(page.getByText(action === 'approve' ? 'Completed: approved' : 'Request rejected', { exact: true }).first()).toBeVisible();
+      expect(executions(project).filter(row => row.phase === 'initialize')).toHaveLength(1);
+      expect(executions(project).filter(row => row.phase === 'tool')).toHaveLength(action === 'approve' ? 1 : 0);
+      expect(executions(project).filter(row => row.phase === 'native_input').map(row => row.answer))
+        .toEqual([{ decision: action }]);
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0].Action).toBe(action);
+      verifyOriginalThread(before, checkpoints(project));
+      await page.reload();
+      await expect(page.getByText('a2ui-e2e', { exact: true }).first()).toBeVisible();
+      await expect(page.getByTestId('interaction-tray')).toHaveCount(0);
+      await attachEvidence(info, project, before, submissions);
     } finally { await page.close(); await runtime.stop(); }
   });
 }

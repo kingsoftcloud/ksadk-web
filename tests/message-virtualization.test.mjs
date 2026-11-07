@@ -77,3 +77,25 @@ test('message virtualization moves later rows after an expanded row is remeasure
   assert.equal(expanded.visibleItems[2].top, 420);
   assert.equal(expanded.totalHeight, 520);
 });
+
+test('a measured hidden row releases its previous space without becoming an estimate', async () => {
+  const { calculateVirtualMessageWindow } = await loadMessageVirtualizationUtils();
+  const items = [{ id: 'form' }, { id: 'approval' }, { id: 'result' }];
+  const measuredHeights = new Map([['form', 32], ['approval', 478], ['result', 80]]);
+  const expanded = calculateVirtualMessageWindow({ items, viewportHeight: 1000, measuredHeights });
+  measuredHeights.set('approval', 0);
+  const hidden = calculateVirtualMessageWindow({ items, viewportHeight: 1000, measuredHeights });
+  assert.equal(expanded.visibleItems[2].top, 510);
+  assert.equal(hidden.visibleItems[1].height, 0);
+  assert.equal(hidden.visibleItems[2].top, 32);
+  assert.equal(hidden.totalHeight, 112);
+});
+
+test('zero is a known height while missing, negative and nonfinite heights remain estimates', async () => {
+  const { calculateVirtualMessageWindow } = await loadMessageVirtualizationUtils();
+  const items = ['hidden', 'missing', 'negative', 'not-a-number', 'infinite'].map(id => ({ id }));
+  const measuredHeights = new Map([['hidden', 0], ['negative', -1], ['not-a-number', NaN], ['infinite', Infinity]]);
+  const result = calculateVirtualMessageWindow({ items, viewportHeight: 1000, defaultItemHeight: 140, measuredHeights });
+  assert.deepEqual(result.visibleItems.map(entry => entry.height), [0, 140, 140, 140, 140]);
+  assert.equal(result.totalHeight, 560);
+});
