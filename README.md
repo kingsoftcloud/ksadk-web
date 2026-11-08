@@ -10,9 +10,9 @@ the KSADK embedded static UI.
   and keeps private deployment shell files such as Docker, nginx, Helm, image
   tags, and runtime environment injection outside this repository.
 
-## Upgrade to 0.3.15
+## Upgrade to 0.3.17
 
-Use `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.15`. Keep existing imports and React peer dependencies. Interactive forms, durable continuation, history and scoped cancellation use the capabilities advertised by the Runtime. Updating the Web package alone does not upgrade an older Runtime or deploy the Hosted UI service. See [CHANGELOG.md](CHANGELOG.md) for A2UI, form and conversation changes.
+Install the release with `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.17`. Existing imports and React peer dependencies remain compatible. With a runtime that supports MCP OAuth, users can authorize a tool in the conversation and receive the result in the same turn. The [changelog](CHANGELOG.md) lists the conversation and interaction fixes.
 
 ## Public Demo
 

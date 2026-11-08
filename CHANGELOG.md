@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.17 - 2026-11-08
+
+- Show MCP OAuth requests in the original conversation and follow the same run after authorization, including after reconnecting.
+- Keep answers in unsupported question cards, and clear execution modes when the runtime withdraws them.
+- Restore completed tool calls, form responses and assistant messages in their original turn when loading chat history.
+
 ## 0.3.16 - 2026-11-03
 
 ### Execution tiers and runtime questions
