@@ -20,6 +20,30 @@ const internalCall = frame(3, 'item.completed', {
 });
 
 describe('explicit internal model ownership', () => {
+  it.each(['flat-v1', 'agent-block-v1'] as const)('accepts the completed result after a native subgraph interrupt in %s', profile => {
+    const ingress = new RuntimeConversationIngress('session', undefined, profile);
+    const child = { scope_id: 'nested', parent_scope_id: 'root' };
+    const result = { ...child, item_id: 'result', item_kind: 'tool_result' };
+    const events = [
+      frame(1, 'run.started'),
+      frame(2, 'item.completed', { ...child, item_id: 'call', item_kind: 'tool_call', snapshot: { parts: [call('connect', 'connect_cloud')] } }),
+      frame(3, 'item.started', result),
+      frame(4, 'item.completed', { ...result, source: { framework: 'langgraph', metadata: { conversation_visibility: 'internal', ksadk_control_flow: 'interrupt' } }, snapshot: { parts: [] } }),
+      frame(5, 'run.interrupted'),
+      frame(6, 'item.started', result),
+      frame(7, 'item.completed', { ...result, snapshot: { parts: [{ part_id: 'result', content_type: 'tool_result', call_id: 'connect', result: 'Connected', is_error: false }] } }),
+      frame(8, 'run.completed'),
+    ];
+    for (const event of events) ingress.apply(event);
+    const state = ingress.snapshot();
+    const projected = projectConversationStreamForHostedUi({ state, presentation: projectConversationItems(state, { profile }), runId: 'run', cursor: 8 });
+    const tools = projected.messages.flatMap(message => Object.values(message.tools || {}));
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ callId: 'connect', name: 'connect_cloud', status: 'completed' });
+    for (const event of events) ingress.apply(event);
+    expect(ingress.snapshot()).toEqual(state);
+  });
+
   it.each(['flat-v1', 'agent-block-v1'] as const)('keeps public same-name errors and unknown results in %s', profile => {
     const ingress = new RuntimeConversationIngress('session', undefined, profile);
     const events = [

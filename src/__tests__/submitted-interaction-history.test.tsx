@@ -23,6 +23,27 @@ const render = (messages: Message[], records = [interaction]) => renderToStaticM
   onRespondToApproval={() => {}} onSubmitFeedback={() => {}} onDeleteFeedback={() => {}} />);
 
 describe('unprojected submitted node input history', () => {
+  it.each([false, true])('distinguishes pending input from approval in the timeline (%s)', blocks => {
+    const tool = { name: 'input', args: '', status: 'paused' as const,
+      approvalRequestId: 'input', approvalStatus: 'pending' as const };
+    const message = { ...row('pending'), tools: { input: tool }, ...(blocks ? { blocks: [{
+      id: 'input-block', type: 'tool' as const, toolName: 'input', args: '', status: 'paused' as const,
+      extra: { approvalRequestId: 'input', approvalStatus: 'pending' },
+    }] } : {}) };
+    for (const kind of ['structured_input', 'approval'] as const) {
+      const html = render([message], [{ ...interaction, kind, status: 'pending', outcome: null }]);
+      if (kind === 'structured_input') {
+        expect(html).toContain('等待填写');
+        expect(html).toContain('请在输入区填写后提交。');
+        expect(html).not.toContain('等待确认');
+        expect(html).not.toContain('请在输入区确认面板中操作。');
+      } else {
+        expect(html).toContain('请在输入区确认面板中操作。');
+        expect(html).not.toContain('等待填写');
+      }
+    }
+  });
+
   it('renders the saved answer for a pure graph node without requiring a tool call', () => {
     const html = render([row('final')]);
     expect(html.match(/data-testid="interaction-history-anchor"/g)).toHaveLength(1);

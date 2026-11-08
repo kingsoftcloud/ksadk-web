@@ -1,3 +1,5 @@
+import { McpAuthorizationCard } from './McpAuthorizationCard.js';
+import type { McpAuthorizationRequest, McpAuthorizationSnapshot } from '../../core/mcp-authorization/types.js';
 import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import { jsonValue, type JsonValue } from '../../types/json-value.js';
 import { useState } from 'react';
@@ -24,6 +26,8 @@ import {
 import { interactionIdempotencyKey } from '../../core/interaction/types.js';
 import { JsonSchemaInputForm } from './JsonSchemaInputForm';
 import { InteractionA2uiSurface } from './InteractionA2uiSurface';
+import { a2uiApprovalBindings } from '../../core/interaction/a2ui-approval.js';
+import { isLegacyA2uiInput } from '../../core/interaction/legacy-a2ui.js';
 
 export type InteractionTrayRespondInput = {
   interactionId: string;
@@ -41,6 +45,7 @@ export type InteractionTrayProps = {
   onRespond: (input: InteractionTrayRespondInput) => void | Promise<unknown>;
   /** Local pinned A2UI catalog used for digest validation. */
   localCatalog?: unknown;
+  mcpAuthorization?: McpAuthorizationRequest;
   className?: string;
 };
 
@@ -134,20 +139,29 @@ export function InteractionTray({
   onSelectIndex,
   onRespond,
   localCatalog,
+  mcpAuthorization,
   className,
 }: InteractionTrayProps) {
   const registry = useA2uiCatalogRegistry();
   const [comment, setComment] = useState('');
   const [localError, setLocalError] = useState<{ id: string; message: string } | null>(null);
+  const [approvalRenderFailure, setApprovalRenderFailure] = useState('');
   const isImeComposing = useImeComposition();
 
   const active = interactions[Math.min(activeIndex, Math.max(interactions.length - 1, 0))];
   if (!active) return null;
+  const oauth = active.extensions.mcpAuthorization as McpAuthorizationSnapshot | undefined;
 
   const expired = isExpired(active);
   const submitError = readSubmitError(active);
   const summary = approvalSummary(active);
   const approvalPreview = validatedApprovalA2ui(active, registry);
+  const approvalKey = JSON.stringify([active.sessionId, active.interactionId, active.revision]);
+  const approvalBindings = approvalPreview && approvalRenderFailure !== approvalKey
+    ? a2uiApprovalBindings(approvalPreview, registry) : [];
+  const customApproval = approvalBindings.length > 0;
+  const customApprove = approvalBindings.some(binding => binding.action === 'approve');
+  const customReject = approvalBindings.some(binding => binding.action === 'reject');
   const disabled = expired || active.status === 'resolving' || ['resolved', 'cancelled', 'expired'].includes(active.status);
   const presentationMode = validateA2uiPresentation(
     active.presentation?.a2ui,
@@ -206,9 +220,9 @@ export function InteractionTray({
     >
       <div
         data-slot="interaction-card"
-        className="rounded-2xl border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-background)] px-3 py-3 text-[var(--ksadk-interaction-foreground)] shadow-sm"
+        className={oauth ? undefined : "rounded-2xl border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-background)] px-3 py-3 text-[var(--ksadk-interaction-foreground)] shadow-sm"}
       >
-        <div className="flex items-center justify-between gap-2 text-xs text-[var(--ksadk-interaction-muted)]">
+        {(!oauth || interactions.length > 1) && <div className="flex items-center justify-between gap-2 text-xs text-[var(--ksadk-interaction-muted)]">
           <div className="flex min-w-0 items-center gap-1.5">
             <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0" strokeWidth={1.7} aria-hidden="true" />
             <span data-testid="interaction-tray-title">
@@ -248,7 +262,7 @@ export function InteractionTray({
               </button>
               </>
             ) : null}
-            <button
+            {!oauth && <button
               type="button"
               data-testid="interaction-cancel"
               disabled={disabled}
@@ -257,10 +271,12 @@ export function InteractionTray({
               aria-label="取消本次确认"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            </button>}
           </div>
-        </div>
+        </div>}
 
+        {oauth ? <McpAuthorizationCard key={active.interactionId} sessionId={active.sessionId}
+          snapshot={oauth} request={mcpAuthorization} /> : <>
         {active.message !== summary.command ? (
           <p className="mt-2 whitespace-pre-wrap break-words text-sm font-medium leading-5 text-[var(--ksadk-interaction-foreground)]" data-testid="interaction-tray-message">
             {active.message}
@@ -303,13 +319,17 @@ export function InteractionTray({
         ) : null}
 
         {approvalPreview ? (
-          <div data-testid="interaction-approval-preview">
+          <div data-testid={customApproval ? 'interaction-approval-a2ui' : 'interaction-approval-preview'}
+            className={customApproval ? undefined : '[&_button]:hidden [&_[role=button]]:hidden'}>
             <InteractionA2uiSurface
               key={JSON.stringify([active.sessionId, active.interactionId, active.revision])}
               a2ui={approvalPreview}
-              disabled
+              disabled={disabled || !customApproval}
               onSubmit={() => {}}
               onCancel={() => {}}
+              approvalBindings={customApproval ? approvalBindings : undefined}
+              onDecision={action => respond(action, { decision: action })}
+              onRenderError={customApproval ? () => setApprovalRenderFailure(approvalKey) : undefined}
             />
           </div>
         ) : null}
@@ -318,6 +338,7 @@ export function InteractionTray({
           <InteractionA2uiSurface
             key={JSON.stringify([active.sessionId, active.interactionId, active.revision])}
             a2ui={active.presentation.a2ui}
+            legacyInput={isLegacyA2uiInput(active.requestSchema)}
             disabled={disabled}
             onSubmit={(payload) => respond('submit', payload)}
             onCancel={() => respond('cancel', {})}
@@ -330,9 +351,9 @@ export function InteractionTray({
             onSubmit={value => respond('submit', value)}
             onCancel={() => respond('cancel', {})}
           />
-        ) : active.kind === 'approval' ? (
+        ) : active.kind === 'approval' ? (!customApprove || !customReject ? (
           <div className="mt-2 flex flex-col gap-1" data-testid="interaction-tray-basic">
-            <button
+            {!customApprove ? <button
               type="button"
               data-testid="interaction-approve"
               disabled={disabled}
@@ -342,8 +363,8 @@ export function InteractionTray({
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--ksadk-interaction-muted-background)] text-xs text-[var(--ksadk-interaction-muted)]">1</span>
               <span className="min-w-0 flex-1">批准并继续</span>
               <ArrowRight className="h-3.5 w-3.5 text-[var(--ksadk-interaction-muted)] opacity-0 transition group-hover:opacity-100" aria-hidden="true" />
-            </button>
-            <button
+            </button> : null}
+            {!customReject ? <button
               type="button"
               data-testid="interaction-reject"
               disabled={disabled}
@@ -353,7 +374,7 @@ export function InteractionTray({
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--ksadk-interaction-muted-background)] text-xs text-[var(--ksadk-interaction-muted)]">2</span>
               <span className="min-w-0 flex-1">拒绝</span>
               <ArrowRight className="h-3.5 w-3.5 text-[var(--ksadk-interaction-muted)] opacity-0 transition group-hover:opacity-100" aria-hidden="true" />
-            </button>
+            </button> : null}
             <label className="mt-0.5 flex min-w-0 items-center gap-2.5 rounded-xl bg-[var(--ksadk-interaction-muted-background)]/60 px-2.5 py-1.5">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--ksadk-interaction-border)] bg-[var(--ksadk-interaction-control-background)] text-[var(--ksadk-interaction-muted)]">
                 <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
@@ -388,6 +409,7 @@ export function InteractionTray({
               </button>
             </label>
           </div>
+        ) : null
         ) : (
           <div className="mt-2.5" data-testid="interaction-tray-basic">
             <input
@@ -430,6 +452,7 @@ export function InteractionTray({
               : '正在发送，请稍候…'}
           </p>
         ) : null}
+        </>}
       </div>
     </div>
   );

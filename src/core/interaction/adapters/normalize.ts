@@ -71,6 +71,8 @@ function stringOrNull(value: unknown): string | null {
 
 export const DEFAULT_INTERACTION_TITLE = '人工确认';
 export const DEFAULT_INTERACTION_MESSAGE = '本次运行需要人工处理后才能继续。';
+export const DEFAULT_INPUT_TITLE = '补充信息';
+export const DEFAULT_INPUT_MESSAGE = '请填写后提交，Agent 将继续当前任务。';
 
 export function normalizeInteraction(fields: RawInteractionFields): Interaction {
   const kind = String(fields.kind || 'approval');
@@ -88,10 +90,11 @@ export function normalizeInteraction(fields: RawInteractionFields): Interaction 
     sessionId: fields.sessionId,
     runId: stringOrNull(fields.runId),
     kind: (VALID_KINDS.has(kind) ? kind : 'custom') as InteractionKind,
-    title: typeof fields.title === 'string' && fields.title ? fields.title : DEFAULT_INTERACTION_TITLE,
+    title: typeof fields.title === 'string' && fields.title ? fields.title
+      : kind === 'structured_input' ? DEFAULT_INPUT_TITLE : DEFAULT_INTERACTION_TITLE,
     message: typeof fields.message === 'string' && fields.message
       ? fields.message
-      : DEFAULT_INTERACTION_MESSAGE,
+      : kind === 'structured_input' ? DEFAULT_INPUT_MESSAGE : DEFAULT_INTERACTION_MESSAGE,
     requestSchema: asRecord(fields.requestSchema),
     presentation: a2ui
       ? {

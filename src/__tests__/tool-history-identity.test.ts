@@ -18,6 +18,27 @@ const rebuild = (events: PersistedSessionEventRecord[]) => rebuildPersistedSessi
 const records = fixture.Events as unknown as PersistedSessionEventRecord[];
 
 describe('tool call identity across cumulative and partial history', () => {
+  it.each([false, true])('pairs a LangGraph child result with its parent call on replay (full=%s)', full => {
+    const call = { content_type: 'tool_call', call_id: 'native-call', name: 'lookup', arguments: { q: 'test' } };
+    const result = { content_type: 'tool_result', call_id: 'native-call', result: 42, is_error: false };
+    const frames = [
+      { event_type: 'run.started' },
+      { event_type: 'item.started', item_kind: 'tool_call', item_id: 'call', initial: { parts: [call] } },
+      { event_type: 'item.completed', item_kind: 'tool_call', item_id: 'call', snapshot: { parts: [call] } },
+      { event_type: 'item.started', item_kind: 'tool_result', item_id: 'result', scope_id: 'tools', parent_scope_id: 'model' },
+      { event_type: 'item.completed', item_kind: 'tool_result', item_id: 'result', scope_id: 'tools', parent_scope_id: 'model', snapshot: { parts: [result] } },
+      { event_type: 'run.completed' },
+    ];
+    const events = frames.map((frame, i) => ({ SessionId: 's', InvocationId: 'r', SeqId: 1+i,
+      Content: { runtime_event: { schema_version: 2, run_id: 'r', scope_id: 'model', event_id: `e${i}`,
+        seq: 1+i, source: { framework: 'langgraph' }, ...frame } } }));
+    const rows = mapBackendMessages([{ Role: 'assistant', MessageId: 'reply', InvocationId: 'r', Content: { text: 'Done.' },
+      ToolEvents: [{ ToolCallId: 'native-call', Name: 'lookup', Result: 42, Status: 'completed' }] }]);
+    const hydrated = rebuildPersistedSessionHistory(rows, full ? events : events.slice(1), 's');
+    expect(calls(hydrated.messages)).toHaveLength(1);
+    expect(callBlocks(hydrated.messages)).toHaveLength(1);
+    expect(calls(hydrated.messages)[0]).toMatchObject({ name: 'lookup', status: 'completed', output: '42' });
+  });
   it('shows each observed call once before canonical history hydration', () => {
     const input = JSON.stringify(fixture.Messages);
     const messages = fallback();

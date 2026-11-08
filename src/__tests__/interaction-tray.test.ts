@@ -12,6 +12,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { InteractionTray } from '../components/chat/InteractionTray.js';
 import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
+import { interactionFromAguiInterrupt } from '../core/interaction/adapters/agui.js';
 
 function readSource(relativePath: string): string {
   return readFileSync(
@@ -21,6 +22,45 @@ function readSource(relativePath: string): string {
 }
 
 describe('InteractionTray contract', () => {
+  it.each([{}, { type: 'boolean' }])('renders input as input for Schema %j, without approval controls', requestSchema => {
+    const records = [
+      interactionFromSessionEvent({ family: 'interaction', session_id: 'session',
+        event_type: 'interaction.requested', payload: { interaction_id: 'wait', kind: 'structured_input',
+          request_schema: requestSchema } })!,
+      interactionFromAguiInterrupt({ interruptId: 'wait', sessionId: 'session', requestSchema })!,
+    ];
+    for (const record of records) {
+      expect(record.title).toBe('补充信息');
+      const html = renderToStaticMarkup(createElement(InteractionTray, {
+        interactions: [record], activeIndex: 0, onSelectIndex: () => {}, onRespond: () => {},
+      }));
+      expect(html).toContain('interaction-schema-form');
+      expect(html).not.toContain('interaction-approve');
+      expect(html).not.toContain('批准并继续');
+      expect(html).not.toContain('人工确认');
+      if (Object.keys(requestSchema).length === 0) {
+        expect(html).toContain('interaction-generic-input');
+        expect(html).toContain('答案格式');
+      }
+    }
+  });
+
+  it('retains explicit and legacy approvals without converting them to generic input', () => {
+    const records = [
+      interactionFromSessionEvent({ family: 'interaction', session_id: 'session',
+        event_type: 'interaction.requested', payload: { interaction_id: 'wait', kind: 'approval' } })!,
+      interactionFromAguiInterrupt({ interruptId: 'wait', sessionId: 'session' })!,
+    ];
+    for (const record of records) {
+      const html = renderToStaticMarkup(createElement(InteractionTray, {
+        interactions: [record], activeIndex: 0, onSelectIndex: () => {}, onRespond: () => {},
+      }));
+      expect(html).toContain('interaction-approve');
+      expect(html).toContain('interaction-reject');
+      expect(html).not.toContain('interaction-schema-form');
+    }
+  });
+
   it('distinguishes sending from durable acceptance while retaining disabled controls', () => {
     const record = interactionFromSessionEvent({ family: 'interaction', session_id: 'session',
       event_type: 'interaction.requested', payload: { interaction_id: 'wait', kind: 'approval' } })!;

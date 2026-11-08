@@ -13,9 +13,120 @@ const data = (value: unknown, path = '/', surfaceId = 's'): Operation => ({
 });
 const form = (names: string[]) => ({ id: 'form', component: 'Form', fields: names.map(name => ({ name, label: name, type: 'string' })) });
 
+const themedForm: Operation[] = [
+  { version: 'v0.9', createSurface: {
+    surfaceId: 's', catalogId: 'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json',
+  } },
+  components([
+    { id: 'title', component: 'Text', text: '选择参数', variant: 'h2' },
+    { id: 'zone', component: 'ChoicePicker', label: '可用区', variant: 'mutuallyExclusive',
+      displayStyle: 'chips', filterable: true, options: [{ label: '可用区 A', value: 'a' }, { label: '可用区 B', value: 'b' }],
+      value: { path: '/fields/zone' } },
+    { id: 'note', component: 'TextField', label: '备注', value: { path: '/fields/note' } },
+    { id: 'submit-label', component: 'Text', text: '提交参数' },
+    { id: 'submit', component: 'Button', child: 'submit-label', variant: 'primary',
+      action: { event: { name: 'submit', context: { note: { path: '/fields/note' }, zone: { path: '/fields/zone' } } } } },
+    { id: 'root', component: 'Column', children: ['title', 'zone', 'note', 'submit'] },
+  ]),
+  data({ fields: { zone: [], note: '' } }),
+];
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/e2e/fixtures/a2ui-renderer.html');
   await page.waitForFunction(() => Boolean(window.rendererProbe));
+});
+
+for (const system of ['dark', 'light'] as const) {
+  for (const dark of [false, true]) {
+    test(`A2UI theme follows the page (system=${system}, page=${dark ? 'dark' : 'light'})`, async ({ page }, testInfo) => {
+      await page.emulateMedia({ colorScheme: system });
+      // A library consumer can scope its theme without changing the whole document.
+      await page.evaluate(dark => document.getElementById('root')!.classList.toggle('dark', dark), dark);
+      await page.evaluate(messages => window.rendererProbe.surfaces(messages), themedForm);
+      const input = page.getByRole('textbox', { name: '', exact: true });
+      const filter = page.getByPlaceholder('Filter options...');
+      const title = page.getByRole('heading', { name: '选择参数' });
+      const checkColors = async (isDark: boolean) => {
+        await expect(input).toHaveCSS('background-color', isDark ? 'rgb(42, 42, 42)' : 'rgb(255, 255, 255)');
+        await expect(filter).toHaveCSS('background-color', isDark ? 'rgb(42, 42, 42)' : 'rgb(255, 255, 255)');
+        await expect(title).toHaveCSS('color', isDark ? 'rgb(238, 238, 238)' : 'rgb(51, 51, 51)');
+      };
+      await checkColors(dark);
+      await input.fill('保留输入');
+      await page.getByRole('button', { name: '可用区 B', exact: true }).click();
+      await expect(page.getByRole('button', { name: '可用区 B', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await page.evaluate(dark => document.getElementById('root')!.classList.toggle('dark', dark), !dark);
+      await checkColors(!dark);
+      await expect(input).toHaveValue('保留输入');
+      await expect(page.getByRole('button', { name: '可用区 B', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await page.evaluate(dark => document.getElementById('root')!.classList.toggle('dark', dark), dark);
+      await checkColors(dark);
+      await page.screenshot({ path: testInfo.outputPath('theme.png') });
+      await page.getByRole('button', { name: '提交参数', exact: true }).click();
+      expect(await page.evaluate(() => window.rendererProbe.actions)).toEqual([{ note: '保留输入', zone: ['b'] }]);
+      await page.evaluate(messages => window.rendererProbe.mixedCatalogs(messages, true), themedForm);
+      await checkColors(dark);
+      await expect(input).toBeDisabled();
+      await expect(page.getByRole('button', { name: '提交参数', exact: true })).toBeDisabled();
+      expect(await page.evaluate(() => window.rendererProbe.actions)).toHaveLength(1);
+    });
+  }
+}
+
+test('history layout reclaims hidden rows and follows form expand/collapse', async ({ page }) => {
+  await page.evaluate(() => window.rendererProbe.layout());
+  const rowTop = (id: string) => page.locator(`[data-message-id="${id}"]`).evaluate(el => parseFloat((el as HTMLElement).style.top));
+  const history = page.getByTestId('a2ui-input-history');
+  await expect(history).toBeVisible();
+  await expect.poll(async () => (await rowTop('layout-result')) - await history.evaluate(el => el.parentElement!.offsetHeight)).toBe(0);
+  const collapsedTop = await rowTop('layout-result');
+  await history.locator('summary').click();
+  await expect(history.getByLabel('参数 0', { exact: true })).toHaveValue('已提交 0');
+  await expect(history.getByLabel('参数 0', { exact: true })).toBeDisabled();
+  await expect.poll(() => rowTop('layout-result')).toBeGreaterThan(collapsedTop + 100);
+  await history.locator('summary').click();
+  await expect.poll(() => rowTop('layout-result')).toBe(collapsedTop);
+  await page.getByRole('button', { name: '显示结果卡', exact: true }).click();
+  await expect(page.getByText('后续结果卡', { exact: true })).toBeVisible();
+  await expect.poll(() => rowTop('layout-result')).toBeGreaterThan(collapsedTop);
+  await page.getByRole('button', { name: '隐藏结果卡', exact: true }).click();
+  await expect.poll(() => rowTop('layout-result')).toBe(collapsedTop);
+});
+
+test('history layout keeps virtual scrolling and explicit navigation accurate across zero rows', async ({ page }) => {
+  await page.evaluate(() => window.rendererProbe.layout(true));
+  await page.getByRole('button', { name: '定位最终回答', exact: true }).click();
+  const result = page.locator('[data-message-id="layout-result"]');
+  await expect(result).toHaveAttribute('data-search-target', 'true');
+  await expect(page.getByText('最终回答仍然可见', { exact: true })).toBeVisible();
+  await expect.poll(() => result.evaluate(el => Math.abs(el.getBoundingClientRect().top - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top - 24))).toBeLessThan(2);
+  const mounted = await page.locator('[data-message-id]').count();
+  expect(mounted).toBeLessThan(30);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '定位最终回答', exact: true }).click();
+  await expect(page.getByText('最终回答仍然可见', { exact: true })).toBeVisible();
+  const scroller = page.locator('[data-slot="message-list"]');
+  await scroller.evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+  await expect(page.getByText('早期历史消息 0', { exact: true })).toBeVisible();
+  await scroller.evaluate(el => el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }));
+  await expect(page.getByText('后续历史消息 29', { exact: true })).toBeVisible();
+});
+
+test('history layout rebuilds after refresh without stale form placeholders', async ({ page }) => {
+  await page.evaluate(() => window.rendererProbe.layout());
+  const height = () => page.locator('[data-message-id="input-row"]').evaluate(el => el.parentElement!.offsetHeight);
+  const history = page.getByTestId('a2ui-input-history');
+  await expect(history).toBeVisible();
+  await expect.poll(() => page.locator('[data-message-id="hidden-0"]').evaluate(el => el.offsetHeight)).toBe(0);
+  const collapsedHeight = await height();
+  await history.locator('summary').click();
+  await expect.poll(height).toBeGreaterThan(collapsedHeight + 100);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.rendererProbe));
+  await page.evaluate(() => window.rendererProbe.layout());
+  await expect(page.getByTestId('a2ui-input-history')).toBeVisible();
+  await expect.poll(height).toBe(collapsedHeight);
+  await expect(page.getByText('最终回答仍然可见', { exact: true })).toHaveCount(1);
 });
 
 for (const disabled of [false, true]) {
@@ -45,15 +156,17 @@ for (const disabled of [false, true]) {
   });
 }
 
-test('approval keeps operation details visible and only the tray can approve', async ({ page }) => {
+test('approval keeps operation details visible with one declared action entry', async ({ page }) => {
   await page.evaluate(messages => window.rendererProbe.approval(messages), [create(), components([
     { id: 'plan', component: 'Card', body: 'Example operation details' }, { id: 'bar', component: 'ApprovalBar' },
   ])]);
   await expect(page.getByText('Example operation details')).toBeVisible();
-  const preview = page.getByTestId('legacy-a2ui-surface');
-  await expect(preview.getByRole('button', { name: '批准', exact: true })).toBeDisabled();
-  await expect(preview.getByRole('button', { name: '拒绝', exact: true })).toBeDisabled();
-  await page.getByTestId('interaction-approve').click();
+  const preview = page.getByTestId('interaction-approval-a2ui');
+  await expect(preview.getByRole('button', { name: '批准', exact: true })).toBeEnabled();
+  await expect(preview.getByRole('button', { name: '拒绝', exact: true })).toBeEnabled();
+  await expect(page.getByTestId('interaction-approve')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '批准', exact: true })).toHaveCount(1);
+  await preview.getByRole('button', { name: '批准', exact: true }).click();
   expect(await page.evaluate(() => window.rendererProbe.actions)).toMatchObject([{ action: 'approve' }]);
 });
 
@@ -117,11 +230,12 @@ test('restored approval presentation needs no live Activity and keeps one action
     { id: 'plan', component: 'Card', body: 'Persisted operation details' }, { id: 'bar', component: 'ApprovalBar' },
   ])]);
   await expect(page.getByText('Persisted operation details', { exact: true })).toHaveCount(1);
-  const preview = page.getByTestId('interaction-approval-preview');
-  await expect(preview.getByRole('button', { name: '批准', exact: true })).toBeDisabled();
-  await expect(preview.getByRole('button', { name: '拒绝', exact: true })).toBeDisabled();
-  await expect(page.getByTestId('interaction-approve')).toHaveCount(1);
-  await page.getByTestId('interaction-reject').click();
+  const preview = page.getByTestId('interaction-approval-a2ui');
+  await expect(preview.getByRole('button', { name: '批准', exact: true })).toBeEnabled();
+  await expect(preview.getByRole('button', { name: '拒绝', exact: true })).toBeEnabled();
+  await expect(page.getByTestId('interaction-approve')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '拒绝', exact: true })).toHaveCount(1);
+  await preview.getByRole('button', { name: '拒绝', exact: true }).click();
   expect(await page.evaluate(() => window.rendererProbe.actions)).toMatchObject([{ action: 'reject' }]);
 });
 

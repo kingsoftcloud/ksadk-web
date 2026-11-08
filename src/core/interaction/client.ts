@@ -165,6 +165,23 @@ export class InteractionClientImpl implements InteractionClient {
       return syntheticReceipt('duplicate', input.interactionId);
     }
 
+    const useInteractionV1 =
+      this.deps.interactionV1Enabled || record.source === 'interaction_v1';
+    // The legacy Responses bridge carries only an approval boolean. Sending
+    // structured answers there silently discards them and falsely resolves the
+    // question. Absence of an answer transport must remain visible to the user.
+    if (!useInteractionV1 && record.source === 'responses'
+      && (record.kind !== 'approval' || !['approve', 'reject', 'cancel'].includes(input.action))) {
+      const error = {
+        code: 'input_transport_unsupported',
+        message: '当前运行时不支持提交此提问，请升级运行时后重试。',
+        retryable: false,
+        extensions: {},
+      };
+      this.store.markFailed(record.sessionId, input.interactionId, error);
+      return { ...syntheticReceipt('unsupported', input.interactionId), error };
+    }
+
     try {
       jsonValue(input.response);
     } catch {
@@ -213,9 +230,6 @@ export class InteractionClientImpl implements InteractionClient {
 
     this.inFlight.set(recordKey, idempotencyKey);
     this.store.markResolving(record.sessionId, input.interactionId);
-
-    const useInteractionV1 =
-      this.deps.interactionV1Enabled || record.source === 'interaction_v1';
 
     try {
       if (!useInteractionV1 && record.source === 'responses' && this.deps.legacyResponsesApproval) {

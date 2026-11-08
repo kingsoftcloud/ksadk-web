@@ -6,6 +6,7 @@ import type { RunEvent } from '../core/run/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useMessageStore } from '../stores/message.js';
 import { useSessionStore } from '../stores/session.js';
+import { useExecutionPermissionStore } from '../stores/execution-permission.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
 import { dispatchRunEventToStores, resetDispatcherState } from '../core/run/dispatcher.js';
 import { sharedInteractionStore } from '../core/interaction/index.js';
@@ -191,6 +192,23 @@ function canonicalResultWithUser(text: string): ConversationStreamResult {
 }
 
 describe('RunEngineImpl', () => {
+  it.each([false, true])('does not send revoked permissions in a request (resume=%s)', async resume => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'permission-agent', agentFramework: 'codex', apiFormats: ['responses'], selectedModel: 'test', thinkingMode: 'auto' });
+    const permissions = useExecutionPermissionStore.getState();
+    permissions.configure('permission-agent', { Modes: ['read-only'] });
+    permissions.configure('permission-agent', null);
+    // An event handler from an already closed menu must not reintroduce it.
+    permissions.select('permission-agent', 'danger-full-access');
+    engine.start({ text: resume ? '' : 'hello', attachments: [], sessionId: 'permission-session',
+      ...(resume ? { responsesInput: [{ type: 'mcp_approval_response', approval_request_id: 'approval-1', approve: true }], previousResponseId: 'response-1' } : {}) });
+    await waitForCalls(calls);
+    expect(calls[0]).toMatchObject({ Metadata: { agentengine: { tool_approval_mode: 'risk' } } });
+    expect((calls[0].Metadata as { agentengine: object }).agentengine).not.toHaveProperty('permission_mode');
+    await waitForEngineIdle(engine);
+  });
+
   it.each(['disconnect', 'eof'] as const)('keeps partial output %s uncertain and publishes its invocation identity', async (ending) => {
     const calls: Record<string, unknown>[] = [];
     const api = createApiFacade(calls);

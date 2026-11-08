@@ -228,6 +228,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     currentSessionId,
     api,
     interactionV1Enabled: Boolean(uiCapabilities.InteractionV1),
+    reloadHistory: loadSession,
     onAcceptedInteraction: followAcceptedInteraction,
     legacyResponsesApproval: (approvalRequestId, approve, previousResponseId) => {
       return respondToApprovalRef.current({ approvalRequestId, approve, previousResponseId });

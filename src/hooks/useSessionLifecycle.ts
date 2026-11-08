@@ -560,11 +560,27 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       || agentIdRef.current !== agentId
       || currentSessionIdRef.current !== interaction.sessionId
       || runSubscriptionAbortRef.current) return;
+    // Loading an older page also restores OAuth completion records. A known
+    // terminal root run must not be subscribed again as if it just resumed.
+    // Child completion and interrupt/wait boundaries are not root completion.
+    const history = eventHistoryBySessionRef.current.get(interaction.sessionId)?.events || [];
+    if (history.some(event => {
+      const frame = (event.Content as { runtime_event?: Record<string, unknown> } | undefined)?.runtime_event;
+      return event.InvocationId === interaction.runId && !frame?.parent_scope_id
+        && ['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted']
+          .includes(sessionEventRunStatus(event));
+    })) return;
     const activity = useStreamingStore.getState().getSessionActivity(interaction.sessionId);
-    if (uiCapabilitiesRef.current.KernelSessionEventsByCommand === true
-      && useStreamingStore.getState().isSessionStreaming(interaction.sessionId)
-      && activity?.source === 'run' && activity.runId === interaction.runId
-      && ['connecting', 'running', 'waiting'].includes(activity.status)) return;
+    const ownsLiveStream = useStreamingStore.getState().isSessionStreaming(interaction.sessionId)
+      && activity?.source === 'run'
+      && ['connecting', 'running', 'waiting'].includes(activity.status);
+    // OAuth resumes inside the original AG-UI stream too. Its wire run id can
+    // differ from the persisted Kernel id on the authorization record. Opening
+    // a second observer here renders both projections as separate assistants.
+    // After reload/disconnect there is no live owner and recovery still follows.
+    if (ownsLiveStream && (Boolean(interaction.extensions?.mcpAuthorization)
+      || (uiCapabilitiesRef.current.KernelSessionEventsByCommand === true
+        && activity.runId === interaction.runId))) return;
     void subscribeRunEvents({
       sessionId: interaction.sessionId,
       invocationId: interaction.runId,

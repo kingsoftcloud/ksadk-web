@@ -31,12 +31,12 @@ export class ResponsesProtocol implements StreamProtocol {
 
   parse(event: TransportEvent, state: Record<string, unknown>): StreamAction[] {
     const frame = event.data as Record<string, unknown> | null;
-    if (event.eventName === 'interaction.requested' && frame?.family === 'interaction') {
+    if (frame && ((event.eventName === 'interaction.requested' && frame.family === 'interaction') || event.eventName?.startsWith('mcp.authorization.'))) {
       const payload = frame.payload as Record<string, unknown> | undefined;
-      const interactionId = String(payload?.interaction_id || '');
+      const interactionId = String(payload?.interaction_id || payload?.wait_id || '');
       if (interactionId && frame.session_id && frame.run_id) {
         return [{ type: 'canonical_interaction', interactionId, event: {
-          EventType: 'interaction.requested', SessionId: String(frame.session_id),
+          EventType: event.eventName, SessionId: String(frame.session_id),
           InvocationId: String(frame.run_id), SeqId: Number(frame.seq || 0),
           Content: { session_event: frame },
         } }];

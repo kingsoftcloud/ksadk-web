@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { normalizeCapabilities } from '../utils/capabilities.js';
 import type { RuntimeApiFormat } from '../types/api.js';
 import type { UiCapabilities } from '../types/capabilities.js';
+import { useExecutionPermissionStore } from './execution-permission.js';
 
 export type BootstrapStatus = 'loading' | 'ready' | 'auth-required' | 'error';
 
@@ -30,7 +31,7 @@ export type BootstrapActions = {
 
 export type BootstrapStore = BootstrapState & BootstrapActions;
 
-export const useBootstrapStore = create<BootstrapStore>()((set) => ({
+export const useBootstrapStore = create<BootstrapStore>()((set, get) => ({
   agentId: 'default-agent',
   agentName: 'Agent',
   agentFramework: '',
@@ -43,7 +44,10 @@ export const useBootstrapStore = create<BootstrapStore>()((set) => ({
   setAgentId: (id) => set({ agentId: id }),
   setAgentName: (name) => set({ agentName: name }),
   setAgentFramework: (framework) => set({ agentFramework: framework }),
-  setCapabilities: (caps) => set({ capabilities: caps }),
+  setCapabilities: (caps) => {
+    useExecutionPermissionStore.getState().configure(get().agentId, caps.ExecutionPolicy);
+    set({ capabilities: caps });
+  },
   setApiFormats: (formats) => set({ apiFormats: formats }),
   setAccessMode: (mode) => set({ accessMode: mode }),
   setWorkspaceFiles: (files) => set({ workspaceFiles: files }),

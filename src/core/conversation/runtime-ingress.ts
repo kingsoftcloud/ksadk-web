@@ -230,7 +230,9 @@ export class RuntimeConversationIngress {
       const existing = this.runtime
         .snapshot()
         .items.find((i) => i.scopeId === scope && i.itemId === nativeItem);
-      if (parent && existing && existing.status !== 'open') {
+      // Native subgraphs reuse tool item identity after a checkpoint interrupt.
+      // Remote AgentBlock terminal items remain immutable.
+      if (parent && !nativeScope && existing && existing.status !== 'open') {
         if (type === 'item.updated' || type === 'item.started')
           throw new Error('Remote item cannot reopen');
         if (

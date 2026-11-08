@@ -1,6 +1,7 @@
 import type { Message } from '../components/chat/types.js';
 import type { Interaction } from '../core/interaction/types.js';
 import type { RunActivity } from '../stores/streaming.js';
+import { isUserPendingInteraction } from '../core/interaction/pending.js';
 
 /** Presentation only: a quiet stream is still active until its owner settles it. */
 export function runProgressLabel({
@@ -25,8 +26,13 @@ export function runProgressLabel({
   if (/创建会话|连接运行时|连接会话/.test(phase)) return '正在提交…';
 
   const runId = activity?.runId;
-  if (/等待人工/.test(phase) || interactions.some(item =>
-    item.status === 'pending' && (!runId || item.runId === runId))) return '等待你的确认…';
+  const currentInteractions = interactions.filter(item => !runId || item.runId === runId);
+  if (currentInteractions.some(isUserPendingInteraction)) return '等待你的确认…';
+  // A native OAuth checkpoint can interrupt AG-UI without requesting user input.
+  // Keep that internal handoff out of both the tray and the trailing feedback.
+  if (currentInteractions.some(item => item.status === 'pending'
+    && item.extensions.mcpAuthorization && !isUserPendingInteraction(item))) return '正在处理…';
+  if (/等待人工/.test(phase)) return '等待你的确认…';
 
   const owned = runId ? messages.filter(message =>
     message.role === 'model' && (message.runId === runId || message.invocationId === runId)) : [];
