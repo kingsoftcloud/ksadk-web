@@ -1,4 +1,3 @@
-import { MCP_AUTHORIZATION_CAPABILITY } from '../mcp-authorization/contract.js';
 import type { JsonValue } from '../../types/json-value.js';
 import type { ApiFacade, CancelRunOptions } from './types.js';
 import {
@@ -185,10 +184,7 @@ export class ApiFacadeImpl implements ApiFacade {
   }
 
   async runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }) {
-    return this.client.streamAction('RunAgent', { ...body, Extensions: {
-      ...(body.Extensions as Record<string, unknown> | undefined),
-      'mcp.authorization': MCP_AUTHORIZATION_CAPABILITY,
-    } }, opts);
+    return this.client.streamAction('RunAgent', body, opts);
   }
 
   async resumeRun(

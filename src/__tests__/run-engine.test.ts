@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { RunEngineImpl } from '../core/run/engine.js';
 import type { ApiFacade } from '../core/api/types.js';
+import { ApiFacadeImpl } from '../core/api/facade.js';
+import { MCP_AUTHORIZATION_CAPABILITY as oauth } from '../core/mcp-authorization/contract.js';
 import type { RunEvent } from '../core/run/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useMessageStore } from '../stores/message.js';
@@ -192,6 +194,58 @@ function canonicalResultWithUser(text: string): ConversationStreamResult {
 }
 
 describe('RunEngineImpl', () => {
+  it.each([
+    ['langgraph', oauth, true], ['LangGraph', oauth, true], ['langgraph', undefined, false],
+    ['langgraph', { ...oauth, digest: 'unknown' }, false],
+    ['langgraph', { ...oauth, schema: 'future' }, false],
+    ['codex', oauth, false], ['harness', undefined, false], ['dsh-native', undefined, false],
+  ] as const)('negotiates MCP authorization on the %s RunAgent request (%j)', async (agentFramework, mcpAuthorization, supported) => {
+    const calls: Record<string, unknown>[] = [];
+    const facade = new ApiFacadeImpl({ fetch: async (_url, init) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return new Response('data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+    } });
+    const engine = createRunEngine(facade);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework, mcpAuthorization,
+      apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+    engine.start({ text: 'hello', sessionId: 'session-a', attachments: [] });
+    await waitForCalls(calls);
+    if (supported) expect(calls[0].Extensions).toEqual({ 'mcp.authorization': oauth });
+    else expect(calls[0]).not.toHaveProperty('Extensions');
+    await waitForEngineIdle(engine);
+  });
+
+  it.each([undefined, 'ask', 'risk'] as const)('uses the DSH deployment approval mode %s for a normal chat', async dshApprovalMode => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'codex', apiFormats: ['responses'], selectedModel: '',
+      thinkingMode: 'auto', permissionMode: 'full', dshApprovalMode,
+      hostedChatTransport: { Protocol: 'responses', Runtime: 'dsh', Version: 'v1', Endpoint: '/RunAgent',
+        Capabilities: { A2UI: false, Interrupt: false, Cancel: true } } });
+    engine.start({ text: 'hello', sessionId: 'session', attachments: [] });
+    await waitForCalls(calls);
+    expect(calls[0].Metadata).toEqual({ agentengine: dshApprovalMode ? { tool_approval_mode: dshApprovalMode } : {} });
+    await waitForEngineIdle(engine);
+  });
+
+  it('keeps each tool call in place when same-name results complete out of order', () => {
+    const ids = { sessionId: 'tools-session', messageId: 'tools-message' };
+    useSessionStore.getState().setCurrentSessionId(ids.sessionId);
+    for (const callId of ['one', 'two']) {
+      dispatchRunEventToStores({ ...ids, type: 'tool_upsert', name: 'lookup', callId, args: '', status: 'running' });
+      dispatchRunEventToStores({ ...ids, type: 'text_delta', delta: callId });
+    }
+    for (const callId of ['two', 'one']) {
+      dispatchRunEventToStores({ ...ids, type: 'tool_result', name: 'lookup', callId, output: callId });
+    }
+    const message = useMessageStore.getState().messages[0];
+    expect(message.blocks).toMatchObject([
+      { type: 'tool', output: 'one' }, { type: 'text', content: 'one' },
+      { type: 'tool', output: 'two' }, { type: 'text', content: 'two' },
+    ]);
+    expect(Object.values(message.tools ?? {}).map(tool => [tool.callId, tool.output])).toEqual([['one', 'one'], ['two', 'two']]);
+  });
+
   it.each([false, true])('does not send revoked permissions in a request (resume=%s)', async resume => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine(createApiFacade(calls));

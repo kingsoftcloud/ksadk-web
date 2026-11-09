@@ -14,6 +14,7 @@ import {
 } from '../../stores/execution-permission.js';
 import { ContractMismatchError, decodeReceipt } from '../../types/agent-control.js';
 import type { ApiFacade } from '../api/types.js';
+import { MCP_AUTHORIZATION_CAPABILITY } from '../mcp-authorization/contract.js';
 import type { StreamAction } from '../stream/types.js';
 import { createProtocol } from '../stream/index.js';
 import { shouldStopReadingRunStream } from '../../utils/stream-control.js';
@@ -1196,14 +1197,25 @@ export class RunEngineImpl implements RunEngine {
     invocationId: string,
   ): Record<string, unknown> {
     const executionMetadata = this.buildExecutionMetadata(draft);
+    const approvalMode = this.config.hostedChatTransport?.Runtime === 'dsh'
+      ? this.config.dshApprovalMode : this.config.permissionMode || 'risk';
+    const extensions: Record<string, unknown> = {};
+    if (this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1') {
+      extensions['ksadk.presentation'] = { profile: 'agent-block-v1' };
+    }
+    const declared = this.config.mcpAuthorization;
+    if (this.config.agentFramework.trim().toLowerCase() === 'langgraph'
+      && declared?.schema === MCP_AUTHORIZATION_CAPABILITY.schema
+      && declared.digest === MCP_AUTHORIZATION_CAPABILITY.digest) {
+      extensions['mcp.authorization'] = MCP_AUTHORIZATION_CAPABILITY;
+    }
     const body: Record<string, unknown> = {
       AgentId: this.config.agentId,
       SessionId: sessionId,
       InvocationId: invocationId,
       Stream: true,
       ...(this.config.kernelSessionEventsEnabled ? { Background: true } : {}),
-      ...(this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
-        ? { Extensions: { 'ksadk.presentation': { profile: 'agent-block-v1' } } } : {}),
+      ...(Object.keys(extensions).length ? { Extensions: extensions } : {}),
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,
       ModelMetadata: this.config.selectedModelMetadata || undefined,
@@ -1212,7 +1224,7 @@ export class RunEngineImpl implements RunEngine {
       // the server can validate them and still apply a stricter deployment policy.
       Metadata: {
         agentengine: {
-          tool_approval_mode: this.config.permissionMode || 'risk',
+          ...(approvalMode ? { tool_approval_mode: approvalMode } : {}),
           // Execution sandbox tier: the runtime clamps it to its own declaration,
           // Server admission validates it, and the Gateway carries it as a
           // trusted header (never body metadata the runtime trusts directly).
@@ -1557,10 +1569,8 @@ export class RunEngineImpl implements RunEngine {
         this.emit({ type: 'reasoning_delta', messageId, delta: action.text });
         break;
       case 'tool_upsert':
-        this.emit({ type: 'tool_upsert', messageId, name: action.name, args: action.args, status: action.status, extra: action.extra });
-        break;
       case 'tool_result':
-        this.emit({ type: 'tool_result', messageId, name: action.name, output: action.output });
+        this.emit({ ...action, messageId });
         break;
       case 'approval_request':
         this.emit({

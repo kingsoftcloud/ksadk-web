@@ -13,7 +13,9 @@ export function createResponsesStreamState() {
     callIds: new Map(),
     currentResponseId: '',
     sawTextDelta: false,
+    messageTextByItem: new Map(),
     reasoningByItem: new Map(),
+    reasoningByIndex: new Map(),
   };
 }
 
@@ -77,10 +79,17 @@ function rememberTool(state, key, item, name, args) {
   }
   const callId = String(item?.call_id || '');
   if (callId) {
-    state.callIds.set(callId, key || name);
+    state.callIds.set(key, callId);
+    state.callIds.set(callId, callId);
     state.toolNames.set(callId, name);
     state.toolArguments.set(callId, args);
   }
+}
+
+function rememberMessageText(state, key, index, text, snapshot) {
+  const content = snapshot ? text : (state.messageTextByItem.get(key) || '') + text;
+  if (key) state.messageTextByItem.set(key, content);
+  if (Number.isInteger(index)) state.messageTextByItem.set(index, content);
 }
 
 function toolNameFor(state, key, item, fallback = 'tool') {
@@ -149,12 +158,17 @@ function unwrapInterruptInfo(value) {
 
 // The same reasoning item can arrive as deltas, an item snapshot and again
 // in response.completed. A repeated snapshot must not open a new row.
-function reasoningActions(state, key, text, snapshot = false) {
+function reasoningActions(state, key, text, outputIndex, snapshot = false) {
   if (!text) return [];
   const previous = state.reasoningByItem.get(key) || '';
   const delta = snapshot && text.startsWith(previous) ? text.slice(previous.length) : text;
-  state.reasoningByItem.set(key, snapshot ? text : previous + text);
-  return delta ? [{ type: 'reasoning_delta', text: delta }] : [];
+  const content = snapshot ? text : previous + text;
+  // A Responses bridge can use its own item IDs while streaming and the
+  // upstream IDs at completion. Its repeated snapshot still occupies the same slot.
+  const repeated = snapshot && state.reasoningByIndex.get(outputIndex) === text;
+  state.reasoningByItem.set(key, content);
+  if (Number.isInteger(outputIndex)) state.reasoningByIndex.set(outputIndex, content);
+  return delta && !repeated ? [{ type: 'reasoning_delta', text: delta }] : [];
 }
 
 function normalizeOutputItem({ data, state, status }) {
@@ -166,7 +180,8 @@ function normalizeOutputItem({ data, state, status }) {
     const name = toolNameFor(state, key, item);
     const args = stringifyPayload(item.arguments ?? item.args ?? item.input);
     rememberTool(state, key, item, name, args);
-    return [{ type: 'tool_upsert', name, args, status }];
+    const callId = state.callIds.get(key);
+    return [{ type: 'tool_upsert', name, args, status, ...(callId && { callId }) }];
   }
 
   if (type === 'function_call_output') {
@@ -175,6 +190,7 @@ function normalizeOutputItem({ data, state, status }) {
       {
         type: 'tool_result',
         name,
+        ...(item.call_id && { callId: item.call_id }),
         output: stringifyPayload(item.output ?? item.result ?? item.content),
       },
     ];
@@ -225,11 +241,12 @@ function normalizeOutputItem({ data, state, status }) {
 
   if (type === 'reasoning' || type === 'reasoning_summary' || type === 'reasoning_summary_text') {
     const text = extractItemText(item);
-    return reasoningActions(state, key, text, true);
+    return reasoningActions(state, key, text, data?.output_index, true);
   }
 
   if (type === 'message') {
     const text = extractItemText(item);
+    if (text) rememberMessageText(state, key, data?.output_index, text, true);
     return text ? [{ type: status === 'completed' ? 'text_final' : 'text_delta', text }] : [];
   }
 
@@ -246,12 +263,15 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
   if (eventType === 'response.tool_call') {
     const name = String(data?.name || data?.tool_name || 'tool');
     const args = stringifyPayload(data?.args ?? data?.arguments);
-    return [{ type: 'tool_upsert', name, args, status: 'running' }];
+    const callId = data?.call_id;
+    if (callId) rememberTool(state, callId, data, name, args);
+    return [{ type: 'tool_upsert', name, args, status: 'running', ...(callId && { callId }) }];
   }
 
   if (eventType === 'response.tool_result' || eventType === 'response.ksadk.tool_result') {
     const name = String(data?.name || data?.tool_name || 'tool');
-    return [{ type: 'tool_result', name, output: stringifyPayload(data?.output ?? data?.result) }];
+    const callId = data?.call_id || state.callIds.get(data?.run_id);
+    return [{ type: 'tool_result', name, output: stringifyPayload(data?.output ?? data?.result), ...(callId && { callId }) }];
   }
 
   if (eventType === 'response.output_item.added') {
@@ -267,7 +287,8 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     const name = toolNameFor(state, key, data);
     const args = `${state.toolArguments.get(key) || ''}${String(data?.delta || '')}`;
     state.toolArguments.set(key, args);
-    return [{ type: 'tool_upsert', name, args, status: 'running' }];
+    const callId = state.callIds.get(key);
+    return [{ type: 'tool_upsert', name, args, status: 'running', ...(callId && { callId }) }];
   }
 
   if (eventType === 'response.function_call_arguments.done') {
@@ -275,7 +296,8 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     const name = toolNameFor(state, key, data);
     const args = stringifyPayload(data?.arguments ?? state.toolArguments.get(key));
     state.toolArguments.set(key, args);
-    return [{ type: 'tool_upsert', name, args, status: 'running' }];
+    const callId = state.callIds.get(key);
+    return [{ type: 'tool_upsert', name, args, status: 'running', ...(callId && { callId }) }];
   }
 
   if (
@@ -285,21 +307,27 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     eventType === 'response.reasoning_summary_text.delta'
   ) {
     const text = firstString(data?.delta, data?.text);
-    return reasoningActions(state, itemKey(null, data), text);
+    return reasoningActions(state, itemKey(null, data), text, data?.output_index);
   }
 
   if (eventType === 'response.output_text.delta') {
     if (data?.replace === true && (typeof data.delta === 'string' || typeof data.text === 'string')) {
       state.sawTextDelta = true;
-      return [{ type: 'text_replace', text: typeof data.delta === 'string' ? data.delta : data.text }];
+      const text = typeof data.delta === 'string' ? data.delta : data.text;
+      rememberMessageText(state, itemKey(null, data), data.output_index, text, true);
+      return [{ type: 'text_replace', text }];
     }
     const text = firstString(data?.delta, data?.text);
-    if (text) state.sawTextDelta = true;
+    if (text) {
+      state.sawTextDelta = true;
+      rememberMessageText(state, itemKey(null, data), data?.output_index, text, false);
+    }
     return text ? [{ type: 'text_delta', text }] : [];
   }
 
   if (eventType === 'response.output_text.done') {
     const text = firstString(data?.text, data?.delta);
+    if (text) rememberMessageText(state, itemKey(null, data), data?.output_index, text, true);
     return text ? [{ type: 'text_final', text }] : [];
   }
 
@@ -308,23 +336,29 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     const text = firstString(data?.delta?.text, data?.delta, data?.text);
     if (!text) return [];
     if (partType.includes('reasoning')) {
-      return reasoningActions(state, itemKey(null, data), text);
+      return reasoningActions(state, itemKey(null, data), text, data?.output_index);
     }
     state.sawTextDelta = true;
+    rememberMessageText(state, itemKey(null, data), data?.output_index, text, false);
     return [{ type: 'text_delta', text }];
   }
 
   if (eventType === 'response.completed') {
     const text = extractCompletedText(data);
     const outputActions = completedOutputItems(data).flatMap((item, output_index) => {
+      if (state.sawTextDelta && item?.type === 'message') {
+        const id = itemKey(item, {});
+        const content = extractItemText(item);
+        // Older unkeyed snapshots can summarize several streamed messages.
+        if (!id || !state.messageTextByItem.size || state.messageTextByItem.get(id) === content
+          || state.messageTextByItem.get(output_index) === content) return [];
+      }
       return normalizeOutputItem({
         data: { ...data, output_index, item },
         state,
         status: 'completed',
       });
-    }).filter((action) => (
-      !(state.sawTextDelta && action.type === 'text_final')
-    ));
+    });
     const hasFinalTextAction = outputActions.some((action) => action.type === 'text_final');
     return [
       ...outputActions,

@@ -18,8 +18,8 @@ export type StreamAction =
   | { type: 'text_replace'; text: string }
   | { type: 'text_final'; text: string }
   | { type: 'reasoning_delta'; text: string }
-  | { type: 'tool_upsert'; name: string; args: string; status: 'running' | 'completed' | 'error' | 'paused'; extra?: Record<string, unknown> }
-  | { type: 'tool_result'; name: string; output: string }
+  | { type: 'tool_upsert'; name: string; callId?: string; args: string; status: 'running' | 'completed' | 'error' | 'paused'; extra?: Record<string, unknown> }
+  | { type: 'tool_result'; name: string; callId?: string; output: string }
   | {
       type: 'approval_request';
       approvalRequestId: string;

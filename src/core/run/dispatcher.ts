@@ -41,6 +41,13 @@ import { sharedInteractionStore } from '../interaction/index.js';
 
 const DEFAULT_RUN_ERROR_MESSAGE = '连接断开或生成出错，请重试';
 
+function toolEntryKey(message: Message, name: string, callId?: string): string {
+  const first = message.tools?.[name];
+  if (!first?.callId) return name;
+  if (callId) return first.callId === callId ? name : callId;
+  return Object.entries(message.tools ?? {}).findLast(([, tool]) => tool.name === name)?.[0] ?? name;
+}
+
 function userFacingRunError(error: Error): string {
   const message = String(error.message || '').trim();
   if (/runtime agent kernel is not ready/i.test(message)) {
@@ -249,7 +256,9 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
       ms.patchMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
-          const current = msg.tools?.[event.name];
+          const key = toolEntryKey(msg, event.name, event.callId);
+          const current = msg.tools?.[key];
+          const extra = event.callId ? { ...event.extra, callId: event.callId } : event.extra;
           const currentApprovalResolved = current?.approvalStatus === 'approved'
             || current?.approvalStatus === 'rejected'
             || current?.approvalStatus === 'cancelled';
@@ -267,16 +276,16 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
             blocks: upsertToolBlock(msg.blocks, event.name, {
               args: event.args,
               status,
-              extra: event.extra as Record<string, unknown> | undefined,
+              extra,
             }),
             tools: {
               ...(msg.tools || {}),
-              [event.name]: {
+              [key]: {
                 ...(current || { name: event.name, args: '' }),
                 name: event.name,
                 args: event.args,
                 status,
-                ...(event.extra || {}),
+                ...extra,
                 ...(event.extra?.approvalRequestId && !currentApprovalResolved
                   ? { approvalStatus: 'pending' as const }
                   : {}),
@@ -295,16 +304,19 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
         prev.map((msg) => {
           if (msg.id !== event.messageId) return msg;
           const status = isFailedToolOutput(event.output) ? 'error' : 'completed';
+          const key = toolEntryKey(msg, event.name, event.callId);
           return {
             ...msg,
             blocks: upsertToolBlock(msg.blocks, event.name, {
               output: event.output,
               status,
+              ...(event.callId && { extra: { callId: event.callId } }),
             }),
             tools: {
               ...(msg.tools || {}),
-              [event.name]: {
-                ...(msg.tools?.[event.name] || { name: event.name, args: '' }),
+              [key]: {
+                ...(msg.tools?.[key] || { name: event.name, args: '' }),
+                ...(event.callId && { callId: event.callId }),
                 output: event.output,
                 status,
               },

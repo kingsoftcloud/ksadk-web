@@ -87,6 +87,7 @@ test('responses stream utils normalize native tool done and tool output items', 
   assert.deepEqual(toolAdded, [
     {
       type: 'tool_upsert',
+      callId: 'call_1',
       name: 'wps_user_search',
       args: '',
       status: 'running',
@@ -109,6 +110,7 @@ test('responses stream utils normalize native tool done and tool output items', 
   assert.deepEqual(argsDone, [
     {
       type: 'tool_upsert',
+      callId: 'call_1',
       name: 'wps_user_search',
       args: '{"keyword":"夏雨"}',
       status: 'completed',
@@ -129,6 +131,7 @@ test('responses stream utils normalize native tool done and tool output items', 
   assert.deepEqual(outputDone, [
     {
       type: 'tool_result',
+      callId: 'call_1',
       name: 'wps_user_search',
       output: '[\n  {\n    "id": "u1",\n    "name": "夏雨"\n  }\n]',
     },
@@ -453,6 +456,7 @@ test('responses stream utils normalize tools and reasoning from completed respon
       { type: 'reasoning_delta', text: '需要先搜索资料' },
       {
         type: 'tool_upsert',
+        callId: 'call_1',
         name: 'web_search',
         args: '{"query":"agent tools"}',
         status: 'completed',
@@ -460,6 +464,7 @@ test('responses stream utils normalize tools and reasoning from completed respon
       {
         type: 'tool_result',
         name: 'web_search',
+        callId: 'call_1',
         output: '{"result":"done"}',
       },
       { type: 'text_final', text: '最终答案' },
@@ -511,4 +516,24 @@ test('a repeated reasoning snapshot cannot open a thought below the answer', asy
     [{ type: 'terminal', status: 'completed' }]);
   assert.deepEqual(parse('response.output_item.done', { item: { ...item, id: 'second' } }),
     [{ type: 'reasoning_delta', text: 'check' }]);
+});
+
+test('completed output reconciles bridged IDs and keeps a final-only message', async () => {
+  const { createResponsesStreamState, normalizeResponsesStreamEvent } = await loadResponsesStreamUtils();
+  const state = createResponsesStreamState();
+  const parse = (eventName, data) => normalizeResponsesStreamEvent({ eventName, data, state });
+  parse('response.reasoning.delta', { item_id: 'bridge-r', output_index: 0, delta: '思考' });
+  parse('response.output_text.delta', { item_id: 'progress', output_index: 1, delta: '查询中' });
+  const thought = { type: 'reasoning', summary: [{ text: '思考' }] };
+  const output = [
+    { ...thought, id: 'upstream-r' },
+    { type: 'message', id: 'progress', content: [{ text: '查询中' }] },
+    { ...thought, id: 'second-r' },
+    { type: 'message', id: 'answer', content: [{ text: '完成' }] },
+  ];
+  assert.deepEqual(parse('response.completed', { response: { output } }), [
+    { type: 'reasoning_delta', text: '思考' },
+    { type: 'text_final', text: '完成' },
+    { type: 'terminal', status: 'completed' },
+  ]);
 });

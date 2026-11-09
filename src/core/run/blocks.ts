@@ -173,14 +173,21 @@ export function stripMirroredTerminalAnswerFromThinking(
 }
 
 /** upsert 工具块(对应 wework mergeProcessingBlock + finalize):
- *  先关闭打开的 thinking 块,再按 toolName 找已有 tool 块更新,否则新建。 */
+ *  有调用 ID 时只更新本次调用，旧事件按工具名匹配。 */
 export function upsertToolBlock(
   blocks: ProcessingBlock[] | undefined,
   toolName: string,
   patch: Partial<Omit<ToolBlock, 'id' | 'type' | 'toolName'>>,
 ): ProcessingBlock[] {
   const next = [...(blocks ?? [])];
-  const existingIndex = next.findIndex((b) => b.type === 'tool' && b.toolName === toolName);
+  const callId = patch.extra?.callId;
+  let existingIndex = callId
+    ? next.findIndex(b => b.type === 'tool' && b.extra?.callId === callId && b.toolName === toolName)
+    : -1;
+  if (existingIndex < 0) {
+    existingIndex = next.findLastIndex(b => b.type === 'tool' && b.toolName === toolName
+      && (!callId || (!b.extra?.callId && (b.status === 'running' || b.status === 'paused'))));
+  }
   if (existingIndex >= 0 && next[existingIndex].type === 'tool') {
     const existing = next[existingIndex] as ToolBlock;
     // 已是 error/completed 终态时,不被后续 running/completed 覆盖:
@@ -194,7 +201,7 @@ export function upsertToolBlock(
     }
     // 合并时保留 existing.extra:tool_upsert 的 extra 通常是 undefined(不传审批),
     // 不能用它覆盖 approval_requested 写的 extra(否则审批卡流式时不显示,刷新才出)。
-    const mergedExtra = patch.extra ?? existing.extra;
+    const mergedExtra = patch.extra ? { ...existing.extra, ...patch.extra } : existing.extra;
     next[existingIndex] = { ...existing, ...patch, extra: mergedExtra };
     return next;
   }

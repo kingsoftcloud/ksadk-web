@@ -417,7 +417,8 @@ export function ProcessingBlocksView({
         }
         if (block.type === 'tool') {
           const blockExtra = (block.extra || {}) as Record<string, unknown>;
-          const tool = message.tools?.[block.toolName]
+          const tool = (typeof blockExtra.callId === 'string' && message.tools?.[blockExtra.callId])
+            || message.tools?.[block.toolName]
             || Object.values(message.tools || {}).find(entry =>
               (blockExtra.approvalRequestId && entry.approvalRequestId === blockExtra.approvalRequestId)
               || (blockExtra.callId && entry.callId === blockExtra.callId));

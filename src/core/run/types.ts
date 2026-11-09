@@ -2,6 +2,7 @@ import type { RuntimeApiFormat } from '../../types/api.js';
 import type { AgentControlError, AgentControlReceipt } from '../../types/agent-control.js';
 import type { HostedChatTransport } from '../../types/api.js';
 import type { ModelCatalogItem } from '../../components/chat/types.js';
+import type { UiCapabilities } from '../../types/capabilities.js';
 import type { RuntimeCapabilityMatrix } from '../../types/agent-control.js';
 import type {
   ConversationClient,
@@ -41,8 +42,8 @@ export type RunEvent =
   | { type: 'text_replace'; messageId: string; text: string; sessionId?: string | null }
   | { type: 'text_final'; messageId: string; text: string; sessionId?: string | null }
   | { type: 'reasoning_delta'; messageId: string; delta: string; sessionId?: string | null }
-  | { type: 'tool_upsert'; messageId: string; name: string; args: string; status: string; extra?: Record<string, unknown>; sessionId?: string | null }
-  | { type: 'tool_result'; messageId: string; name: string; output: string; sessionId?: string | null }
+  | { type: 'tool_upsert'; messageId: string; name: string; callId?: string; args: string; status: string; extra?: Record<string, unknown>; sessionId?: string | null }
+  | { type: 'tool_result'; messageId: string; name: string; callId?: string; output: string; sessionId?: string | null }
   | {
       type: 'approval_requested';
       messageId: string;
@@ -112,6 +113,8 @@ export type RunEngineConfig = {
   selectedModel: string;
   selectedModelMetadata?: ModelCatalogItem | null;
   thinkingMode: string;
+  mcpAuthorization?: UiCapabilities['McpAuthorization'];
+  dshApprovalMode?: PermissionMode;
   permissionMode?: PermissionMode;
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
