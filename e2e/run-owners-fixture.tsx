@@ -25,7 +25,7 @@ let sessionQueries = 0;
 const api = {
   async getAgentUiBootstrap(agentId: string) {
     return { Agent: { AgentId: agentId, Name: agentId, Framework: 'hermes' },
-      Capabilities: { HostedChat: { Enabled: true, ApiFormats: ['responses'] }, StopRun: true },
+      Capabilities: { HostedChat: { Enabled: true, ApiFormats: ['responses'] }, Thinking: true, StopRun: true },
       Model: { id: `model-${agentId}`, display_name: `Model ${agentId}` } };
   },
   async listAgentModels(agentId: string) { return { Models: [{ id: `model-${agentId}` }], Current: `model-${agentId}` }; },
@@ -60,24 +60,36 @@ const api = {
     const stream = new ReadableStream<Uint8Array>({ start(value) { streamController = value; } });
     const event = (data: unknown) => streamController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`));
     const content = (body.Messages as Array<{ content: Array<{ text?: string }> }>)[0].content;
+    const frameEvent = `fixture:responses:${id}`;
+    const onFrame = (frame: Event) => event((frame as CustomEvent).detail);
+    function closeRun() {
+      run.closed = true;
+      window.removeEventListener(frameEvent, onFrame);
+      changed();
+    }
     const run = { id, agentId: String(body.AgentId), sessionId: String(body.SessionId),
       invocationId: String(body.InvocationId), text: content.map(part => part.text || '').join(''), body, closed: false,
       emit: () => { if (!run.closed) event({ type: 'response.output_text.delta', delta: `output ${id} ` }); },
       drop: () => {
         if (run.closed) return;
-        run.closed = true; streamController.error(new TypeError('Fixture connection lost')); changed();
+        streamController.error(new TypeError('Fixture connection lost'));
+        closeRun();
       },
       finish: () => {
         if (run.closed) return;
         event({ type: 'response.completed', response: { status: 'completed' } });
-        streamController.close(); run.closed = true; changed();
+        streamController.close();
+        closeRun();
       },
     };
+    // Browser tests can pace individual Responses frames for this run.
+    window.addEventListener(frameEvent, onFrame);
     runs.push(run);
     event({ type: 'response.in_progress' });
     options?.signal?.addEventListener('abort', () => {
       if (run.closed) return;
-      run.closed = true; streamController.error(new DOMException('Aborted', 'AbortError')); changed();
+      streamController.error(new DOMException('Aborted', 'AbortError'));
+      closeRun();
     }, { once: true });
     changed(); return stream;
   },
@@ -104,7 +116,7 @@ function App() {
         onSubmitFeedback={() => {}} onRespondToApproval={() => {}} />
     </section>
     <ConnectedComposer draftKey={chat.conversationId} draftStore={chat.conversationDrafts} composerMaxHeight={180}
-      isMobile={false} attachmentsEnabled={false} stopGeneration={chat.stop}
+      isMobile={false} thinkingEnabled attachmentsEnabled={false} stopGeneration={chat.stop}
       submitDraft={async (text, attachments) => chat.send(text, { attachments })} />
     <aside aria-label="Synthetic transport controls" style={{ paddingTop: 20 }}>
       {creations.filter(item => !item.done).map(item => <div key={item.id}>

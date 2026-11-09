@@ -498,3 +498,17 @@ test('responses stream utils mark terminal response events', async () => {
     ],
   );
 });
+
+test('a repeated reasoning snapshot cannot open a thought below the answer', async () => {
+  const { createResponsesStreamState, normalizeResponsesStreamEvent } = await loadResponsesStreamUtils();
+  const state = createResponsesStreamState();
+  const parse = (eventName, data) => normalizeResponsesStreamEvent({ eventName, data, state });
+  const item = { id: 'thought', type: 'reasoning', summary: [{ text: 'check' }] };
+  parse('response.reasoning_summary_text.delta', { item_id: item.id, delta: 'check' });
+  parse('response.output_text.delta', { item_id: 'answer', delta: 'done' });
+  assert.deepEqual(parse('response.output_item.done', { item }), []);
+  assert.deepEqual(parse('response.completed', { response: { output: [item] } }),
+    [{ type: 'terminal', status: 'completed' }]);
+  assert.deepEqual(parse('response.output_item.done', { item: { ...item, id: 'second' } }),
+    [{ type: 'reasoning_delta', text: 'check' }]);
+});

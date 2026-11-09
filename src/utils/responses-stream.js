@@ -13,7 +13,7 @@ export function createResponsesStreamState() {
     callIds: new Map(),
     currentResponseId: '',
     sawTextDelta: false,
-    sawReasoningDelta: false,
+    reasoningByItem: new Map(),
   };
 }
 
@@ -66,8 +66,7 @@ function itemKey(item, data) {
       item?.call_id ||
       data?.item_id ||
       data?.call_id ||
-      data?.output_index ||
-      '',
+      (data?.output_index ?? ''),
   );
 }
 
@@ -112,6 +111,7 @@ function extractCompletedText(data) {
 
   const output = Array.isArray(payload?.output) ? payload.output : [];
   for (const item of output) {
+    if (item?.type !== 'message') continue;
     const text = extractItemText(item);
     if (text) {
       return text;
@@ -145,6 +145,16 @@ function unwrapInterruptInfo(value) {
     };
   }
   return current;
+}
+
+// The same reasoning item can arrive as deltas, an item snapshot and again
+// in response.completed. A repeated snapshot must not open a new row.
+function reasoningActions(state, key, text, snapshot = false) {
+  if (!text) return [];
+  const previous = state.reasoningByItem.get(key) || '';
+  const delta = snapshot && text.startsWith(previous) ? text.slice(previous.length) : text;
+  state.reasoningByItem.set(key, snapshot ? text : previous + text);
+  return delta ? [{ type: 'reasoning_delta', text: delta }] : [];
 }
 
 function normalizeOutputItem({ data, state, status }) {
@@ -215,7 +225,7 @@ function normalizeOutputItem({ data, state, status }) {
 
   if (type === 'reasoning' || type === 'reasoning_summary' || type === 'reasoning_summary_text') {
     const text = extractItemText(item);
-    return text ? [{ type: 'reasoning_delta', text }] : [];
+    return reasoningActions(state, key, text, true);
   }
 
   if (type === 'message') {
@@ -275,8 +285,7 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     eventType === 'response.reasoning_summary_text.delta'
   ) {
     const text = firstString(data?.delta, data?.text);
-    if (text) state.sawReasoningDelta = true;
-    return text ? [{ type: 'reasoning_delta', text }] : [];
+    return reasoningActions(state, itemKey(null, data), text);
   }
 
   if (eventType === 'response.output_text.delta') {
@@ -299,8 +308,7 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
     const text = firstString(data?.delta?.text, data?.delta, data?.text);
     if (!text) return [];
     if (partType.includes('reasoning')) {
-      state.sawReasoningDelta = true;
-      return [{ type: 'reasoning_delta', text }];
+      return reasoningActions(state, itemKey(null, data), text);
     }
     state.sawTextDelta = true;
     return [{ type: 'text_delta', text }];
@@ -308,15 +316,14 @@ export function normalizeResponsesStreamEvent({ eventName, data, state }) {
 
   if (eventType === 'response.completed') {
     const text = extractCompletedText(data);
-    const outputActions = completedOutputItems(data).flatMap((item) => {
+    const outputActions = completedOutputItems(data).flatMap((item, output_index) => {
       return normalizeOutputItem({
-        data: { ...data, item },
+        data: { ...data, output_index, item },
         state,
         status: 'completed',
       });
     }).filter((action) => (
       !(state.sawTextDelta && action.type === 'text_final')
-      && !(state.sawReasoningDelta && action.type === 'reasoning_delta')
     ));
     const hasFinalTextAction = outputActions.some((action) => action.type === 'text_final');
     return [

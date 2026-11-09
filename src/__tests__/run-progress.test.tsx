@@ -49,7 +49,7 @@ describe('minimal trailing run feedback', () => {
   it('does not borrow an earlier turn or a queued turn to describe the active run', () => {
     const rows: Message[] = [...messages, { id: 'queued', role: 'user', content: '下一项', timestamp: 3 }];
     expect(label({ messages: rows })).toBe('正在等待工具返回…');
-    expect(label({ activity: { ...activity, runId: 'new' }, messages: rows })).toBe('正在思考…');
+    expect(label({ activity: { ...activity, runId: 'new' }, messages: rows })).toBe('正在等待回复…');
   });
 
   it.each([

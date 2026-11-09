@@ -745,7 +745,7 @@ function ChatMessage({
     );
   }
 
-  const reasoningStreaming = isStreaming && isLastMessage && !message.content;
+  const reasoningStreaming = isStreaming && isLastMessage && !message.content && !Object.keys(message.tools || {}).length;
 
   return (
     <div data-slot="assistant-message" className="group mx-auto mb-3 w-full max-w-[60rem] px-2 sm:px-4">
@@ -767,7 +767,7 @@ function ChatMessage({
       {message.agentBlock ? <AgentBlockView key={message.agentBlock.item.itemId} block={message.agentBlock} actions={agentBlockActions} /> : message.blocks?.length ? (
         <ProcessingBlocksView
           message={message}
-          isStreaming={isStreaming}
+          isStreaming={isStreaming && isLastMessage}
           onRespondToApproval={onRespondToApproval}
           interactionRecords={interactionRecords}
           onRespondToAguiApproval={onRespondToAguiApproval}

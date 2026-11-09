@@ -95,8 +95,10 @@ export function replaceTextBlocks(blocks: ProcessingBlock[] | undefined, text: s
   const base = blocks ?? [];
   const current = base.filter((block): block is TextBlock => block.type === 'text').map(block => block.content).join('');
   if (current === text) return base;
+  if (text.startsWith(current) && base.at(-1)?.type !== 'text') {
+    return appendTextBlock(base, text.slice(current.length));
+  }
   const textIndexes = base.flatMap((block, index) => block.type === 'text' ? [index] : []);
-  if (!textIndexes.length) return [...base, { id: nextId('text'), type: 'text', content: text, status: 'streaming' }];
   let prefix = 0;
   while (prefix < current.length && prefix < text.length && current[prefix] === text[prefix]) prefix++;
   let suffix = 0;
@@ -128,29 +130,21 @@ export function finalizeTextBlock(
   text: string,
 ): ProcessingBlock[] {
   const base = finalizeOpenThinkingBlocks(blocks ?? []);
-  const streamedText = base
-    .filter((block): block is TextBlock => block.type === 'text')
-    .map((block) => block.content)
-    .join('');
-
-  // Responses 的 output_text.done 是整轮输出的终态快照。若它正好等于已经
-  // 收到的 text delta 聚合，不能把它回填到最后一个块：这会把
-  // [思考1][文本1][思考2][文本2] 错误折叠成最后一个混合文本块。
-  if (streamedText === text) {
-    return base.map((block) =>
-      block.type === 'text' && block.status === 'streaming'
-        ? { ...block, status: 'done' as const }
-        : block,
-    );
+  const streamedText = base.flatMap(block => block.type === 'text' ? [block.content] : []).join('');
+  const last = base.at(-1);
+  let next = base;
+  if (text !== streamedText && last?.type !== 'text') {
+    // A tool or thought separates the earlier commentary from a final-only
+    // answer. Some transports seal the aggregate, others just the answer.
+    const tail = text.startsWith(streamedText) ? text.slice(streamedText.length) : text;
+    if (tail) next = [...base, { id: nextId('text'), type: 'text', content: tail, status: 'done' }];
+  } else if (last?.type === 'text' && text !== streamedText && text !== last.content) {
+    const prefix = streamedText.slice(0, streamedText.length - last.content.length);
+    const content = text.startsWith(prefix) ? text.slice(prefix.length) : text;
+    next = [...base.slice(0, -1), { ...last, content }];
   }
-
-  const next = [...base];
-  const lastIndex = next.map((b) => b.type).lastIndexOf('text');
-  if (lastIndex >= 0 && next[lastIndex].type === 'text') {
-    next[lastIndex] = { ...(next[lastIndex] as TextBlock), content: text, status: 'done' };
-    return next;
-  }
-  return [...next, { id: nextId('text'), type: 'text', content: text, status: 'done' }];
+  return next.map(block => block.type === 'text' && block.status === 'streaming'
+    ? { ...block, status: 'done' } : block);
 }
 
 /**
@@ -185,8 +179,7 @@ export function upsertToolBlock(
   toolName: string,
   patch: Partial<Omit<ToolBlock, 'id' | 'type' | 'toolName'>>,
 ): ProcessingBlock[] {
-  const base = finalizeOpenThinkingBlocks(blocks ?? []);
-  const next = [...base];
+  const next = [...(blocks ?? [])];
   const existingIndex = next.findIndex((b) => b.type === 'tool' && b.toolName === toolName);
   if (existingIndex >= 0 && next[existingIndex].type === 'tool') {
     const existing = next[existingIndex] as ToolBlock;
@@ -206,7 +199,7 @@ export function upsertToolBlock(
     return next;
   }
   return [
-    ...next,
+    ...finalizeOpenThinkingBlocks(next),
     {
       id: nextId('tool'),
       type: 'tool',

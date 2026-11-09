@@ -69,9 +69,8 @@ function Collapsible({
   );
 }
 
-function ThinkingRow({ block }: { block: ThinkingBlock }) {
+function ThinkingRow({ block, generating }: { block: ThinkingBlock; generating: boolean }) {
   const [open, setOpen] = useState(false);
-  const generating = block.status === 'streaming';
   const len = block.content.length;
   const detailId = `${block.id}-thinking-detail`;
 
@@ -402,6 +401,7 @@ function TextRow({ block }: { block: TextBlock }) {
 
 export function ProcessingBlocksView({
   message,
+  isStreaming,
   interactionRecords,
   renderProcessingBlock,
   className,
@@ -413,7 +413,7 @@ export function ProcessingBlocksView({
         const rendered = renderProcessingBlock?.(block, message);
         if (rendered !== undefined) return <Fragment key={block.id}>{rendered}</Fragment>;
         if (block.type === 'thinking') {
-          return <ThinkingRow key={block.id} block={block} />;
+          return <ThinkingRow key={block.id} block={block} generating={isStreaming && block === blocks.at(-1) && block.status === 'streaming'} />;
         }
         if (block.type === 'tool') {
           const blockExtra = (block.extra || {}) as Record<string, unknown>;
