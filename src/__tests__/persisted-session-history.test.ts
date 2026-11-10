@@ -136,6 +136,50 @@ describe('legacy terminal receipts observed in control fallback history', () => 
 });
 
 describe('rebuildPersistedSessionHistory', () => {
+  it('replays a LangGraph rejection by run, scope and call ID without settling its siblings as rejected', () => {
+    const tool = (callId: string) => ({ name: 'search', callId, args: '{}', status: 'running' as const });
+    const row: Message = { id: 'row', role: 'model', content: 'answer', timestamp: 1,
+      invocationId: 'run', scopeId: 'search-node', blocks: [{
+        type: 'tool', id: 'block-one', toolName: 'search', args: '{}', status: 'running', extra: { callId: 'one' },
+      }], tools: {
+        denied: tool('one'), pending: tool('two'), done: { ...tool('three'), status: 'completed', output: 'ok' },
+      } };
+    const sibling = { ...row, id: 'sibling', scopeId: 'other-node' };
+    const otherRun = { ...row, id: 'other-run', invocationId: 'another-run' };
+    const frame = (event: Record<string, unknown>, seq: number) => ({
+      SessionId: 'session', InvocationId: 'run', SeqId: seq, EventType: 'runtime_event',
+      Content: { runtime_event: { run_id: 'run', ...event } },
+    });
+    const decision = { SessionId: 'session', InvocationId: 'run', SeqId: 80, EventType: 'interaction.resolved',
+      Content: { session_event: { family: 'interaction', event_type: 'interaction.resolved', session_id: 'session',
+        payload: { interaction_id: 'approval', kind: 'approval', run_id: 'run', outcome: 'rejected', revision: 2 } } } };
+    const receipt = frame({ event_type: 'item.completed', item_kind: 'data', scope_id: 'search-node',
+      source: { framework: 'langgraph' }, snapshot: { parts: [{ content_type: 'data', data: {
+        'HumanInTheLoopMiddleware.after_model': { messages: [
+          { type: 'tool', status: 'error', tool_call_id: 'one' },
+          { type: 'tool', status: 'success', tool_call_id: 'two' },
+        ] },
+      } }] } }, 70);
+    const unscoped = { ...row, id: 'unscoped', scopeId: undefined };
+    const fallback = [row, sibling, otherRun, unscoped];
+    const rebuilt = rebuildPersistedSessionHistory(fallback, [receipt, decision], 'session').messages;
+    const denied = rebuilt.find(m => m.id === row.id)!;
+    expect(denied.tools?.denied).toMatchObject({ status: 'completed', approvalStatus: 'rejected' });
+    expect(denied.tools?.denied.output).toBeUndefined();
+    expect(denied.blocks).toContainEqual(expect.objectContaining({ type: 'tool', status: 'completed',
+      extra: expect.objectContaining({ callId: 'one', approvalStatus: 'rejected' }) }));
+    expect(denied.tools?.pending).toEqual(row.tools!.pending);
+    expect(denied.tools?.done).toEqual(row.tools!.done);
+    for (const unaffected of [sibling, otherRun, unscoped]) {
+      expect(rebuilt.find(m => m.id === unaffected.id)?.tools?.denied).toEqual(tool('one'));
+    }
+    const end = frame({ event_type: 'run.completed' }, 95);
+    const missingReceipt = rebuildPersistedSessionHistory(fallback, [decision, end], 'session').messages;
+    const unlinked = missingReceipt.find(m => m.id === row.id)!.tools!.denied;
+    expect(unlinked.status).toBe('unknown');
+    expect(unlinked.approvalStatus).toBeUndefined();
+  });
+
   it('normalises RuntimeEvent Unix seconds before ordering with millisecond message rows', () => {
     const fallback: Message[] = [{
       id: 'user-1',

@@ -225,6 +225,22 @@ describe('RunEngineImpl', () => {
     engine.start({ text: 'hello', sessionId: 'session', attachments: [] });
     await waitForCalls(calls);
     expect(calls[0].Metadata).toEqual({ agentengine: dshApprovalMode ? { tool_approval_mode: dshApprovalMode } : {} });
+    expect(calls[0]).not.toHaveProperty('ContinueOnDisconnect');
+    await waitForEngineIdle(engine);
+  });
+
+  it.each(['dsh', 'ksadk'])('requests disconnect survival only for a replayable DSH transport (%s)', async runtime => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'codex', apiFormats: ['responses'],
+      selectedModel: '', thinkingMode: 'auto', hostedChatTransport: {
+        Protocol: 'responses', Runtime: runtime, Version: 'v1', Endpoint: '/RunAgent',
+        Capabilities: { A2UI: false, Interrupt: false, Cancel: true, SessionEventReplay: true },
+      } });
+    engine.start({ text: 'hello', sessionId: 'session', attachments: [] });
+    await waitForCalls(calls);
+    expect(calls[0].ContinueOnDisconnect).toBe(runtime === 'dsh' ? true : undefined);
+    expect(calls[0]).not.toHaveProperty('Background');
     await waitForEngineIdle(engine);
   });
 

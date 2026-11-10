@@ -279,6 +279,11 @@ export function isNativeTerminalEnabled(capabilities) {
   return normalizeCapabilities({ Data: { Capabilities: capabilities } }).NativeTerminal.Enabled;
 }
 
+export function isReplayableDshTransport(transport) {
+  return transport?.Runtime === 'dsh' && transport.Protocol === 'responses'
+    && transport.Capabilities?.SessionEventReplay === true;
+}
+
 export function resolveHostedChatTransport(capabilities, options = {}) {
   const hostedChat = normalizeCapabilities({ Data: { Capabilities: capabilities } }).HostedChat;
   const preferred = hostedChat.Transports.find(

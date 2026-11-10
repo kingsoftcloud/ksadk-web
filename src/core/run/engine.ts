@@ -24,6 +24,7 @@ import { getErrorMessage } from '../../utils/error.js';
 import { ApiError, CancelledError } from '../../api/errors.js';
 import { buildModelOptionsFromThinkingMode, normalizeThinkingMode } from '../../utils/model-options.js';
 import { resolveRunAgentApiFormat } from '../../utils/layout-constants.js';
+import { isReplayableDshTransport } from '../../utils/capabilities.js';
 import { useStreamingStore } from '../../stores/streaming.js';
 import { KernelRunEventTranslator, peekKernelReceipt } from '../stream/kernel-events.js';
 import type { StreamProtocol } from '../stream/types.js';
@@ -1214,6 +1215,7 @@ export class RunEngineImpl implements RunEngine {
       SessionId: sessionId,
       InvocationId: invocationId,
       Stream: true,
+      ...(isReplayableDshTransport(this.config.hostedChatTransport) ? { ContinueOnDisconnect: true } : {}),
       ...(this.config.kernelSessionEventsEnabled ? { Background: true } : {}),
       ...(Object.keys(extensions).length ? { Extensions: extensions } : {}),
       ApiFormat: apiFormat,
