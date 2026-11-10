@@ -356,7 +356,7 @@ test('responses stream utils do not use reasoning items as completed text', asyn
       state,
     }),
     [
-      { type: 'reasoning_delta', text: '先分析问题' },
+      { type: 'reasoning_delta', itemId: 'rs_1', text: '先分析问题' },
       { type: 'text_final', text: '最终答案' },
       { type: 'terminal', status: 'completed' },
     ],
@@ -453,7 +453,7 @@ test('responses stream utils normalize tools and reasoning from completed respon
       state,
     }),
     [
-      { type: 'reasoning_delta', text: '需要先搜索资料' },
+      { type: 'reasoning_delta', itemId: 'rs_1', text: '需要先搜索资料' },
       {
         type: 'tool_upsert',
         callId: 'call_1',
@@ -515,7 +515,7 @@ test('a repeated reasoning snapshot cannot open a thought below the answer', asy
   assert.deepEqual(parse('response.completed', { response: { output: [item] } }),
     [{ type: 'terminal', status: 'completed' }]);
   assert.deepEqual(parse('response.output_item.done', { item: { ...item, id: 'second' } }),
-    [{ type: 'reasoning_delta', text: 'check' }]);
+    [{ type: 'reasoning_delta', itemId: 'second', text: 'check' }]);
 });
 
 test('completed output reconciles bridged IDs and keeps a final-only message', async () => {
@@ -532,7 +532,7 @@ test('completed output reconciles bridged IDs and keeps a final-only message', a
     { type: 'message', id: 'answer', content: [{ text: '完成' }] },
   ];
   assert.deepEqual(parse('response.completed', { response: { output } }), [
-    { type: 'reasoning_delta', text: '思考' },
+    { type: 'reasoning_delta', itemId: 'second-r', text: '思考' },
     { type: 'text_final', text: '完成' },
     { type: 'terminal', status: 'completed' },
   ]);

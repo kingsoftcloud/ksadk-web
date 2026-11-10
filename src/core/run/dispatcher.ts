@@ -6,6 +6,7 @@ import {
   appendTextBlock,
   finalizeTextBlock,
   replaceTextBlocks,
+  replaceThinkingItem,
   finalizeThinkingBlocks,
   stripMirroredTerminalAnswerFromThinking,
   upsertToolBlock,
@@ -243,11 +244,19 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
             ? {
                 ...msg,
                 reasoning: (msg.reasoning || '') + event.delta,
-                blocks: appendThinkingBlock(msg.blocks, event.delta),
+                blocks: appendThinkingBlock(msg.blocks, event.delta, event.itemId),
               }
             : msg,
         ),
       );
+      break;
+
+    case 'reasoning_snapshot':
+      ms.patchMessages(prev => prev.map(msg => {
+        if (msg.id !== event.messageId || !msg.blocks) return msg;
+        const blocks = replaceThinkingItem(msg.blocks, event.itemId, event.text);
+        return { ...msg, blocks, reasoning: blocks.flatMap(block => block.type === 'thinking' ? [block.content] : []).join('') };
+      }));
       break;
 
     case 'tool_upsert': {

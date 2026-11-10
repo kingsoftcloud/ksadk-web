@@ -171,7 +171,7 @@ for (const [mode, label] of [['enabled', '开启'], ['disabled', '关闭']]) {
     await expect.poll(async () => (await audit(page)).runs[0]?.body.ModelOptions?.thinking.type).toBe(mode);
     await expect(timeline.getByTestId('run-progress-indicator')).toHaveText('正在等待回复…');
     if (mode === 'enabled') {
-      await frame({ type: 'response.reasoning.delta', item_id: 'r1', delta: '先确定范围。' });
+      await frame({ type: 'response.reasoning.delta', item_id: 'r1', output_index: 0, delta: '先确定范围。' });
       await expect(thought).toHaveCount(1);
       await thought.click();
       await expect(timeline.getByText('先确定范围。')).toBeVisible();
@@ -187,6 +187,13 @@ for (const [mode, label] of [['enabled', '开启'], ['disabled', '关闭']]) {
       await expect(thought).toHaveCount(1);
     }
     await frame({ type: 'response.output_text.done', text: '找到三条。' });
+    if (mode === 'enabled') {
+      await frame({ type: 'response.output_item.done', output_index: 0, item: {
+        id: 'upstream-r1', type: 'reasoning', summary: [{ text: '先确定范围，再核对来源。' }],
+      } });
+      await expect(timeline.locator('[data-slot="processing-blocks"] > div').first())
+        .toContainText('先确定范围，再核对来源。');
+    }
     await click(page, 'Finish run 1');
     await expect(timeline.getByTestId('run-progress-indicator')).toHaveCount(0);
     const expected = mode === 'enabled'

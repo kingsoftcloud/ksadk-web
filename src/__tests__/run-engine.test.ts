@@ -1472,6 +1472,36 @@ describe('RunEngineImpl', () => {
       .toBe('运行失败：云端运行时尚未就绪，请检查部署状态后重试');
   });
 
+  it.each(['check sources', 'verify sources'])('updates the original thought when its terminal snapshot says %s', async (summary) => {
+    const calls: Record<string, unknown>[] = [];
+    const frames = [
+      ['response.reasoning.delta', { item_id: 'bridge-1', output_index: 0, delta: 'check' }],
+      ['response.output_text.delta', { item_id: 'message-1', output_index: 1, delta: 'answer' }],
+      ['response.completed', { response: { output: [
+        { id: 'upstream-1', type: 'reasoning', summary: [{ text: summary }] },
+        { id: 'message-1', type: 'message', content: [{ text: 'answer' }] },
+      ] } }],
+    ];
+    const engine = createRunEngine({ ...createApiFacade(calls), async runAgent(body) {
+      calls.push(body);
+      const sse = frames.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+      return new Response(sse).body!;
+    } });
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'langgraph', apiFormats: ['responses'],
+      selectedModel: '', thinkingMode: 'auto' });
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-1');
+    engine.start({ text: 'question', attachments: [], sessionId: 'session-1' });
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+    const message = useMessageStore.getState().messages.find(row => row.role === 'model');
+    expect(message?.blocks).toEqual([
+      expect.objectContaining({ type: 'thinking', content: summary }),
+      expect.objectContaining({ type: 'text', content: 'answer' }),
+    ]);
+    expect(message?.reasoning).toBe(summary);
+  });
+
   it('removes only a terminal answer mirrored at the tail of legacy reasoning', () => {
     dispatchRunEventToStores({
       type: 'reasoning_delta',

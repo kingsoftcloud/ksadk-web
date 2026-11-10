@@ -12,6 +12,7 @@ export type BlockStatus = 'streaming' | 'done' | 'error';
 export interface ThinkingBlock {
   id: string;
   type: 'thinking';
+  itemId?: string;
   content: string;
   status: BlockStatus;
   /** Explicit public provenance retained for host presentation policies. */
@@ -62,17 +63,31 @@ function finalizeOpenThinkingBlocks(blocks: ProcessingBlock[]): ProcessingBlock[
 export function appendThinkingBlock(
   blocks: ProcessingBlock[] | undefined,
   delta: string,
+  itemId?: string,
 ): ProcessingBlock[] {
   const next = [...(blocks ?? [])];
   const last = next[next.length - 1];
-  if (last?.type === 'thinking' && last.status === 'streaming') {
+  if (last?.type === 'thinking' && last.status === 'streaming' && last.itemId === itemId) {
     next[next.length - 1] = { ...last, content: last.content + delta };
     return next;
   }
   return [
-    ...next,
-    { id: nextId('thinking'), type: 'thinking', content: delta, status: 'streaming' },
+    ...finalizeOpenThinkingBlocks(next),
+    { id: nextId('thinking'), type: 'thinking', content: delta, status: 'streaming', ...(itemId && { itemId }) },
   ];
+}
+
+export function replaceThinkingItem(blocks: ProcessingBlock[], itemId: string, text: string): ProcessingBlock[] {
+  const matches = (block: ProcessingBlock): block is ThinkingBlock => block.type === 'thinking' && block.itemId === itemId;
+  const last = blocks.findLastIndex(matches);
+  let offset = 0;
+  return blocks.flatMap<ProcessingBlock>((block, index) => {
+    if (!matches(block)) return [block];
+    const end = index === last ? text.length : offset + block.content.length;
+    const content = text.slice(offset, end);
+    offset = end;
+    return content ? [{ ...block, content }] : [];
+  });
 }
 
 /** 追加正文 delta:先关闭打开的 thinking,再追加到最后一个流式 text 块(或新建)。 */

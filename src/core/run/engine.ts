@@ -1568,8 +1568,9 @@ export class RunEngineImpl implements RunEngine {
         this.emit({ type: 'text_final', messageId, text: action.text });
         break;
       case 'reasoning_delta':
-        this.emit({ type: 'reasoning_delta', messageId, delta: action.text });
+        this.emit({ type: 'reasoning_delta', messageId, delta: action.text, ...(action.itemId && { itemId: action.itemId }) });
         break;
+      case 'reasoning_snapshot':
       case 'tool_upsert':
       case 'tool_result':
         this.emit({ ...action, messageId });

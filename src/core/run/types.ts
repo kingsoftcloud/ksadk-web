@@ -41,7 +41,8 @@ export type RunEvent =
   | { type: 'text_delta'; messageId: string; delta: string; sessionId?: string | null }
   | { type: 'text_replace'; messageId: string; text: string; sessionId?: string | null }
   | { type: 'text_final'; messageId: string; text: string; sessionId?: string | null }
-  | { type: 'reasoning_delta'; messageId: string; delta: string; sessionId?: string | null }
+  | { type: 'reasoning_delta'; messageId: string; delta: string; itemId?: string; sessionId?: string | null }
+  | { type: 'reasoning_snapshot'; messageId: string; text: string; itemId: string; sessionId?: string | null }
   | { type: 'tool_upsert'; messageId: string; name: string; callId?: string; args: string; status: string; extra?: Record<string, unknown>; sessionId?: string | null }
   | { type: 'tool_result'; messageId: string; name: string; callId?: string; output: string; sessionId?: string | null }
   | {

@@ -160,15 +160,20 @@ function unwrapInterruptInfo(value) {
 // in response.completed. A repeated snapshot must not open a new row.
 function reasoningActions(state, key, text, outputIndex, snapshot = false) {
   if (!text) return [];
-  const previous = state.reasoningByItem.get(key) || '';
+  // Bridges may switch from local to upstream item IDs in a terminal snapshot.
+  const entry = state.reasoningByItem.get(key)
+    ?? (snapshot ? state.reasoningByIndex.get(outputIndex) : undefined)
+    ?? { itemId: key, text: '' };
+  const previous = entry.text;
+  entry.text = snapshot ? text : previous + text;
+  state.reasoningByItem.set(key, entry);
+  if (Number.isInteger(outputIndex)) state.reasoningByIndex.set(outputIndex, entry);
+  if (snapshot && previous) {
+    if (text === previous) return [];
+    if (entry.itemId) return [{ type: 'reasoning_snapshot', itemId: entry.itemId, text }];
+  }
   const delta = snapshot && text.startsWith(previous) ? text.slice(previous.length) : text;
-  const content = snapshot ? text : previous + text;
-  // A Responses bridge can use its own item IDs while streaming and the
-  // upstream IDs at completion. Its repeated snapshot still occupies the same slot.
-  const repeated = snapshot && state.reasoningByIndex.get(outputIndex) === text;
-  state.reasoningByItem.set(key, content);
-  if (Number.isInteger(outputIndex)) state.reasoningByIndex.set(outputIndex, content);
-  return delta && !repeated ? [{ type: 'reasoning_delta', text: delta }] : [];
+  return [{ type: 'reasoning_delta', text: delta, ...(entry.itemId && { itemId: entry.itemId }) }];
 }
 
 function normalizeOutputItem({ data, state, status }) {
