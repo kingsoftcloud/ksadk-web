@@ -179,6 +179,7 @@ export function sessionEventRunStatus(event) {
   return String(
     event?.Content?.status
       || payload.status
+      || (eventType === 'run_status' && event?.Metadata?.status)
       || RUNTIME_RUN_STATUS_BY_EVENT_TYPE[eventType]
       || '',
   ).trim().toLowerCase();

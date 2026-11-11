@@ -1,5 +1,26 @@
 import { mergeSessionEventRecords } from './session-events.js';
 import type { SessionEventRecord } from '../types/session-events.js';
+import type { ApiFacade } from '../core/api/types.js';
+
+/** The DSH control directory may omit the invocation that owns the native stream. */
+export async function readDshRunStatus(
+  api: ApiFacade, sessionId: string,
+  source: { CursorSource?: string; HistoryEpoch?: string; SnapshotSeqId?: number },
+  cached?: { events: SessionEventRecord[]; loadedCount: number; total: number }, signal?: AbortSignal,
+): Promise<SessionEventRecord | undefined> {
+  if (source.CursorSource !== 'runtime') return;
+  const latest = cached?.events.filter(event => event.EventType === 'run_status')
+    .sort((a, b) => Number(b.SeqId) - Number(a.SeqId))[0];
+  if (latest || (cached && cached.loadedCount >= cached.total)) return latest;
+
+  // A long reply can push its start outside the visible event page.
+  const page = await api.listSessionEvents(sessionId, {
+    eventTypes: ['run_status'], limit: 1, cursorSource: source.CursorSource,
+    historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId, signal,
+  });
+  if (page.CursorSource === source.CursorSource && page.HistoryEpoch === source.HistoryEpoch
+    && page.SnapshotSeqId === source.SnapshotSeqId) return page.Events[0] as SessionEventRecord | undefined;
+}
 
 export type ListSessionEventsPage = {
   Events?: unknown[];

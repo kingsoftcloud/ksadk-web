@@ -12,6 +12,7 @@ import type {
 import type { ApiFacade } from '../core/api/types.js';
 import { useA2uiCatalogRegistry } from '../core/a2ui/provider.js';
 import { isUserPendingInteraction } from '../core/interaction/pending.js';
+import { useBootstrapStore } from '../stores/bootstrap.js';
 
 import { observeMcpConnections } from '../core/mcp-authorization/recovery.js';
 
@@ -70,24 +71,17 @@ export function useInteractions(ctx: UseInteractionsContext) {
     return sharedInteractionStore.subscribe(() => setVersion((v) => v + 1));
   }, []);
 
-  const pending = useMemo<readonly Interaction[]>(() => {
-    void version;
-    return ctx.currentSessionId
-      ? sharedInteractionStore
-          .listAll(ctx.currentSessionId)
-          .filter(isUserPendingInteraction)
-      : [];
-  }, [version, ctx.currentSessionId]);
-
+  const shareLink = useBootstrapStore(s => s.accessMode === 'Share');
   const records = useMemo<readonly Interaction[]>(() => {
     void version;
-    return ctx.currentSessionId
-      ? sharedInteractionStore.listAll(ctx.currentSessionId)
-      : [];
-  }, [version, ctx.currentSessionId]);
+    if (!ctx.currentSessionId) return [];
+    const items = sharedInteractionStore.listAll(ctx.currentSessionId);
+    return shareLink ? items.filter(item => !item.extensions.mcpAuthorization) : items;
+  }, [version, ctx.currentSessionId, shareLink]);
+  const pending = useMemo(() => records.filter(isUserPendingInteraction), [records]);
 
   const { currentSessionId, interactionV1Enabled, onAcceptedInteraction } = ctx;
-  const requestAuthorization = ctx.api.mcpAuthorization;
+  const requestAuthorization = shareLink ? undefined : ctx.api.mcpAuthorization;
   const reloadHistory = ctx.reloadHistory;
   useEffect(() => {
     if (currentSessionId && requestAuthorization) {

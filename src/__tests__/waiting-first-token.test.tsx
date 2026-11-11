@@ -14,13 +14,13 @@ describe('first-token waiting surface', () => {
       { id: 'pending', role: 'model', content: '', timestamp: 2, eventType: 'optimistic_assistant_placeholder' },
     ]} />);
     expect(html).toContain('waiting-thinking-text');
-    expect(html).toContain('正在思考…');
+    expect(html).toContain('正在等待回复…');
     expect(html).not.toContain('waiting-generation-breathe');
   });
 
   it('does not show the welcome surface while a draft submission is pending', () => {
     const html = renderToStaticMarkup(<ChatMessageList {...props} isStreaming showWaitingIndicator messages={[]} emptyState={<p>欢迎</p>} />);
-    expect(html).toContain('正在思考…');
+    expect(html).toContain('正在等待回复…');
     expect(html).not.toContain('欢迎');
   });
 });

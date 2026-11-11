@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { RunEngineImpl } from '../core/run/engine.js';
 import type { ApiFacade } from '../core/api/types.js';
+import { ApiFacadeImpl } from '../core/api/facade.js';
+import { MCP_AUTHORIZATION_CAPABILITY as oauth } from '../core/mcp-authorization/contract.js';
 import type { RunEvent } from '../core/run/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { useMessageStore } from '../stores/message.js';
@@ -192,6 +194,74 @@ function canonicalResultWithUser(text: string): ConversationStreamResult {
 }
 
 describe('RunEngineImpl', () => {
+  it.each([
+    ['langgraph', oauth, true], ['LangGraph', oauth, true], ['langgraph', undefined, false],
+    ['langgraph', { ...oauth, digest: 'unknown' }, false],
+    ['langgraph', { ...oauth, schema: 'future' }, false],
+    ['codex', oauth, false], ['harness', undefined, false], ['dsh-native', undefined, false],
+  ] as const)('negotiates MCP authorization on the %s RunAgent request (%j)', async (agentFramework, mcpAuthorization, supported) => {
+    const calls: Record<string, unknown>[] = [];
+    const facade = new ApiFacadeImpl({ fetch: async (_url, init) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return new Response('data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+    } });
+    const engine = createRunEngine(facade);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework, mcpAuthorization,
+      apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+    engine.start({ text: 'hello', sessionId: 'session-a', attachments: [] });
+    await waitForCalls(calls);
+    if (supported) expect(calls[0].Extensions).toEqual({ 'mcp.authorization': oauth });
+    else expect(calls[0]).not.toHaveProperty('Extensions');
+    await waitForEngineIdle(engine);
+  });
+
+  it.each([undefined, 'ask', 'risk'] as const)('uses the DSH deployment approval mode %s for a normal chat', async dshApprovalMode => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'codex', apiFormats: ['responses'], selectedModel: '',
+      thinkingMode: 'auto', permissionMode: 'full', dshApprovalMode,
+      hostedChatTransport: { Protocol: 'responses', Runtime: 'dsh', Version: 'v1', Endpoint: '/RunAgent',
+        Capabilities: { A2UI: false, Interrupt: false, Cancel: true } } });
+    engine.start({ text: 'hello', sessionId: 'session', attachments: [] });
+    await waitForCalls(calls);
+    expect(calls[0].Metadata).toEqual({ agentengine: dshApprovalMode ? { tool_approval_mode: dshApprovalMode } : {} });
+    expect(calls[0]).not.toHaveProperty('ContinueOnDisconnect');
+    await waitForEngineIdle(engine);
+  });
+
+  it.each(['dsh', 'ksadk'])('requests disconnect survival only for a replayable DSH transport (%s)', async runtime => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'codex', apiFormats: ['responses'],
+      selectedModel: '', thinkingMode: 'auto', hostedChatTransport: {
+        Protocol: 'responses', Runtime: runtime, Version: 'v1', Endpoint: '/RunAgent',
+        Capabilities: { A2UI: false, Interrupt: false, Cancel: true, SessionEventReplay: true },
+      } });
+    engine.start({ text: 'hello', sessionId: 'session', attachments: [] });
+    await waitForCalls(calls);
+    expect(calls[0].ContinueOnDisconnect).toBe(runtime === 'dsh' ? true : undefined);
+    expect(calls[0]).not.toHaveProperty('Background');
+    await waitForEngineIdle(engine);
+  });
+
+  it('keeps each tool call in place when same-name results complete out of order', () => {
+    const ids = { sessionId: 'tools-session', messageId: 'tools-message' };
+    useSessionStore.getState().setCurrentSessionId(ids.sessionId);
+    for (const callId of ['one', 'two']) {
+      dispatchRunEventToStores({ ...ids, type: 'tool_upsert', name: 'lookup', callId, args: '', status: 'running' });
+      dispatchRunEventToStores({ ...ids, type: 'text_delta', delta: callId });
+    }
+    for (const callId of ['two', 'one']) {
+      dispatchRunEventToStores({ ...ids, type: 'tool_result', name: 'lookup', callId, output: callId });
+    }
+    const message = useMessageStore.getState().messages[0];
+    expect(message.blocks).toMatchObject([
+      { type: 'tool', output: 'one' }, { type: 'text', content: 'one' },
+      { type: 'tool', output: 'two' }, { type: 'text', content: 'two' },
+    ]);
+    expect(Object.values(message.tools ?? {}).map(tool => [tool.callId, tool.output])).toEqual([['one', 'one'], ['two', 'two']]);
+  });
+
   it.each([false, true])('does not send revoked permissions in a request (resume=%s)', async resume => {
     const calls: Record<string, unknown>[] = [];
     const engine = createRunEngine(createApiFacade(calls));
@@ -1400,6 +1470,36 @@ describe('RunEngineImpl', () => {
     });
     expect(useMessageStore.getState().messages.at(-1)?.content)
       .toBe('运行失败：云端运行时尚未就绪，请检查部署状态后重试');
+  });
+
+  it.each(['check sources', 'verify sources'])('updates the original thought when its terminal snapshot says %s', async (summary) => {
+    const calls: Record<string, unknown>[] = [];
+    const frames = [
+      ['response.reasoning.delta', { item_id: 'bridge-1', output_index: 0, delta: 'check' }],
+      ['response.output_text.delta', { item_id: 'message-1', output_index: 1, delta: 'answer' }],
+      ['response.completed', { response: { output: [
+        { id: 'upstream-1', type: 'reasoning', summary: [{ text: summary }] },
+        { id: 'message-1', type: 'message', content: [{ text: 'answer' }] },
+      ] } }],
+    ];
+    const engine = createRunEngine({ ...createApiFacade(calls), async runAgent(body) {
+      calls.push(body);
+      const sse = frames.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+      return new Response(sse).body!;
+    } });
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'langgraph', apiFormats: ['responses'],
+      selectedModel: '', thinkingMode: 'auto' });
+    engine.subscribe(dispatchRunEventToStores);
+    useSessionStore.getState().setCurrentSessionId('session-1');
+    engine.start({ text: 'question', attachments: [], sessionId: 'session-1' });
+    await waitForCalls(calls);
+    await waitForEngineIdle(engine);
+    const message = useMessageStore.getState().messages.find(row => row.role === 'model');
+    expect(message?.blocks).toEqual([
+      expect.objectContaining({ type: 'thinking', content: summary }),
+      expect.objectContaining({ type: 'text', content: 'answer' }),
+    ]);
+    expect(message?.reasoning).toBe(summary);
   });
 
   it('removes only a terminal answer mirrored at the tail of legacy reasoning', () => {

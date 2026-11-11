@@ -12,6 +12,7 @@ export type BlockStatus = 'streaming' | 'done' | 'error';
 export interface ThinkingBlock {
   id: string;
   type: 'thinking';
+  itemId?: string;
   content: string;
   status: BlockStatus;
   /** Explicit public provenance retained for host presentation policies. */
@@ -62,17 +63,31 @@ function finalizeOpenThinkingBlocks(blocks: ProcessingBlock[]): ProcessingBlock[
 export function appendThinkingBlock(
   blocks: ProcessingBlock[] | undefined,
   delta: string,
+  itemId?: string,
 ): ProcessingBlock[] {
   const next = [...(blocks ?? [])];
   const last = next[next.length - 1];
-  if (last?.type === 'thinking' && last.status === 'streaming') {
+  if (last?.type === 'thinking' && last.status === 'streaming' && last.itemId === itemId) {
     next[next.length - 1] = { ...last, content: last.content + delta };
     return next;
   }
   return [
-    ...next,
-    { id: nextId('thinking'), type: 'thinking', content: delta, status: 'streaming' },
+    ...finalizeOpenThinkingBlocks(next),
+    { id: nextId('thinking'), type: 'thinking', content: delta, status: 'streaming', ...(itemId && { itemId }) },
   ];
+}
+
+export function replaceThinkingItem(blocks: ProcessingBlock[], itemId: string, text: string): ProcessingBlock[] {
+  const matches = (block: ProcessingBlock): block is ThinkingBlock => block.type === 'thinking' && block.itemId === itemId;
+  const last = blocks.findLastIndex(matches);
+  let offset = 0;
+  return blocks.flatMap<ProcessingBlock>((block, index) => {
+    if (!matches(block)) return [block];
+    const end = index === last ? text.length : offset + block.content.length;
+    const content = text.slice(offset, end);
+    offset = end;
+    return content ? [{ ...block, content }] : [];
+  });
 }
 
 /** 追加正文 delta:先关闭打开的 thinking,再追加到最后一个流式 text 块(或新建)。 */
@@ -95,8 +110,10 @@ export function replaceTextBlocks(blocks: ProcessingBlock[] | undefined, text: s
   const base = blocks ?? [];
   const current = base.filter((block): block is TextBlock => block.type === 'text').map(block => block.content).join('');
   if (current === text) return base;
+  if (text.startsWith(current) && base.at(-1)?.type !== 'text') {
+    return appendTextBlock(base, text.slice(current.length));
+  }
   const textIndexes = base.flatMap((block, index) => block.type === 'text' ? [index] : []);
-  if (!textIndexes.length) return [...base, { id: nextId('text'), type: 'text', content: text, status: 'streaming' }];
   let prefix = 0;
   while (prefix < current.length && prefix < text.length && current[prefix] === text[prefix]) prefix++;
   let suffix = 0;
@@ -128,29 +145,21 @@ export function finalizeTextBlock(
   text: string,
 ): ProcessingBlock[] {
   const base = finalizeOpenThinkingBlocks(blocks ?? []);
-  const streamedText = base
-    .filter((block): block is TextBlock => block.type === 'text')
-    .map((block) => block.content)
-    .join('');
-
-  // Responses 的 output_text.done 是整轮输出的终态快照。若它正好等于已经
-  // 收到的 text delta 聚合，不能把它回填到最后一个块：这会把
-  // [思考1][文本1][思考2][文本2] 错误折叠成最后一个混合文本块。
-  if (streamedText === text) {
-    return base.map((block) =>
-      block.type === 'text' && block.status === 'streaming'
-        ? { ...block, status: 'done' as const }
-        : block,
-    );
+  const streamedText = base.flatMap(block => block.type === 'text' ? [block.content] : []).join('');
+  const last = base.at(-1);
+  let next = base;
+  if (text !== streamedText && last?.type !== 'text') {
+    // A tool or thought separates the earlier commentary from a final-only
+    // answer. Some transports seal the aggregate, others just the answer.
+    const tail = text.startsWith(streamedText) ? text.slice(streamedText.length) : text;
+    if (tail) next = [...base, { id: nextId('text'), type: 'text', content: tail, status: 'done' }];
+  } else if (last?.type === 'text' && text !== streamedText && text !== last.content) {
+    const prefix = streamedText.slice(0, streamedText.length - last.content.length);
+    const content = text.startsWith(prefix) ? text.slice(prefix.length) : text;
+    next = [...base.slice(0, -1), { ...last, content }];
   }
-
-  const next = [...base];
-  const lastIndex = next.map((b) => b.type).lastIndexOf('text');
-  if (lastIndex >= 0 && next[lastIndex].type === 'text') {
-    next[lastIndex] = { ...(next[lastIndex] as TextBlock), content: text, status: 'done' };
-    return next;
-  }
-  return [...next, { id: nextId('text'), type: 'text', content: text, status: 'done' }];
+  return next.map(block => block.type === 'text' && block.status === 'streaming'
+    ? { ...block, status: 'done' } : block);
 }
 
 /**
@@ -179,15 +188,21 @@ export function stripMirroredTerminalAnswerFromThinking(
 }
 
 /** upsert 工具块(对应 wework mergeProcessingBlock + finalize):
- *  先关闭打开的 thinking 块,再按 toolName 找已有 tool 块更新,否则新建。 */
+ *  有调用 ID 时只更新本次调用，旧事件按工具名匹配。 */
 export function upsertToolBlock(
   blocks: ProcessingBlock[] | undefined,
   toolName: string,
   patch: Partial<Omit<ToolBlock, 'id' | 'type' | 'toolName'>>,
 ): ProcessingBlock[] {
-  const base = finalizeOpenThinkingBlocks(blocks ?? []);
-  const next = [...base];
-  const existingIndex = next.findIndex((b) => b.type === 'tool' && b.toolName === toolName);
+  const next = [...(blocks ?? [])];
+  const callId = patch.extra?.callId;
+  let existingIndex = callId
+    ? next.findIndex(b => b.type === 'tool' && b.extra?.callId === callId && b.toolName === toolName)
+    : -1;
+  if (existingIndex < 0) {
+    existingIndex = next.findLastIndex(b => b.type === 'tool' && b.toolName === toolName
+      && (!callId || (!b.extra?.callId && (b.status === 'running' || b.status === 'paused'))));
+  }
   if (existingIndex >= 0 && next[existingIndex].type === 'tool') {
     const existing = next[existingIndex] as ToolBlock;
     // 已是 error/completed 终态时,不被后续 running/completed 覆盖:
@@ -201,12 +216,12 @@ export function upsertToolBlock(
     }
     // 合并时保留 existing.extra:tool_upsert 的 extra 通常是 undefined(不传审批),
     // 不能用它覆盖 approval_requested 写的 extra(否则审批卡流式时不显示,刷新才出)。
-    const mergedExtra = patch.extra ?? existing.extra;
+    const mergedExtra = patch.extra ? { ...existing.extra, ...patch.extra } : existing.extra;
     next[existingIndex] = { ...existing, ...patch, extra: mergedExtra };
     return next;
   }
   return [
-    ...next,
+    ...finalizeOpenThinkingBlocks(next),
     {
       id: nextId('tool'),
       type: 'tool',

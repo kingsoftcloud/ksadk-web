@@ -157,3 +157,54 @@ test('queued turns keep each reply immediately after its submitting user message
     expect(transcript.indexOf(phrases[index])).toBeGreaterThan(transcript.indexOf(phrases[index - 1]));
   }
 });
+
+for (const [mode, label] of [['enabled', '开启'], ['disabled', '关闭']]) {
+  test(`thinking ${mode} preserves the visible timeline through a final-only answer`, async ({ page }, testInfo) => {
+    const timeline = page.getByTestId('timeline');
+    const frame = data => page.evaluate(payload =>
+      window.dispatchEvent(new CustomEvent('fixture:responses:1', { detail: payload })), data);
+    const thought = timeline.getByText('正在思考…', { exact: true });
+    await page.getByRole('button', { name: /模型 .*推理/ }).click();
+    await click(page, label);
+    await send(page, '查询记录');
+    await click(page, 'Resolve creation 1');
+    await expect.poll(async () => (await audit(page)).runs[0]?.body.ModelOptions?.thinking.type).toBe(mode);
+    await expect(timeline.getByTestId('run-progress-indicator')).toHaveText('正在等待回复…');
+    if (mode === 'enabled') {
+      await frame({ type: 'response.reasoning.delta', item_id: 'r1', output_index: 0, delta: '先确定范围。' });
+      await expect(thought).toHaveCount(1);
+      await thought.click();
+      await expect(timeline.getByText('先确定范围。')).toBeVisible();
+    }
+    await frame({ type: 'response.output_text.delta', delta: '开始查询。' });
+    await expect(timeline.getByText('开始查询。', { exact: true })).toBeVisible();
+    await expect(thought).toHaveCount(0);
+    await frame({ type: 'response.tool_call', name: 'lookup', args: {} });
+    await expect(timeline.getByTestId('run-progress-indicator')).toHaveText('正在等待工具返回…');
+    await frame({ type: 'response.tool_result', name: 'lookup', output: '3' });
+    if (mode === 'enabled') {
+      await frame({ type: 'response.reasoning.delta', item_id: 'r2', delta: '整理结果。' });
+      await expect(thought).toHaveCount(1);
+    }
+    await frame({ type: 'response.output_text.done', text: '找到三条。' });
+    if (mode === 'enabled') {
+      await frame({ type: 'response.output_item.done', output_index: 0, item: {
+        id: 'upstream-r1', type: 'reasoning', summary: [{ text: '先确定范围，再核对来源。' }],
+      } });
+      await expect(timeline.locator('[data-slot="processing-blocks"] > div').first())
+        .toContainText('先确定范围，再核对来源。');
+    }
+    await click(page, 'Finish run 1');
+    await expect(timeline.getByTestId('run-progress-indicator')).toHaveCount(0);
+    const expected = mode === 'enabled'
+      ? ['已思考', '开始查询。', 'lookup', '已思考', '找到三条。'] : ['开始查询。', 'lookup', '找到三条。'];
+    const blocks = timeline.locator('[data-slot="processing-blocks"] > div');
+    await expect(blocks).toHaveCount(expected.length);
+    for (const [index, value] of expected.entries()) {
+      await expect(blocks.nth(index)).toContainText(value);
+      if (index) expect((await blocks.nth(index).boundingBox()).y)
+        .toBeGreaterThan((await blocks.nth(index - 1).boundingBox()).y);
+    }
+    await timeline.screenshot({ path: testInfo.outputPath(`thinking-${mode}.png`) });
+  });
+}

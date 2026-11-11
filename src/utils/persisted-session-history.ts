@@ -1,5 +1,6 @@
 import { orderTranscript } from './transcript-order.js';
 import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
+import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
 import { projectConversationItems } from '../core/conversation/presentation.js';
 import { projectConversationStreamForHostedUi } from '../core/conversation/hosted.js';
 import type { Message } from '../components/chat/types.js';
@@ -73,6 +74,82 @@ function eventTimestamp(value: unknown): number {
   }
   const parsed = Date.parse(String(value || ''));
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+// LangGraph approvals can omit the call ID. The HITL middleware writes one
+// ToolMessage per rejected call, in the scope that requested it.
+function applyRejectedToolCalls(
+  messages: Message[], records: PersistedSessionEventRecord[], frames: Array<KernelSessionEventFrame | null>,
+  sessionId: string, terminalRunIds: Set<string>,
+): Message[] {
+  const rejectedRuns = new Set<string>();
+  const key = (run: string, id: string) => JSON.stringify([run, id]);
+  const rejectedApprovals = new Set<string>();
+  for (const row of records) {
+    const interaction = interactionFromSessionEvent(row, sessionId);
+    if (interaction?.kind === 'approval' && interaction.outcome === 'rejected' && interaction.runId) {
+      rejectedRuns.add(interaction.runId);
+      rejectedApprovals.add(key(interaction.runId, interaction.interactionId));
+    }
+  }
+  const scopesByCall = new Map<string, Set<string>>();
+  for (const frame of frames) {
+    if (frame?.item_kind !== 'data' || frame.event_type !== 'item.completed'
+      || typeof frame.run_id !== 'string' || typeof frame.scope_id !== 'string'
+      || record(frame.source)?.framework !== 'langgraph') continue;
+    const parts = record(frame.snapshot)?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      const data = record(record(part)?.data);
+      const update = record(data?.['HumanInTheLoopMiddleware.after_model']);
+      if (!Array.isArray(update?.messages)) continue;
+      for (const entry of update.messages.map(record)) {
+        if (entry?.type !== 'tool' || entry.status !== 'error' || typeof entry.tool_call_id !== 'string') continue;
+        rejectedRuns.add(frame.run_id);
+        const id = key(frame.run_id, entry.tool_call_id);
+        const scopes = scopesByCall.get(id) ?? new Set<string>();
+        scopes.add(frame.scope_id);
+        scopesByCall.set(id, scopes);
+      }
+    }
+  }
+  if (!rejectedRuns.size) return messages;
+  // After coalescing, an unscoped row left beside scoped owners is ambiguous.
+  const scopedCalls = new Set<string>();
+  for (const message of messages) {
+    const run = message.invocationId || message.runId;
+    if (!message.scopeId || !run || !rejectedRuns.has(run)) continue;
+    for (const tool of Object.values(message.tools || {})) {
+      if (tool.callId) scopedCalls.add(key(run, tool.callId));
+    }
+  }
+  const settle = (message: Message): Message => {
+    if (message.agentBlock) return { ...message, agentBlock: { ...message.agentBlock,
+      messages: message.agentBlock.messages.map(settle) } };
+    const run = message.invocationId || message.runId;
+    if (!run || !rejectedRuns.has(run) || message.role !== 'model') return message;
+    const statusFor = (id: unknown, approvalId: unknown, status: string) => {
+      if (!['running', 'paused', 'unknown'].includes(status)) return;
+      const call = typeof id === 'string' ? key(run, id) : '';
+      const scopes = scopesByCall.get(call);
+      if ((typeof approvalId === 'string' && rejectedApprovals.has(key(run, approvalId)))
+        || (scopes && (message.scopeId ? scopes.has(message.scopeId) : scopes.size === 1 && !scopedCalls.has(call)))) {
+        return { status: 'completed' as const, approvalStatus: 'rejected' as const };
+      }
+      if (status !== 'unknown' && terminalRunIds.has(run)) return { status: 'unknown' as const };
+    };
+    return { ...message,
+      tools: message.tools && Object.fromEntries(Object.entries(message.tools).map(([name, tool]) =>
+        [name, { ...tool, ...statusFor(tool.callId, tool.approvalRequestId, tool.status) }])),
+      blocks: message.blocks?.map(block => {
+        if (block.type !== 'tool') return block;
+        const fact = statusFor(block.extra?.callId, block.extra?.approvalRequestId, block.status);
+        return fact ? { ...block, status: fact.status, extra: { ...block.extra,
+          ...(fact.approvalStatus ? { approvalStatus: fact.approvalStatus } : {}) } } : block;
+      }),
+    };
+  };
+  return messages.map(settle);
 }
 
 /**
@@ -544,8 +621,11 @@ export function rebuildPersistedSessionHistory(
     completeCanonicalRunIds.add(runId);
   }
 
+  const transcript = coalesceHistoryToolCalls(orderTranscript(
+    applyLegacyTerminalReceipts(messages, orderedRecords, canonicalTerminalRunIds),
+  ));
   return {
-    messages: coalesceHistoryToolCalls(orderTranscript(applyLegacyTerminalReceipts(messages, orderedRecords, canonicalTerminalRunIds))),
+    messages: applyRejectedToolCalls(transcript, orderedRecords, historyFrames, sessionId, canonicalTerminalRunIds),
     canonicalRunIds: [...completeCanonicalRunIds],
     translatedEvents,
   };

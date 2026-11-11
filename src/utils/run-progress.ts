@@ -46,7 +46,8 @@ export function runProgressLabel({
     if (block.status === 'paused') return '等待你的确认…';
     if (block.status === 'running') return '正在等待工具返回…';
   } else if (block?.status === 'streaming') {
-    if (block.type === 'thinking') return '正在思考…';
+    // The expandable thinking row already announces this phase.
+    if (block.type === 'thinking' && latest === messages.at(-1)) return null;
     if (block.type === 'text') return '正在生成回复…';
   }
   if (!latest?.blocks?.length) {
@@ -54,8 +55,8 @@ export function runProgressLabel({
     if (tools.some(tool => tool.status === 'paused')) return '等待你的确认…';
     if (tools.some(tool => tool.status === 'running')) return '正在等待工具返回…';
     if (latest?.content) return '正在生成回复…';
-    if (latest?.reasoning) return '正在思考…';
+    if (latest?.reasoning && tools.length === 0 && latest === messages.at(-1)) return null;
   }
   return current.some(message => message.content || message.reasoning || message.blocks?.length)
-    ? '正在处理…' : '正在思考…';
+    ? '正在处理…' : '正在等待回复…';
 }

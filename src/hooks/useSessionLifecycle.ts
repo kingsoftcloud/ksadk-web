@@ -20,6 +20,7 @@ import {
   sessionEventRunStatus,
 } from '../utils/session-events.js';
 import { mapBackendMessages } from '../utils/messages.js';
+import { isReplayableDshTransport, resolveHostedChatTransport } from '../utils/capabilities.js';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
 import { useStreamingStore } from '../stores/streaming.js';
 import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedback.js';
@@ -38,6 +39,7 @@ import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
   createSessionEventCursor,
+  readDshRunStatus,
 } from '../utils/session-event-history.js';
 import { ingestLegacyApprovalHistory, ingestSessionEventRecord } from '../core/interaction/index.js';
 import type { Interaction } from '../core/interaction/types.js';
@@ -799,6 +801,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         const lastSeqId = Math.max(messagesData.LatestSeqId || 0, latestEventSeqId);
 
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
+        const dshReplay = isReplayableDshTransport(resolveHostedChatTransport(capabilities));
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
           void api.listSessionCheckpoints({
             agentId: agentIdRef.current,
@@ -832,12 +835,17 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
         // 正式判据是后端的 ActiveRunStatus。旧本地 runtime 会漏投该字段，
         // 此时仅对近期更新、仍带 invocation 的会话做一次兼容恢复。
-        if (
-          runtimeCapabilities.RunLifecycle.Enabled &&
-          runtimeCapabilities.RunLifecycle.Resume
-        ) {
+        const canResume = runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Resume;
+        if (dshReplay || canResume) {
           try {
-            const session = await api.getSession(sessionId);
+            let session: Partial<Awaited<ReturnType<ApiFacade['getSession']>>> = canResume
+              ? await api.getSession(sessionId) : {};
+            if (dshReplay && !session.ActiveInvocationId && isStillCurrentSession()) {
+              const cache = eventHistoryBySessionRef.current.get(sessionId);
+              const statusEvent = await readDshRunStatus(api, sessionId, messagesData,
+                cache && compatibleHistorySource(messagesData, eventCacheSource(cache)) ? cache : undefined, signal);
+              if (statusEvent) session = { ActiveInvocationId: statusEvent.InvocationId, ActiveRunStatus: sessionEventRunStatus(statusEvent) };
+            }
             if (!isStillCurrentSession()) {
               return;
             }
@@ -848,7 +856,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
             );
             if (isActive) {
               const activity = useStreamingStore.getState().getSessionActivity(sessionId);
-              const nativeOwner = capabilities.KernelSessionEventsByCommand === true
+              const nativeOwner = (capabilities.KernelSessionEventsByCommand === true || dshReplay)
                 && useStreamingStore.getState().isSessionStreaming(sessionId)
                 && activity?.source === 'run' && activity.runId === session.ActiveInvocationId
                 && ['connecting', 'running', 'waiting'].includes(activity.status);

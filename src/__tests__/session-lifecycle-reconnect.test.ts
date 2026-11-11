@@ -40,6 +40,34 @@ describe('session lifecycle reconnect errors', () => {
     useStreamingStore.getState().setBanner(null);
   });
 
+  it.each(['in_progress', 'completed', 'cancelled'])('restores a DSH observer from its native %s receipt', async status => {
+    const dsh = { ...capabilities, RunLifecycle: { ...capabilities.RunLifecycle, Resume: false },
+      HostedChat: { Enabled: true, PreferredTransport: 'responses', ApiFormats: ['responses'], Transports: [{
+        Protocol: 'responses', Runtime: 'dsh', Endpoint: '/RunAgent', Version: 'v1',
+        Capabilities: { SessionEventReplay: true, Cancel: true, Interrupt: false, A2UI: false },
+      }] } } as UiCapabilities;
+    useBootstrapStore.getState().setCapabilities(dsh);
+    const source = { CursorSource: 'runtime', HistoryEpoch: 'native', SnapshotSeqId: 250 };
+    const listSessionEvents = vi.fn()
+      .mockResolvedValueOnce({ ...source, Events: [{ SeqId: 248, InvocationId: 'original', EventType: 'assistant_message' }], Total: 100 })
+      .mockResolvedValueOnce({ ...source, Events: [{ SeqId: 180, InvocationId: 'original', EventType: 'run_status', Metadata: { status } }] });
+    const subscribeRunEvents = vi.fn().mockRejectedValue(new CancelledError());
+    const getSession = vi.fn();
+    const actions = lifecycle({ listSessionMessages: vi.fn().mockResolvedValue({
+      ...source, Messages: [], LatestSeqId: 250, NextCursor: null, HasMore: false,
+    }), listSessionEvents, subscribeRunEvents, getSession });
+    await actions.loadSession('long-dsh-session');
+    expect(getSession).not.toHaveBeenCalled();
+    expect(listSessionEvents).toHaveBeenLastCalledWith('long-dsh-session', expect.objectContaining({
+      limit: 1, eventTypes: ['run_status'], historyEpoch: 'native', snapshotSeqId: 250,
+    }));
+    if (status === 'in_progress') {
+      expect(subscribeRunEvents).toHaveBeenCalledWith(expect.objectContaining({
+        invocationId: 'original', sessionId: 'long-dsh-session', afterSeqId: 250,
+      }), expect.anything());
+    } else expect(subscribeRunEvents).not.toHaveBeenCalled();
+  });
+
   it('surfaces permanent subscription auth failures instead of retrying forever', async () => {
     const subscribeRunEvents = vi.fn().mockRejectedValue(new ApiError(401, 'Unauthorized'));
     const actions = lifecycle({

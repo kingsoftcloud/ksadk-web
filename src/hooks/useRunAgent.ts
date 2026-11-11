@@ -2,6 +2,7 @@ import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
 import { useRef, useCallback, useEffect, useMemo } from 'react';
 import { useStreamingStore } from '../stores/streaming.js';
+import { useBootstrapStore } from '../stores/bootstrap.js';
 import { useUIStore } from '../stores/ui.js';
 import { useSessionStore } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
@@ -116,10 +117,16 @@ export function useRunAgent(ctx: RunAgentContext) {
     outbox,
   } = ctx;
 
+  const mcpAuthorization = useBootstrapStore(s =>
+    s.status === 'ready' && s.agentId === agentId && s.accessMode !== 'Share'
+      ? s.capabilities.McpAuthorization : undefined);
   const config = useMemo<RunEngineConfig>(() => ({
     a2uiCatalogRegistry,
     agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata,
     thinkingMode: uiCapabilities.Thinking ? thinkingMode : 'auto', permissionMode,
+    mcpAuthorization,
+    dshApprovalMode: uiCapabilities.Approval && uiCapabilities.ApprovalPolicy?.RuntimeOverride
+      ? uiCapabilities.ApprovalPolicy.DefaultMode : undefined,
     runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
     hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
       requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),
@@ -129,7 +136,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     kernelCommandEventsEnabled: uiCapabilities.KernelSessionEventsByCommand === true,
     presentationProfile: bootstrapPresentationProfile(uiCapabilities.ConversationSurface, agentBlockRendererCatalog),
     conversationClient: conversationClient || undefined,
-  }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, conversationClient, a2uiCatalogRegistry]);
+  }), [agentId, apiFormats, agentFramework, selectedModel, selectedModelMetadata, thinkingMode, permissionMode, uiCapabilities, mcpAuthorization, conversationClient, a2uiCatalogRegistry]);
 
   const getOwner = useCallback((sessionId: string | null | undefined = currentSessionIdRef.current): RunOwner => {
     const conversationId = ctx.conversationIdRef?.current;

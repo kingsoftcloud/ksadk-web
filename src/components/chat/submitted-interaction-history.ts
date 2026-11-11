@@ -56,7 +56,8 @@ export function missingSubmittedInputHistory(
       for (const block of message.blocks) {
         if (block.type !== 'tool') continue;
         const extra = block.extra || {};
-        const tool = message.tools?.[block.toolName] || tools.find(entry =>
+        const tool = (typeof extra.callId === 'string' && message.tools?.[extra.callId])
+          || message.tools?.[block.toolName] || tools.find(entry =>
           (extra.approvalRequestId && entry.approvalRequestId === extra.approvalRequestId)
           || (extra.callId && entry.callId === extra.callId));
         const id = extra.approvalRequestId || tool?.approvalRequestId;
