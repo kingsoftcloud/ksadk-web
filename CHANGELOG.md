@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.18 - 2026-11-11
+
+- Keep reasoning, tool calls and text in stream order, including when late reasoning snapshots arrive. Show one active thinking indicator.
+- Restore DSH replies after refreshing during a stream and show rejected tool calls correctly in history.
+- Send MCP authorization controls only when a LangGraph runtime advertises support.
+
 ## 0.3.17 - 2026-11-08
 
 - Show MCP OAuth requests in the original conversation and follow the same run after authorization, including after reconnecting.
