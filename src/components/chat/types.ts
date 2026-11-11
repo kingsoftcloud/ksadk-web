@@ -17,6 +17,7 @@ export type PreviewImageSize = {
 };
 
 export type Message = {
+  harnessView?: import('../../core/conversation/harness-view.js').HarnessRunView;
   agentBlock?: {
     /** Sanitized excerpt of an explicitly public child text item, prepared by the shared projector. */
     summary?: string;

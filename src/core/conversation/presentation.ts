@@ -1,3 +1,4 @@
+import { collectHarnessViews } from './harness-view.js';
 import type {
   ConversationArtifact,
   ConversationItem,
@@ -296,6 +297,7 @@ export function projectConversationItems(
     }
     visible = root.filter(item => item.kind !== 'assistant_text' || Boolean(rootTerminal));
   }
+  const harnessViews = collectHarnessViews(visible);
   const supported = visible.filter(schemaSupported);
   const unsupported = visible.filter((item) => !schemaSupported(item));
   const textKinds: ReadonlySet<ConversationItemKind> = new Set([
@@ -322,6 +324,7 @@ export function projectConversationItems(
 
   return {
     timeline: projectTimeline(supported.filter((item) => item.kind !== 'progress')),
+    ...(harnessViews.length ? { harnessViews } : {}),
     output: textSummary('assistant_text'),
     reasoning: textSummary('reasoning'),
     textItems,

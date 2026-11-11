@@ -1,5 +1,6 @@
 import type { StreamProtocol, StreamAction } from './types.js';
 import type { TransportEvent } from '../transport/types.js';
+import { readHarnessViewEvent } from '../conversation/harness-view.js';
 import {
   createResponsesStreamState,
   normalizeResponsesStreamEvent,
@@ -31,6 +32,11 @@ export class ResponsesProtocol implements StreamProtocol {
 
   parse(event: TransportEvent, state: Record<string, unknown>): StreamAction[] {
     const frame = event.data as Record<string, unknown> | null;
+    if (event.eventName === 'response.harness_view') {
+      const view = readHarnessViewEvent(frame?.harness_view);
+      return view && typeof frame?.run_id === 'string' && frame.run_id
+        ? [{ type: 'harness_view', runId: frame.run_id, view }] : [];
+    }
     if (frame && ((event.eventName === 'interaction.requested' && frame.family === 'interaction') || event.eventName?.startsWith('mcp.authorization.'))) {
       const payload = frame.payload as Record<string, unknown> | undefined;
       const interactionId = String(payload?.interaction_id || payload?.wait_id || '');

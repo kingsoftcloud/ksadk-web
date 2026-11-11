@@ -328,15 +328,24 @@ export function projectConversationStreamForHostedUi(
   const fallbackById = new Map(presentation.fallbacks.map((entry) => [entry.id, entry]));
   const messages: Message[] = [];
   const interactions: Interaction[] = [];
+  const harnessViews = new Map((presentation.harnessViews || []).map(view => [view.runId, view]));
+  function appendHarnessView(runId: string) {
+    const view = harnessViews.get(runId);
+    if (!view) return;
+    harnessViews.delete(runId);
+    messages.push({ id: `harness-view:${runId}`, role: 'model', content: '',
+      timestamp: 0, eventType: EVENT_TYPE, runId, harnessView: view });
+  }
 
   // The shared presentation is the only place allowed to combine related
   // native items (for example tool_call and tool_result by callId). Iterating
   // raw state here would reintroduce duplicate cards in Hosted UI.
   for (const entry of presentation.timeline) {
     const { item } = entry;
+    if (item.kind !== 'user_message') appendHarnessView(item.runId);
     if (item.kind === 'agent') {
       if (!entry.children) { messages.push(fallbackMessage(item, 'Remote agent', String(item.payload.status || 'submitted'))); continue; }
-      const childResult = {...result, presentation:{...presentation, timeline:entry.children || []}};
+      const childResult = {...result, presentation:{...presentation, harnessViews: [], timeline:entry.children || []}};
       const children = projectConversationStreamForHostedUi(childResult);
       messages.push({
         ...messageBase(item),
@@ -441,6 +450,7 @@ export function projectConversationStreamForHostedUi(
     }
   }
 
+  for (const runId of harnessViews.keys()) appendHarnessView(runId);
   return { messages, interactions };
 }
 
