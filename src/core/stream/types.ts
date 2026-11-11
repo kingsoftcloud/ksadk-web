@@ -13,6 +13,7 @@ export interface A2UISurface {
 }
 
 export type StreamAction =
+  | { type: 'harness_view'; runId: string; view: import('../conversation/harness-view.js').HarnessViewUpdate }
   | { type: 'canonical_interaction'; interactionId: string; event: import('../../types/session-events.js').SessionEventRecord }
   | { type: 'text_delta'; text: string }
   | { type: 'text_replace'; text: string }

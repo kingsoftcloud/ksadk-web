@@ -1,4 +1,5 @@
 import { orderTranscript } from './transcript-order.js';
+import { mergeHarnessViewMessage, readHarnessViewEvent } from '../core/conversation/harness-view.js';
 import { RuntimeConversationIngress } from '../core/conversation/runtime-ingress.js';
 import { interactionFromSessionEvent } from '../core/interaction/adapters/session-events.js';
 import { projectConversationItems } from '../core/conversation/presentation.js';
@@ -518,10 +519,16 @@ export function rebuildPersistedSessionHistory(
         record(record(part)?.data)?.schema === 'execution.scope/v1'));
   const remoteRuns = new Set([...framesByRun].filter(([, frames]) =>
     frames.some(hasDescriptor)).map(([runId]) => runId));
+  const harnessRuns = new Set([...framesByRun].filter(([, frames]) =>
+    frames.some(frame => {
+      const source = record(frame.source);
+      return source?.framework === 'ksadk'
+        && readHarnessViewEvent(record(source.metadata)?.harness_service_presentation) !== null;
+    })).map(([runId]) => runId));
   const replayedRuns = new Map<string, Message[]>();
   const failedStrictRuns = new Set<string>();
   for (const [runId, frames] of framesByRun) {
-    if (!remoteRuns.has(runId) && !completeCanonicalRunIds.has(runId)
+    if (!remoteRuns.has(runId) && !harnessRuns.has(runId) && !completeCanonicalRunIds.has(runId)
       && !frames.some(frame => ['item.failed', 'run.failed'].includes(String(frame.event_type)))) continue;
     const hasRootStart = frames.some(frame => frame.event_type === 'run.started' && !frame.parent_scope_id);
     const starts = new Set<string>();
@@ -611,7 +618,7 @@ export function rebuildPersistedSessionHistory(
     const index = messages.findIndex(belongsToRun);
     const fallback = messages.filter(belongsToRun);
     const input = fallback.find(message => message.role === 'user');
-    const replacement = remoteRuns.has(runId)
+    const replacement = remoteRuns.has(runId) || harnessRuns.has(runId)
       ? input && !projectedRemote.some(message => message.role === 'user')
         ? [input, ...projectedRemote] : projectedRemote
       : enrichCanonicalRun(projectedRemote, fallback);
@@ -619,6 +626,13 @@ export function rebuildPersistedSessionHistory(
     const insertion = index < 0 ? retained.length : index;
     messages = [...retained.slice(0, insertion), ...replacement, ...retained.slice(insertion)];
     completeCanonicalRunIds.add(runId);
+  }
+
+  for (const event of orderedRecords) {
+    if (event.EventType !== 'harness_view' || !event.InvocationId) continue;
+    const view = readHarnessViewEvent(event.Content?.harness_view);
+    if (view) messages = mergeHarnessViewMessage(messages, event.InvocationId, view,
+      { timestamp: eventTimestamp(event.Timestamp), seq: event.SeqId });
   }
 
   const transcript = coalesceHistoryToolCalls(orderTranscript(

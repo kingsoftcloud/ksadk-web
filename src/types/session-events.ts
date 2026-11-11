@@ -7,6 +7,7 @@ export type SessionEventRecord = {
   InvocationId?: string;
   Content?: {
     session_event?: Record<string, unknown>;
+    harness_view?: Record<string, unknown>;
     role?: string;
     status?: string;
     detail?: string;

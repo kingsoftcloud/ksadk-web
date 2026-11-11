@@ -1,3 +1,4 @@
+import { readHarnessViewEvent } from './harness-view.js';
 import { safeRuntimeToolOutput, safeToolValue } from './safe-tool-value.js';
 import { validateAgentItem } from './agent.js';
 import {
@@ -65,14 +66,18 @@ export class RuntimeConversationIngress {
     const scope = String(frame.scope_id || '');
     const event = String(frame.event_id || '');
     const type = String(frame.event_type || '');
-    if (!type.startsWith('item.') && !type.startsWith('run.')) return null;
+    const source = record(frame.source);
+    const harnessView = source.framework === 'ksadk'
+      ? record(source.metadata).harness_service_presentation : undefined;
+    const hasHarnessView = readHarnessViewEvent(harnessView) !== null;
+    if (!type.startsWith('item.') && !type.startsWith('run.')
+      && !(type === 'usage.reported' && hasHarnessView)) return null;
     if (!run || !scope || !event)
       throw new Error('RuntimeEvent identity missing');
     if (this.runId && this.runId !== run)
       throw new Error('RuntimeEvent run identity changed');
     if (this.seen.has(event)) return null;
     const parent = String(frame.parent_scope_id ?? this.descriptors.get(scope)?.parent_scope_id ?? this.parents.get(scope) ?? '');
-    const source = record(frame.source);
     // Native graph/node scopes are not remote AgentBlock scopes. Only the
     // latter require execution.scope/v1 descriptors before child content.
     const nativeScope = ['adk', 'langgraph', 'codex'].includes(String(source.framework))
@@ -122,7 +127,9 @@ export class RuntimeConversationIngress {
       base.visibility = visibility as ConversationItem['visibility'];
     else if (parent && frame.item_kind === 'reasoning')
       base.visibility = 'hidden';
-    if (type.startsWith('run.')) {
+    if (type === 'usage.reported') {
+      base.payload = { message: 'usage' };
+    } else if (type.startsWith('run.')) {
       this.rootScope = scope;
       base.payload = {
         status: ['run.started', 'run.progress'].includes(type)
@@ -385,6 +392,7 @@ export class RuntimeConversationIngress {
         base.payload = { summary: 'Unsupported runtime content' };
       }
     }
+    if (hasHarnessView) base.payload.harnessView = harnessView;
     this.runId = run;
     this.parents.set(scope, parent);
     this.seen.add(event);

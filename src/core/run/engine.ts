@@ -1555,6 +1555,9 @@ export class RunEngineImpl implements RunEngine {
 
   private dispatchAction(action: StreamAction, messageId: string) {
     switch (action.type) {
+      case 'harness_view':
+        this.emit({ ...action, messageId });
+        break;
       case 'canonical_interaction':
         this.emit({ type: 'stream_event', event: action.event, sessionId: action.event.SessionId });
         break;

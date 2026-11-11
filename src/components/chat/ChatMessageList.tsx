@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 
 import { MessageMarkdown } from '../MessageMarkdown';
 import { AgentBlockView } from './AgentBlockView';
+import { HarnessRunView } from './HarnessRunView';
 import { ProcessingBlocksView, type ProcessingBlocksViewProps } from './ProcessingBlocksView';
 import { StatusBanner } from './StatusBanner';
 import { RunProgressIndicator } from './RunProgressIndicator';
@@ -715,6 +716,10 @@ function ChatMessage({
   onSubmitAguiAction?: ChatMessageListProps['onSubmitAguiAction'];
   renderProcessingBlock?: ChatMessageListProps['renderProcessingBlock'];
 }) {
+  if (message.harnessView) {
+    return <HarnessRunView key={message.harnessView.sha256} view={message.harnessView} />;
+  }
+
   if (message.role === 'user') {
     return (
       <div className="mb-3 flex justify-end">

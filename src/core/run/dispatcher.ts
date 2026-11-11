@@ -32,6 +32,7 @@ import {
   sessionEventRunStatus,
 } from '../../utils/session-events.js';
 import { mergeRecoveredRunMessages } from '../../utils/recovered-run.js';
+import { mergeHarnessViewMessage } from '../conversation/harness-view.js';
 import { isFailedToolOutput } from '../../utils/tool-display.js';
 import type { Message } from '../../components/chat/types.js';
 import {
@@ -175,6 +176,12 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
 
     case 'assistant_message_created':
       ensureAssistantMessage(event.messageId, event.invocationId);
+      break;
+
+    case 'harness_view':
+      ms.patchMessages(messages => mergeHarnessViewMessage(messages, event.runId, event.view,
+        { anchorId: event.messageId, timestamp: Date.now() }));
+      bumpEventCount(event.sessionId);
       break;
 
     case 'text_delta':

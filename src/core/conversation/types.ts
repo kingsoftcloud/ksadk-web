@@ -170,6 +170,7 @@ export type ConversationTimelineEntry = {
 export type ConversationPresentation = {
   /** Canonical visible order; renderers must not reconstruct it from groups. */
   timeline: ConversationTimelineEntry[];
+  harnessViews?: import('./harness-view.js').HarnessRunView[];
   /**
    * Compatibility summaries for consumers that have not yet moved to
    * `timeline` / `textItems`. They never participate in identity reduction.
