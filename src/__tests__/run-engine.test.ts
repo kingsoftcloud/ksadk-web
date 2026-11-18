@@ -207,7 +207,12 @@ describe('RunEngineImpl', () => {
     } });
     const engine = createRunEngine(facade);
     engine.updateConfig({ agentId: 'agent-a', agentFramework, mcpAuthorization,
-      apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+      apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto',
+      hostedChatTransport: { Protocol: 'responses', Runtime: 'ksadk', Endpoint: '/v1/responses', Version: 'v1',
+        Capabilities: { A2UI: false, Interrupt: true, Cancel: true } },
+      aguiResumeTransport: { Protocol: 'ag-ui', Runtime: 'copilotkit', Endpoint: '/agentengine/agui', Version: '1.0',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true } },
+    });
     engine.start({ text: 'hello', sessionId: 'session-a', attachments: [] });
     await waitForCalls(calls);
     if (supported) expect(calls[0].Extensions).toEqual({ 'mcp.authorization': oauth });
@@ -910,7 +915,7 @@ describe('RunEngineImpl', () => {
     sharedInteractionStore.clearSession(sessionId);
   });
 
-  it('resumes a rehydrated AG-UI approval through its durable session', async () => {
+  it.each([false, true])('resumes a rehydrated AG-UI approval after preference changes: %s', async responsesPreferred => {
     const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
       fetchCalls.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
@@ -935,7 +940,11 @@ describe('RunEngineImpl', () => {
       agentFramework: 'langgraph',
       selectedModel: '',
       thinkingMode: 'auto',
-      hostedChatTransport: {
+      ...(responsesPreferred ? { hostedChatTransport: {
+        Protocol: 'responses' as const, Runtime: 'ksadk', Endpoint: '/v1/responses', Version: 'v1',
+        Capabilities: { A2UI: false, Interrupt: true, Cancel: true },
+      } } : {}),
+      [responsesPreferred ? 'aguiResumeTransport' : 'hostedChatTransport']: {
         Protocol: 'ag-ui',
         Runtime: 'copilotkit',
         Endpoint: '/agentengine/agui',

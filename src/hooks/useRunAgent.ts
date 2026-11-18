@@ -128,6 +128,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     dshApprovalMode: uiCapabilities.Approval && uiCapabilities.ApprovalPolicy?.RuntimeOverride
       ? uiCapabilities.ApprovalPolicy.DefaultMode : undefined,
     runtimeCapabilityMatrix: uiCapabilities.RuntimeCapabilityMatrix,
+    aguiResumeTransport: uiCapabilities.HostedChat?.Transports?.find(transport => transport.Protocol === 'ag-ui'),
     hostedChatTransport: resolveHostedChatTransport(uiCapabilities, {
       requireResumableRun: Boolean(uiCapabilities.RunLifecycle?.Enabled && uiCapabilities.RunLifecycle.Resume),
     }),
