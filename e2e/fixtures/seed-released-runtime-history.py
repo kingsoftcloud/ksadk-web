@@ -1,6 +1,6 @@
 """Seed the four sessions consumed by released-runtime-history.spec.ts.
 
-Run with the current SDK in a disposable PostgreSQL database. Point both
+Run with the SDK under test in a disposable PostgreSQL database. Point both
 KSADK_TEST_POSTGRES_DSN and KSADK_HISTORY_FIXTURE_NAMESPACE at the same
 database and namespace used by the Runtime under test. Use a fresh namespace.
 Then set KSADK_RELEASED_RUNTIME_FACADE to its local Server and run
@@ -11,8 +11,23 @@ import asyncio
 import json
 import os
 
-from ksadk.sessions._postgres_tables import KSADK_PG_EVENTS_TABLE
-from ksadk.sessions.postgres_service import PostgresSessionService
+from contextlib import asynccontextmanager
+
+import asyncpg
+
+from ksadk.sessions.postgres_service import KSADK_PG_EVENTS_TABLE, PostgresSessionService
+
+
+@asynccontextmanager
+async def fixture_connection():
+    # Each SDK creates its own schema via create_session. Only use columns
+    # that were present in v0.8.0 when populating the large synthetic history.
+    connection = await asyncpg.connect(os.environ["KSADK_TEST_POSTGRES_DSN"])
+    try:
+        async with connection.transaction():
+            yield connection
+    finally:
+        await connection.close()
 
 
 async def seed_deferred_tool(service, namespace):
@@ -20,7 +35,7 @@ async def seed_deferred_tool(service, namespace):
     if await service.get_session(session) is not None:
         raise ValueError(f"Use a fresh fixture namespace; {session} already exists")
     await service.create_session("local-heavy-history", "user", session)
-    async with service._connection(write=True) as connection:
+    async with fixture_connection() as connection:
         await connection.execute(f"""
             INSERT INTO {KSADK_PG_EVENTS_TABLE}
                 (namespace,session_id,id,author,event_type,content_json,metadata_json,timestamp,seq_id,invocation_id)
@@ -53,7 +68,7 @@ async def main():
                 raise ValueError(f"Use a fresh fixture namespace; {session} already exists")
         for session in ("local-heavy-A", "local-heavy-B", "local-heavy-C"):
             await service.create_session("local-heavy-history", "user", session)
-        async with service._connection(write=True) as connection:
+        async with fixture_connection() as connection:
             await connection.execute(f"""
                 INSERT INTO {KSADK_PG_EVENTS_TABLE}
                     (namespace,session_id,id,author,event_type,content_json,timestamp,seq_id,invocation_id)
