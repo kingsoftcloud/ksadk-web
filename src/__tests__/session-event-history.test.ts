@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createSessionEventCursor,
   loadCompleteSessionEventHistory,
   resolveOlderSessionEventPage,
+  readDshRunStatus,
 } from '../utils/session-event-history.js';
 
 function makeEvents(total: number) {
@@ -15,6 +16,22 @@ function makeEvents(total: number) {
 }
 
 describe('session event history loading', () => {
+  it('verifies a legacy DSH status against the facade anchor without forwarding that anchor to Runtime', async () => {
+    const source = { CursorSource: 'runtime', HistoryEpoch: 'facade-seq:123', HistoryEpochSource: 'server-event-anchor',
+      SnapshotSeqId: 99 };
+    const status = { EventType: 'run_status', SessionId: 's', SeqId: 84, InvocationId: 'r' };
+    const listSessionEvents = vi.fn().mockResolvedValue({ CursorSource: 'runtime', Events: [{ ...status, InvocationId: 'wrong' }] });
+    const listSessionMessages = vi.fn().mockResolvedValue({ ...source, HistoryView: 'items-v1', Items: [{ Event: status }] });
+    const api = { listSessionEvents, listSessionMessages } as unknown as import('../core/api/types.js').ApiFacade;
+    expect(await readDshRunStatus(api, 's', source)).toEqual(status);
+    expect(listSessionEvents.mock.calls[0][1]).not.toHaveProperty('historyEpoch');
+    expect(listSessionEvents.mock.calls[0][1]).toMatchObject({ eventTypes: ['run_status'], beforeSeqId: 100 });
+    expect(listSessionMessages.mock.calls[0][1]).toMatchObject({ afterSeqId: 83, historyView: 'items-v1',
+      historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId });
+    listSessionMessages.mockResolvedValue({ ...source, HistoryEpoch: 'changed', HistoryView: 'items-v1', Items: [{ Event: status }] });
+    expect(await readDshRunStatus(api, 's', source)).toBeUndefined();
+  });
+
   it('loads every event page for selected sessions so history is not rebuilt from a truncated tail page', async () => {
     const sourceEvents = makeEvents(306);
     const calls: Array<{ offset?: number; limit?: number }> = [];

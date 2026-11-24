@@ -122,6 +122,7 @@ function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>
     cursorCompatibleWithRuntime: page.CursorCompatibleWithRuntime,
     sessionContractVersion: page.SessionContractVersion,
     historyEpoch: page.HistoryEpoch,
+    historyEpochSource: page.HistoryEpochSource,
     persistenceDegraded: page.PersistenceDegraded,
     snapshotSeqId: page.SnapshotSeqId,
     error: undefined,
@@ -894,7 +895,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (isHistoryReloadRequired(error) && !historyReload && isStillCurrentSession()) {
           useSessionStore.getState().setSessionMessageHistory(sessionId, {
             nextItemCursor: null, historyView: undefined, nextCursor: null, hasMore: false, cursorSource: undefined,
-            historyEpoch: undefined, snapshotSeqId: undefined,
+            historyEpoch: undefined, historyEpochSource: undefined, snapshotSeqId: undefined,
             dataSource: undefined, degraded: undefined,
             cursorCompatibleWithRuntime: undefined,
             sessionContractVersion: undefined,
@@ -915,7 +916,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               ...previous,
               nextCursor: previous?.nextCursor ?? null, hasMore: previous?.hasMore ?? false,
               ...(historyReload ? { nextCursor: null, hasMore: false,
-                cursorSource: undefined, historyEpoch: undefined, snapshotSeqId: undefined } : {}),
+                cursorSource: undefined, historyEpoch: undefined, historyEpochSource: undefined, snapshotSeqId: undefined } : {}),
               preparing: false,
               error: message, retryOlderPage: false,
             });
@@ -1441,6 +1442,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           hasMore: false,
           cursorSource: undefined,
           historyEpoch: undefined,
+          historyEpochSource: undefined,
           snapshotSeqId: undefined,
           dataSource: undefined,
           degraded: undefined,

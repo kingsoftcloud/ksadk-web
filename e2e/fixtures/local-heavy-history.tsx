@@ -31,7 +31,8 @@ function Harness() {
     <nav style={{ zIndex: 9999, background: 'white', padding: 8 }}>
       {['A', 'B', 'C'].map(slot => <button key={slot} type="button"
         onClick={() => void actions.loadSession('local-heavy-' + slot)}>Open {slot}</button>)}
-      <button type="button" onClick={() => void actions.loadOlderSessionMessages('local-heavy-A')}>Older A</button>
+      {['A', 'C'].map(slot => <button key={'older-' + slot} type="button"
+        onClick={() => void actions.loadOlderSessionMessages('local-heavy-' + slot)}>Older {slot}</button>)}
     </nav>
     <ConnectedMessageList agentName="Local Docker LangGraph" isMobile={false}
       onDeleteFeedback={() => {}} onSubmitFeedback={() => {}}

@@ -16,6 +16,7 @@ export type SessionMessageHistory = {
   cursorCompatibleWithRuntime?: boolean;
   sessionContractVersion?: number;
   historyEpoch?: string;
+  historyEpochSource?: string;
   persistenceDegraded?: boolean;
   snapshotSeqId?: number;
   error?: string;

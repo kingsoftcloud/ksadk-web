@@ -35,3 +35,32 @@ it('compacts adjacent legacy token pages while preserving repeated tokens, snaps
   expect(state.semanticItems).toHaveLength(2);
   expect(state.messages[0].content).toBe('初始哈哈哈哈');
 });
+
+it('keeps old raw calls at their own positions while a tool is still running and restores each output by id', () => {
+  function make(seq: number, kind: string, content: any, metadata: any = {}) {
+    const item = event(seq, kind, '');
+    return { ...item, Event: { ...item.Event, Content: content, Metadata: metadata, Timestamp: 100 - seq } };
+  }
+  const rows = [
+    make(1, 'run.started', { payload: { source: 'ag-ui', input: [{ text: 'question' }] } }, { ksadk_runtime_event: true }),
+    make(2, 'assistant_message', { parts: [{ text: 'first' }] }, { response_id: 'same-response' }),
+    make(3, 'tool_call', { parts: [
+      { functionCall: { name: 'search', id: 'one', args: { q: 'first' } } },
+      { functionCall: { name: 'search', id: 'two', args: { q: 'second' } } },
+    ] }),
+    make(4, 'assistant_message', { parts: [{ text: 'still looking' }] }, { response_id: 'same-response' }),
+  ];
+  const read = (items: typeof rows) => prependItemHistory(items, api, 's', scope, 'flat-v1').messages;
+  expect(read(rows).filter(row => row.content).map(row => row.content)).toEqual(['question', 'first', 'still looking']);
+  const toolStates = (items: typeof rows) => read(items).flatMap(row => Object.values(row.tools || {}))
+    .map(tool => [tool.name, tool.callId, tool.status, JSON.parse(tool.args).q, tool.output]);
+  expect(toolStates(rows)).toEqual([
+    ['search', 'one', 'running', 'first', undefined], ['search', 'two', 'running', 'second', undefined],
+  ]);
+  rows.push(make(5, 'tool_result', {}, { tool_receipt: { tool_call_id: 'two' }, tool_is_error: true, tool_result: 'failed' }),
+    make(6, 'tool_result', { parts: [{ functionResponse: { id: 'one', response: 'found' } }] }));
+  expect(toolStates(rows)).toEqual([
+    ['search', 'one', 'completed', 'first', 'found'], ['search', 'two', 'error', 'second', 'failed'],
+  ]);
+  expect(read(rows).map(row => row.historyOrder?.seq)).toEqual([1, 2, 3, 4]);
+});

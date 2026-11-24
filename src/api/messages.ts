@@ -101,6 +101,7 @@ export type ListSessionMessagesResponse = {
   CursorCompatibleWithRuntime?: boolean;
   SessionContractVersion?: number;
   HistoryEpoch?: string;
+  HistoryEpochSource?: string;
   PersistenceDegraded?: boolean;
   SnapshotSeqId?: number;
 };
@@ -127,6 +128,7 @@ export function normalizeSessionMessagesResponse(data: ListSessionMessagesRespon
     CursorCompatibleWithRuntime: data.CursorCompatibleWithRuntime,
     SessionContractVersion: data.SessionContractVersion,
     HistoryEpoch: data.HistoryEpoch,
+    HistoryEpochSource: data.HistoryEpochSource,
     PersistenceDegraded: data.PersistenceDegraded,
     SnapshotSeqId: optionalSeq(data.SnapshotSeqId),
   };

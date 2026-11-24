@@ -120,7 +120,8 @@ function normalizeRuntimeSessionEvent(event) {
       Metadata: {
         ...(event.Metadata || {}),
         tool_name: payload.name,
-        tool_output: payload.error || payload.result,
+        tool_output: payload.result ?? payload.error,
+        tool_is_error: payload.error != null && payload.error !== false,
         tool_call_id: payload.call_id,
       },
       Content: { role: 'model', parts: [] },
@@ -504,50 +505,32 @@ function toolMessageFromSessionEvent(event) {
   if (!TOOL_EVENT_TYPES.has(eventType)) {
     return null;
   }
-  const name = String(
-    event.Metadata?.tool_name
-      || event.Metadata?.name
-      || event.Metadata?.function_name
-      || textFromUnknown(event.Content?.parts)
-      || 'tool',
-  ).trim() || 'tool';
-  const callId = String(
-    event.Metadata?.call_id
-      || event.Metadata?.tool_call_id
-      || event.Metadata?.callId
-      || event.Metadata?.RuntimeItem?.ToolCallId
-      || '',
-  ).trim();
-  const existing = {
-    name,
-    ...(callId ? { callId } : {}),
-    args: '',
-    status: 'running',
-  };
-  const tool =
-    eventType === 'tool_result' || eventType === 'stage_tool_result'
-      ? (() => {
-          const output = stringifyToolPayload(
-            event.Metadata?.tool_output
-              ?? event.Metadata?.output
-              ?? event.Metadata?.result
-              ?? textFromUnknown(event.Content?.parts),
-          );
-          return {
-            ...existing,
-            output,
-            status: isFailedToolOutput(output) ? 'error' : 'completed',
-          };
-        })()
-      : {
-          ...existing,
-          args: stringifyToolPayload(
-            event.Metadata?.tool_args
-              ?? event.Metadata?.arguments
-              ?? event.Metadata?.args
-              ?? {},
-          ),
-        };
+  const isResult = eventType === 'tool_result' || eventType === 'stage_tool_result';
+  const parts = Array.isArray(event.Content?.parts) ? event.Content.parts : [];
+  const nativeTools = parts.map(part => isResult ? part?.functionResponse || part?.function_response
+    : part?.functionCall || part?.function_call).filter(Boolean);
+  // ADK can persist several calls in a single content.parts array. Legacy
+  // Runner events instead carry one tool in the event metadata.
+  const metadata = nativeTools.length > 1 ? {} : event.Metadata || {};
+  const tools = new Map();
+  for (const [i, native] of (nativeTools.length ? nativeTools : [{}]).entries()) {
+    const name = String(native.name || metadata.tool_name || metadata.name || metadata.function_name
+      || event.Content?.name || (!isResult && textFromUnknown(parts)) || 'tool').trim() || 'tool';
+    const callId = String(native.id || native.call_id || metadata.call_id || metadata.tool_call_id || metadata.callId
+      || metadata.tool_receipt?.tool_call_id || metadata.RuntimeItem?.ToolCallId || event.Content?.call_id || '').trim();
+    const key = tools.has(name) ? callId || name + '#' + i : name;
+    const identity = { name, ...(callId ? { callId } : {}) };
+    if (isResult) {
+      const output = stringifyToolPayload(native.response ?? metadata.tool_output ?? metadata.tool_result
+        ?? metadata.output ?? metadata.result ?? event.Content?.result ?? textFromUnknown(parts));
+      tools.set(key, { ...identity, args: '', output,
+        status: metadata.tool_is_error === true || isFailedToolOutput(output) ? 'error' : 'completed' });
+    } else {
+      const args = stringifyToolPayload(native.args ?? metadata.tool_args ?? metadata.arguments
+        ?? metadata.args ?? event.Content?.args ?? {});
+      tools.set(key, { ...identity, args, status: 'running' });
+    }
+  }
   const runtimeIdentity = runtimeIdentityFromEvent(event);
   return {
     id: runtimeIdentity?.id || event.EventId || String(Date.now() + Math.random()),
@@ -556,9 +539,7 @@ function toolMessageFromSessionEvent(event) {
     timestamp: event.Timestamp || Date.now(),
     eventType,
     ...(runtimeIdentity || {}),
-    tools: {
-      [name]: tool,
-    },
+    tools: Object.fromEntries(tools),
   };
 }
 
@@ -883,7 +864,7 @@ export function buildMessagesFromSessionEvents(events = [], options = {}) {
       messages[runtimeItemIndex] = mergeMessageMetadata(messages[runtimeItemIndex], message);
       return;
     }
-    const responseId = String(message?.responseId || '').trim();
+    const responseId = options.preserveDistinctEvents ? '' : String(message?.responseId || '').trim();
     const existingIndex = responseId ? responseIdToIndex.get(responseId) : undefined;
     if (existingIndex !== undefined) {
       messages[existingIndex] = mergeMessageMetadata(messages[existingIndex], message);
@@ -937,7 +918,11 @@ export function buildMessagesFromSessionEvents(events = [], options = {}) {
     }
     if (TOOL_EVENT_TYPES.has(message.eventType)) {
       const invocationId = String(event.InvocationId || '').trim();
-      if (message.itemId) {
+      // An item page may start with a result or end with an outstanding
+      // call. Anchor each fact at its own sequence and reconcile by call id
+      // after earlier pages arrive. A mid-run assistant message is not proof
+      // that all preceding calls finished.
+      if (message.itemId || options.preserveDistinctEvents) {
         flushPendingReasoning();
         pushMessage(message);
         continue;

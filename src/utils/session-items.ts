@@ -71,6 +71,11 @@ function legacyRows(records: SessionEventRecord[]) {
     const text = content?.parts?.map(part => part.text || '').join('') || content?.text || content?.payload?.text || '';
     const key = event.InvocationId || event.EventId;
     const kind = event.EventType;
+    if (kind === 'run.started' && event.Metadata?.ksadk_runtime_event && content?.payload?.source === 'ag-ui') {
+      const prompt = inputText(content.payload.input);
+      if (prompt) rows.push({ ...event, EventId: 'input:' + event.EventId, EventType: 'user_message',
+        Content: { role: 'user', parts: [{ text: prompt }] } });
+    }
     if (key && (kind === 'assistant_stream_delta' || kind === 'text.delta' || kind === 'message.delta'
       || kind === 'assistant_stream_snapshot')) {
       const draft = drafts.get(key);
