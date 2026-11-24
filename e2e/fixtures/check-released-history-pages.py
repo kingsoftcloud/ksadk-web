@@ -11,6 +11,7 @@ import json
 import math
 import os
 import time
+import uuid
 
 import asyncpg
 import httpx
@@ -77,7 +78,9 @@ async def read_page(client, options):
     if result.get("Code") != 0:
         raise AssertionError((result.get("Code"), result.get("ReasonCode")))
     page = result["Data"]
-    if page.get("HistoryView") != "items-v1" or page.get("SessionId") != SESSION:
+    if page.get("HistoryView") != "items-v1" or page.get("SessionId") != options.get(
+        "SessionId", SESSION
+    ):
         raise AssertionError("Expected lossless item history for this Runtime")
     return page, elapsed
 
@@ -175,15 +178,110 @@ async def verify_source(name, url, rows, max_p95_ms):
         raise AssertionError(f"{name} page p95 exceeds {max_p95_ms} ms")
 
 
+async def verify_appends(name, url):
+    from ksadk.sessions.postgres_service import PostgresSessionService
+
+    namespace = os.environ["KSADK_HISTORY_FIXTURE_NAMESPACE"]
+    dsn = os.environ["KSADK_TEST_POSTGRES_DSN"]
+    session_id = "release-resume-" + uuid.uuid4().hex
+    service = PostgresSessionService(dsn=dsn, namespace=namespace)
+    connection = await asyncpg.connect(dsn)
+
+    async def append(start, stop):
+        await connection.execute(
+            """
+            INSERT INTO ksadk_events
+                (namespace,session_id,id,author,event_type,content_json,timestamp,seq_id,invocation_id)
+            SELECT $1,$2,$2||'-'||n,'assistant','assistant_message',
+                   jsonb_build_object('parts',jsonb_build_array(jsonb_build_object('text','marker-'||n))),
+                   n,n,'one-call' FROM generate_series($3::int,$4::int) n
+        """,
+            namespace,
+            session_id,
+            start,
+            stop,
+        )
+
+    def verify(page, start, stop, snapshot):
+        items = page["Items"]
+        if page["SnapshotSeqId"] != snapshot or [
+            item["SeqId"] for item in items
+        ] != list(range(start, stop)):
+            raise AssertionError((name, "reconnect page", start, stop))
+        if [item["Event"]["Content"]["parts"][0]["text"] for item in items] != [
+            "marker-" + str(n) for n in range(start, stop)
+        ]:
+            raise AssertionError((name, "reconnect payload"))
+
+    auth = {"X-Ksc-Account-Id": "acct-1"}
+    try:
+        await service.create_session("local-heavy-history", "user", session_id)
+        await append(1, 150)
+        async with httpx.AsyncClient(base_url=url, headers=auth, timeout=30) as client:
+            first, _ = await read_page(client, {"SessionId": session_id})
+            verify(first, 101, 151, 150)
+        await append(151, 315)
+        state = {
+            "SessionId": session_id,
+            "HistoryEpoch": first["HistoryEpoch"],
+            "CursorSource": "runtime",
+        }
+        async with httpx.AsyncClient(base_url=url, headers=auth, timeout=30) as client:
+            cursor = first["NextItemCursor"]
+            for start in (51, 1):
+                older, _ = await read_page(
+                    client, {**state, "SnapshotSeqId": 150, "ItemCursor": cursor}
+                )
+                verify(older, start, start + 50, 150)
+                cursor = older.get("NextItemCursor")
+            if cursor or older["HasMore"]:
+                raise AssertionError((name, "old snapshot did not terminate"))
+            options = {"AfterSeqId": 150}
+            for start in range(151, 316, 50):
+                page, _ = await read_page(client, {**state, **options})
+                verify(page, start, min(start + 50, 316), 315)
+                if page["HistoryEpoch"] != first["HistoryEpoch"]:
+                    raise AssertionError((name, "epoch changed on append"))
+                options = {
+                    "SnapshotSeqId": 315,
+                    "ItemCursor": page.get("NextItemCursor"),
+                }
+            if options["ItemCursor"] or page["HasMore"]:
+                raise AssertionError((name, "catch-up did not terminate"))
+    finally:
+        try:
+            await service.delete_session(session_id)
+        finally:
+            await connection.close()
+            await service.aclose()
+
+
 async def main(args):
     rows = await read_fixture()
     for facade in args.facade:
         name, url = facade.split("=", 1)
         await verify_source(name, url, rows, args.max_page_p95_ms)
+        if args.verify_appends:
+            await verify_appends(name, url)
+            print(
+                json.dumps(
+                    {
+                        "runtime": name,
+                        "appended_during_disconnect": 165,
+                        "resumed": True,
+                    }
+                ),
+                flush=True,
+            )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--facade", action="append", required=True, metavar="TAG=URL")
     parser.add_argument("--max-page-p95-ms", type=float)
+    parser.add_argument(
+        "--verify-appends",
+        action="store_true",
+        help="Create and remove a dedicated reconnect fixture per target",
+    )
     asyncio.run(main(parser.parse_args()))
