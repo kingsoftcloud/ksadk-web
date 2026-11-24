@@ -212,6 +212,7 @@ export function ConnectedMessageList({
           requestToken,
           activeRequestToken: olderLoadTokenRef.current,
         })) return;
+        if (useSessionStore.getState().messageHistory[requestedSessionId]?.retryOlderPage) return;
         requestAnimationFrame(() => {
           if (!ownsOlderMessageScrollRequest({
             requestedSessionId,
@@ -420,7 +421,10 @@ export function ConnectedMessageList({
       {currentMessageHistory?.error && (
         <div role="alert" data-testid="history-reload-error" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-red-700 dark:text-red-300">
           {currentMessageHistory.error}
-          {onRetryHistory && currentSessionId && (
+          {currentMessageHistory.retryOlderPage && onLoadOlderSessionMessages ? (
+            <button type="button" className="ml-3 underline" disabled={currentMessageHistory.isLoadingOlder}
+              onClick={() => loadOlderHistory(true)}>重试</button>
+          ) : onRetryHistory && currentSessionId && (
             <button type="button" className="ml-3 underline" onClick={() => void onRetryHistory(currentSessionId)}>重试</button>
           )}
         </div>

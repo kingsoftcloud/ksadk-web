@@ -14,6 +14,7 @@ const agentId = 'local-heavy-history';
 useBootstrapStore.getState().setAgentId(agentId);
 useBootstrapStore.getState().setAgentFramework('langgraph');
 useBootstrapStore.getState().setCapabilities(capabilities);
+useSessionStore.getState().setLoadingSessions(false);
 useSessionStore.getState().setCurrentSessionId('local-heavy-A');
 const api = new ApiFacadeImpl({ agentId });
 // Test-only read probe, so assertions can distinguish virtualization from loss.

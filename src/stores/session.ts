@@ -20,6 +20,7 @@ export type SessionMessageHistory = {
   snapshotSeqId?: number;
   error?: string;
   preparing?: boolean;
+  retryOlderPage?: boolean;
 };
 
 export type SessionState = {

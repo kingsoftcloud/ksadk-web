@@ -66,6 +66,34 @@ describe('history continuation and recovery', () => {
     expect(listSessionEvents).not.toHaveBeenCalled();
   });
 
+  it('bridges an older giant invocation into a pinned Messages chain without replacing the rendered suffix', async () => {
+    const pin = { CursorSource: 'runtime', HistoryEpoch: 'epoch', SnapshotSeqId: 100 };
+    const legacy = { ...first, ...pin, DataSource: 'runtime', NextCursor: 9 };
+    const page = (seq: number, cursor: string | null) => ({ ...pin, HistoryView: 'items-v1',
+      LatestSeqId: seq, Messages: [], HasMore: Boolean(cursor), NextItemCursor: cursor, NextCursor: null,
+      Items: [{ ItemId: 'source-' + seq, SeqId: seq, EventType: 'user_message',
+        Event: { SeqId: seq, SessionId: 's', EventId: 'source-' + seq, EventType: 'user_message',
+          Content: { parts: [{ text: 'entry-' + seq }] } } }] });
+    const read = vi.fn().mockResolvedValueOnce(legacy).mockResolvedValueOnce(page(8, 'before-8'))
+      .mockRejectedValueOnce(new ApiError(504, 'timeout')).mockResolvedValueOnce(page(1, null));
+    const detail = vi.fn().mockResolvedValueOnce({ ...pin, Total: 60, Events: [{ SeqId: 9, EventType: 'progress' }] })
+      .mockResolvedValueOnce({ ...pin, Total: 60, Events: [] });
+    const actions = mount({ listSessionMessages: read, listSessionEvents: detail });
+    const contents = () => useMessageStore.getState().messages.map(m => m.content);
+    await actions.loadSession('s');
+    await actions.loadOlderSessionMessages('s');
+    expect(read.mock.calls[1][1]).toMatchObject({ beforeSeqId: 9, historyView: 'items-v1', historyEpoch: 'epoch' });
+    expect(contents()).toEqual(['entry-8', 'Old history']);
+    await actions.loadOlderSessionMessages('s');
+    expect(contents()).toEqual(['entry-8', 'Old history']);
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({ retryOlderPage: true, nextItemCursor: 'before-8' });
+    await actions.loadOlderSessionMessages('s');
+    expect(read.mock.calls[3][1]).toMatchObject({ itemCursor: 'before-8', historyEpoch: 'epoch' });
+    expect(contents()).toEqual(['entry-1', 'entry-8', 'Old history']);
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({ retryOlderPage: false, hasMore: false });
+    expect(detail).toHaveBeenCalledTimes(2);
+  });
+
   it('paints a deferred item before fetching its unicode body and validates every chunk', async () => {
     const page = { HistoryView: 'items-v1', HistoryEpoch: 'epoch', CursorSource: 'runtime', SnapshotSeqId: 2,
       NextCursor: null, NextItemCursor: null, Messages: [], LatestSeqId: 2, HasMore: false };

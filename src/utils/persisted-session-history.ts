@@ -434,6 +434,7 @@ export function rebuildPersistedSessionHistory(
   records: PersistedSessionEventRecord[],
   sessionId: string,
   profile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
+  firstSourceSeqId?: number,
 ): {
   messages: Message[];
   canonicalRunIds: string[];
@@ -457,7 +458,7 @@ export function rebuildPersistedSessionHistory(
   }).sort(
     (left, right) => Number(left.SeqId || 0) - Number(right.SeqId || 0),
   );
-  const startsAtSessionBeginning = Number(orderedRecords[0]?.SeqId || 0) <= 1;
+  const startsAtSessionBeginning = Number(firstSourceSeqId ?? orderedRecords[0]?.SeqId ?? 0) <= 1;
   const historyFrames = toolHistoryFrames(orderedRecords);
   for (const [index, persisted] of orderedRecords.entries()) {
     const frame = historyFrames[index];

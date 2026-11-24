@@ -1,4 +1,4 @@
-import { mergeHistoryWithLive } from '../utils/transcript-order.js';
+import { mergeHistoryWithLive, orderTranscript } from '../utils/transcript-order.js';
 import { isHistoryPreparing, readPreparedHistory } from '../utils/history-preparation.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
@@ -34,8 +34,8 @@ import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
-import { catchUpSessionItems, itemPageRecords, projectItemHistory } from '../utils/session-items.js';
-import type { ListSessionMessagesResponse, SessionHistoryItem } from '../api/messages.js';
+import { catchUpSessionItems, itemPageRecords, prependItemHistory } from '../utils/session-items.js';
+import type { ListSessionMessagesResponse } from '../api/messages.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
@@ -59,7 +59,8 @@ const SESSION_METADATA_CACHE_SIZE = 128;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 
 type SessionEventHistoryCache = {
-  items?: SessionHistoryItem[];
+  itemProjection?: ReturnType<typeof prependItemHistory>;
+  legacySuffix?: { messages: Message[]; canonicalRunIds: string[]; boundary: number };
   hasMore?: boolean;
   events: SessionEventRecord[];
   loadedCount: number;
@@ -114,6 +115,7 @@ function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>
   return {
     historyView: page.HistoryView,
     nextItemCursor: page.NextItemCursor,
+    retryOlderPage: false,
     dataSource: page.DataSource,
     degraded: page.Degraded,
     cursorSource: page.CursorSource,
@@ -650,7 +652,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         const items = messagesData.HistoryView === 'items-v1'
           ? itemPageRecords(messagesData, sessionId) : undefined;
-        const itemTranscript = items && projectItemHistory(items, api, sessionId, messagesData, profile);
+        const itemTranscript = items && prependItemHistory(items, api, sessionId, messagesData, profile);
         const fallbackHistory = mapBackendMessages(messagesData.Messages) as Message[];
         rememberSessionCache(
           fallbackHistoryBySessionRef.current,
@@ -688,7 +690,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (items) {
           const records = items.filter(item => !item.ContentRef).map(item => item.Event);
           rememberSessionCache(eventHistoryBySessionRef.current, sessionId, {
-            items, events: records, hasMore: messagesData.HasMore, loadedCount: items.length, total: items.length,
+            itemProjection: itemTranscript, events: records, hasMore: messagesData.HasMore, loadedCount: items.length, total: items.length,
             cursorSource: messagesData.CursorSource, historyEpoch: messagesData.HistoryEpoch,
             snapshotSeqId: messagesData.SnapshotSeqId,
           }, currentSessionIdRef.current);
@@ -915,7 +917,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               ...(historyReload ? { nextCursor: null, hasMore: false,
                 cursorSource: undefined, historyEpoch: undefined, snapshotSeqId: undefined } : {}),
               preparing: false,
-              error: message,
+              error: message, retryOlderPage: false,
             });
           if (historyReload) useUIStore.getState().pushToast(message, 'error');
         }
@@ -1224,7 +1226,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         canLoadOlderMessages
           ? readPreparedHistory(() => api.listSessionMessages(sessionId, {
               signal,
-              historyView: historyState.historyView,
+              historyView: historyState.historyView ?? (historyState.cursorSource === 'runtime'
+                && historyState.historyEpoch && historyState.snapshotSeqId !== undefined ? 'items-v1' : undefined),
               itemCursor: historyState.nextItemCursor ?? undefined,
               beforeSeqId: historyState.nextCursor ?? undefined,
               cursorSource: historyState.cursorSource,
@@ -1283,23 +1286,45 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       if (historyState.historyView === 'items-v1' && messagePage?.HistoryView !== 'items-v1') {
         throw reloadRequiredError();
       }
-      let itemTranscript: ReturnType<typeof projectItemHistory> | undefined;
+      let itemTranscript: { messages: Message[]; canonicalRunIds: string[] } | undefined;
+      let nextItemCache: SessionEventHistoryCache | undefined;
       if (messagePage?.HistoryView === 'items-v1') {
         const incoming = itemPageRecords(messagePage, sessionId, historyState.nextItemCursor);
-        const existing = cachedEvents?.items;
-        if (!existing || (incoming.length && existing.length && incoming.at(-1)!.SeqId >= existing[0].SeqId)) {
-          throw new Error('历史条目页与当前记录重叠，请重新打开会话。');
+        const previous = cachedEvents?.itemProjection;
+        const boundary = previous?.firstSeq ?? historyState.nextCursor;
+        if (!previous && (historyState.historyView === 'items-v1' || historyState.cursorSource !== 'runtime'
+          || !historyState.historyEpoch || historyState.snapshotSeqId !== messagePage.SnapshotSeqId
+          || boundary == null)) throw reloadRequiredError();
+        if (incoming.length && boundary != null && incoming.at(-1)!.SeqId >= boundary) throw reloadRequiredError();
+        // The old Messages projection covered whole newer invocations. Keep
+        // that suffix when a pinned numeric continuation meets a giant run.
+        const legacySuffix = previous ? cachedEvents?.legacySuffix : {
+          messages: visibleBaseline, boundary: boundary!,
+          canonicalRunIds: [...(canonicalRunIdsBySessionRef.current.get(sessionId) || [])],
+        };
+        const projection = prependItemHistory(incoming, api, sessionId, messagePage,
+          historyProfileBySessionRef.current.get(sessionId) || 'flat-v1', previous);
+        itemTranscript = projection;
+        if (legacySuffix) {
+          const suffix = legacySuffix.messages.filter(row => {
+            const seq = row.historyOrder?.seq;
+            return seq == null || seq >= legacySuffix.boundary
+              || (messagePage.HasMore && projection.firstSeq != null && seq < projection.firstSeq);
+          });
+          const suffixIds = new Set(suffix.map(message => message.id));
+          itemTranscript = { messages: orderTranscript([...projection.messages.filter(row => !suffixIds.has(row.id)), ...suffix]),
+            canonicalRunIds: [...new Set([...projection.canonicalRunIds, ...legacySuffix.canonicalRunIds])] };
         }
-        const items = [...incoming, ...existing];
-        itemTranscript = projectItemHistory(items, api, sessionId, messagePage,
-          historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
         const records = incoming.filter(item => !item.ContentRef).map(item => item.Event);
+        const count = (previous ? cachedEvents!.loadedCount : 0) + incoming.length;
+        nextItemCache = { itemProjection: projection, legacySuffix, hasMore: messagePage.HasMore,
+          events: [...records.filter(event => event.EventType === 'run_status' || eventHasTerminalRunStatus(event)),
+            ...(cachedEvents?.events || [])],
+          loadedCount: count, total: count, historyEpoch: messagePage.HistoryEpoch,
+          snapshotSeqId: messagePage.SnapshotSeqId, cursorSource: messagePage.CursorSource };
         for (const event of records) ingestSessionEventRecord(event, sessionId);
-        rememberSessionCache(eventHistoryBySessionRef.current, sessionId, {
-          ...cachedEvents, items, hasMore: messagePage.HasMore, events: [...records, ...cachedEvents.events],
-          loadedCount: items.length, total: items.length,
-        }, currentSessionIdRef.current);
         historyReadFailureRef.current = null;
+        detailWarning = undefined;
       }
       const olderMessages = messagePage
         ? mapBackendMessages(messagePage.Messages) as Message[]
@@ -1320,7 +1345,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       let mergedEvents = cachedEvents?.events || [];
       let loadedEventCount = cachedEvents?.loadedCount || 0;
       let totalEventCount = cachedEvents?.total || 0;
-      if (eventPage) {
+      if (nextItemCache) {
+        loadedEventCount = totalEventCount = nextItemCache.loadedCount;
+      } else if (eventPage) {
         const olderEvents = (eventPage.Events || []) as SessionEventRecord[];
         mergedEvents = mergeSessionEventRecords(olderEvents, mergedEvents) as SessionEventRecord[];
         totalEventCount = Math.max(totalEventCount, Number(eventPage.Total ?? 0) || 0);
@@ -1359,6 +1386,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       const rebuilt = itemTranscript ?? rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
+      if (nextItemCache) rememberSessionCache(eventHistoryBySessionRef.current, sessionId, nextItemCache, currentSessionIdRef.current);
       ingestLegacyApprovalHistory(rebuilt.messages, sessionId);
       rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuilt.messages, currentSessionIdRef.current);
       const mergedHistory = mergeHistoryWithLive(
@@ -1395,7 +1423,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           snapshotSeqId: messagePage.SnapshotSeqId ?? historyState.snapshotSeqId,
         } : {}),
         preparing: false,
-        error: detailWarning,
+        error: detailWarning, retryOlderPage: Boolean(detailWarning),
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {
@@ -1426,7 +1454,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
       if (isCurrent() && !(error instanceof CancelledError)) {
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
-          ...historyState, preparing: false,
+          ...historyState, preparing: false, retryOlderPage: true,
           error: error instanceof Error ? error.message : '历史加载失败，请重试',
         });
       }

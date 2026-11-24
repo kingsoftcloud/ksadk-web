@@ -183,9 +183,9 @@ const CHAT_EVENT_TYPES = new Set([
   'run_status', 'run.started', 'run.progress', 'run.completed', 'run.interrupted', 'run.failed', 'run.canceled',
 ]);
 
-export function projectItemHistory(
+function projectSemanticItems(
   items: SessionHistoryItem[], api: ApiFacade, sessionId: string, scope: PageScope,
-  profile: 'flat-v1' | 'agent-block-v1',
+  profile: 'flat-v1' | 'agent-block-v1', firstSourceSeqId?: number,
 ) {
   const records = items.filter(item => !item.ContentRef).map(item => item.Event);
   // Accepted inbox text can precede (or replace) a native user item. A verified
@@ -205,7 +205,7 @@ export function projectItemHistory(
       Content: { parts: [{ text: item.InboxInput.Text }] } }] : []);
   const legacy = legacyRows([...records, ...inputs].sort((a, b) => Number(a.SeqId) - Number(b.SeqId)));
   const fallback = [...buildMessagesFromSessionEvents(legacy, { preserveDistinctEvents: true }), ...legacyApprovalRows(legacy), ...legacyActivityRows(legacy)] as Message[];
-  const result = rebuildPersistedSessionHistory(fallback, records, sessionId, profile);
+  const result = rebuildPersistedSessionHistory(fallback, records, sessionId, profile, firstSourceSeqId);
   const deferred: Message[] = items.filter(item => item.ContentRef).map(item => ({
     id: 'history-body:' + item.ItemId, role: 'system', content: item.EventType,
     timestamp: Number(item.Event.Timestamp) || 0, historyOrder: { seq: item.SeqId },
@@ -251,6 +251,90 @@ export function projectItemHistory(
       }).join('\n') });
   }
   return { ...result, messages: deferred.length ? orderTranscript([...result.messages, ...deferred]) : result.messages };
+}
+
+type ProgressChunk = { events: SessionEventRecord[]; count: number; newer?: ProgressChunk };
+
+type ItemProjection = {
+  firstSeq?: number;
+  semanticItems: SessionHistoryItem[];
+  progress: Map<string, ProgressChunk>;
+  semantic: ReturnType<typeof projectSemanticItems>;
+  messages: Message[];
+  canonicalRunIds: string[];
+};
+
+function legacyDeltaText(item: SessionHistoryItem) {
+  if (!item.InvocationId || item.InvocationId !== item.Event.InvocationId || item.ContentRef || item.InboxInput || item.InputCommandId
+    || !['assistant_stream_delta', 'text.delta', 'message.delta'].includes(item.Event.EventType || '')
+    || persistedRuntimeFrame(item.Event) || item.Event.Content?.session_event) return;
+  const content = item.Event.Content as (SessionEventRecord['Content'] & { text?: string }) | undefined;
+  return content?.parts?.map(part => part.text || '').join('') || content?.text || content?.payload?.text || '';
+}
+
+/** New pages precede the cached window. Plain v1 progress has no effect on
+ * chat reducers, so retain its complete rows in per-invocation page chunks.
+ * Consecutive v1 text deltas within a run are associative concatenations;
+ * canonical frames, snapshot replacements and tool boundaries remain intact. */
+export function prependItemHistory(
+  incoming: SessionHistoryItem[], api: ApiFacade, sessionId: string, scope: PageScope,
+  profile: 'flat-v1' | 'agent-block-v1', previous?: ItemProjection,
+): ItemProjection {
+  const progress = new Map(previous?.progress);
+  const newProgress = new Map<string, SessionEventRecord[]>();
+  const semanticPage: SessionHistoryItem[] = [];
+  const addSemantic = (item: SessionHistoryItem) => {
+    const prior = semanticPage.at(-1);
+    const text = legacyDeltaText(item);
+    const priorText = prior && text !== undefined && prior.InvocationId === item.InvocationId
+      ? legacyDeltaText(prior) : undefined;
+    if (priorText !== undefined) {
+      semanticPage[semanticPage.length - 1] = { ...item, Event: { ...item.Event,
+        Content: { parts: [{ text: priorText + text }] } } };
+    } else semanticPage.push(item);
+  };
+  for (const item of incoming) {
+    if (item.Event.EventType === 'progress' && !item.ContentRef && !item.InboxInput && !item.InputCommandId
+      && !item.Event.Content?.session_event && !persistedRuntimeFrame(item.Event)) {
+      const run = item.InvocationId || '';
+      const group = newProgress.get(run) || [];
+      group.push(item.Event);
+      newProgress.set(run, group);
+    } else addSemantic(item);
+  }
+  for (const [run, events] of newProgress) {
+    const newer = progress.get(run);
+    progress.set(run, { events, count: events.length + (newer?.count || 0), newer });
+  }
+
+  const newer = previous?.semanticItems || [];
+  let semanticItems = newer;
+  let semantic = previous?.semantic;
+  const firstSeq = incoming[0]?.SeqId ?? previous?.firstSeq;
+  if (semanticPage.length || !semantic || (firstSeq === 1 && previous?.firstSeq !== 1)) {
+    if (newer.length) addSemantic(newer[0]);
+    semanticItems = semanticPage.concat(newer.slice(1));
+    semantic = projectSemanticItems(semanticItems, api, sessionId, scope, profile, firstSeq);
+  }
+  const details: Message[] = [];
+  for (const [run, chunk] of progress) {
+    const first = chunk.events[0];
+    details.push({ id: 'history-progress:' + run, role: 'system', content: `历史事件（${chunk.count}）`,
+      timestamp: Number(first.Timestamp) || 0, historyOrder: { seq: first.SeqId! }, invocationId: run,
+      readHistoryContent: async () => {
+        const lines: string[] = [];
+        for (let page: ProgressChunk | undefined = chunk; page; page = page.newer) {
+          for (const event of page.events) {
+            const detail = inputText(event.Content?.parts) || inputText(event.Content) || inputText(event.Content?.payload);
+            lines.push([event.SeqId, event.EventType, detail].filter(Boolean).join('  '));
+          }
+        }
+        return lines.join('\n');
+      } });
+  }
+  return { firstSeq, semantic, progress, semanticItems,
+    canonicalRunIds: semantic.canonicalRunIds,
+    messages: details.length ? orderTranscript([...semantic.messages, ...details]) : semantic.messages };
 }
 
 /** A disconnect may span several pages or an entire run. Pin the catch-up snapshot
