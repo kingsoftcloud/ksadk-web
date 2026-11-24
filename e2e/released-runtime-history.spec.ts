@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 
+// Seed the disposable Runtime database with e2e/fixtures/seed-released-runtime-history.py.
 const target = process.env.KSADK_RELEASED_RUNTIME_FACADE;
 test.skip(!target, 'Set KSADK_RELEASED_RUNTIME_FACADE to the fixture control-plane URL.');
 
