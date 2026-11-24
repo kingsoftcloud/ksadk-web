@@ -56,7 +56,7 @@ function contentChanged(message: Message, previous?: Message): boolean {
  * Feedback updates are presentation changes, not new runtime content. Keep
  * them without replacing the run's newly hydrated historical items. */
 export function mergeHistoryWithLive(
-  history: Message[], baseline: Message[], current: Message[],
+  history: Message[], baseline: Message[], current: Message[], preserveOlderItems = false,
 ): Message[] {
   const before = new Map(baseline.map(message => [message.id, message]));
   const feedback = current.filter(message => before.has(message.id)
@@ -83,7 +83,9 @@ export function mergeHistoryWithLive(
     const run = live.filter(message => runOf(message) === runId);
     const original = history.filter(message => runOf(message) === runId);
     const first = result.findIndex(message => runOf(message) === runId);
-    const input = run.some(message => message.role === 'user') ? []
+    const liveIds = new Set(run.map(message => message.id));
+    const input = preserveOlderItems ? original.filter(message => !liveIds.has(message.id) && !before.has(message.id))
+      : run.some(message => message.role === 'user') ? []
       : original.filter(message => message.role === 'user');
     result = result.filter(message => runOf(message) !== runId);
     const insertion = first < 0 ? result.length : Math.min(first, result.length);

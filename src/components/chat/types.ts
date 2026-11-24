@@ -17,6 +17,8 @@ export type PreviewImageSize = {
 };
 
 export type Message = {
+  /** Fetch a body omitted from a bounded history page only when expanded. */
+  readHistoryContent?: (signal: AbortSignal) => Promise<string>;
   agentBlock?: {
     /** Sanitized excerpt of an explicitly public child text item, prepared by the shared projector. */
     summary?: string;

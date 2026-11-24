@@ -1,3 +1,4 @@
+import { DeferredHistoryContent } from './DeferredHistoryContent.js';
 import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import {
@@ -1181,7 +1182,7 @@ export function ChatMessageList({
                 top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >
-                {entry.item.role === 'system' ? (
+                {entry.item.readHistoryContent ? <DeferredHistoryContent message={entry.item} /> : entry.item.role === 'system' ? (
                   <SystemMessage message={entry.item} />
                 ) : (
                   <ChatMessage

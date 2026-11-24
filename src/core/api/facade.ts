@@ -5,7 +5,7 @@ import {
   type AgentEngineClientOptions,
 } from '../../api/client.js';
 import { decodeActionReceipt } from '../../types/agent-control.js';
-import { normalizeSessionMessagesResponse, type ListSessionMessagesResponse } from '../../api/messages.js';
+import { normalizeSessionMessagesResponse, type ListSessionMessagesResponse, type ListSessionMessagesOptions } from '../../api/messages.js';
 
 type ListSessionsData = {
   Sessions?: unknown[];
@@ -127,23 +127,16 @@ export class ApiFacadeImpl implements ApiFacade {
 
   async listSessionMessages(
     sessionId: string,
-    opts?: {
-      agentId?: string;
-      afterSeqId?: number;
-      beforeSeqId?: number;
-      cursorSource?: string;
-      historyEpoch?: string;
-      snapshotSeqId?: number;
-      limit?: number;
-      includeReasoning?: boolean;
-      includeToolEvents?: boolean;
-      includeAttachments?: boolean;
-      signal?: AbortSignal;
-    },
+    opts?: ListSessionMessagesOptions,
   ) {
     const data = await this.client.postJsonAction<ListSessionMessagesResponse>('ListSessionMessages', {
       AgentId: opts?.agentId,
       SessionId: sessionId,
+      HistoryView: opts?.historyView,
+      ItemCursor: opts?.itemCursor,
+      ContentSeqId: opts?.contentSeqId,
+      ContentOffset: opts?.contentOffset,
+      ContentPart: opts?.contentPart,
       AfterSeqId: opts?.afterSeqId,
       BeforeSeqId: opts?.beforeSeqId,
       CursorSource: opts?.cursorSource,

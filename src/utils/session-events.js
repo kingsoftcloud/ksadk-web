@@ -513,6 +513,7 @@ function toolMessageFromSessionEvent(event) {
   ).trim() || 'tool';
   const callId = String(
     event.Metadata?.call_id
+      || event.Metadata?.tool_call_id
       || event.Metadata?.callId
       || event.Metadata?.RuntimeItem?.ToolCallId
       || '',
@@ -563,12 +564,19 @@ function toolMessageFromSessionEvent(event) {
 
 function mergeToolMaps(first = {}, second = {}) {
   const merged = { ...(first || {}) };
-  for (const [name, tool] of Object.entries(second || {})) {
-    merged[name] = {
-      ...(merged[name] || {}),
-      ...(tool || {}),
-      name,
-      args: tool?.args || merged[name]?.args || '',
+  for (const [key, tool] of Object.entries(second || {})) {
+    const name = tool.name || key;
+    let target = tool.callId && merged[tool.callId] ? tool.callId : key;
+    const previous = merged[target];
+    if (previous?.callId && tool.callId && previous.callId !== tool.callId) {
+      // Keep independent same-name calls, even if their result arrives on another page.
+      merged[previous.callId] = previous;
+      delete merged[target];
+      target = tool.callId;
+    }
+    merged[target] = {
+      ...(merged[target] || {}), ...tool, name,
+      args: tool.args || merged[target]?.args || '',
     };
   }
   return merged;
@@ -769,9 +777,10 @@ function buildUnorderedMessageFromSessionEvent(event) {
 
 /**
  * @param {import('../types/session-events.js').SessionEventRecord[]} [events]
+ * @param {{ preserveDistinctEvents?: boolean }} [options]
  * @returns {Message[]}
  */
-export function buildMessagesFromSessionEvents(events = []) {
+export function buildMessagesFromSessionEvents(events = [], options = {}) {
   const latestRunStatusByInvocation = new Map();
   const latestRunStatusEventByInvocation = new Map();
   const outputByInvocation = new Set();
@@ -993,7 +1002,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     if (isAssistantOutputEvent && pendingReasoning) {
       const invocationId = String(event.InvocationId || '').trim();
       const outputKey = assistantOutputDedupeKey(invocationId, message);
-      if (message.eventType === 'assistant_message' && invocationId && assistantOutputKeys.has(outputKey)) {
+      if (message.eventType === 'assistant_message' && invocationId && !options.preserveDistinctEvents && assistantOutputKeys.has(outputKey)) {
         pendingReasoning = null;
         continue;
       }
@@ -1015,7 +1024,7 @@ export function buildMessagesFromSessionEvents(events = []) {
     if (isAssistantOutputEvent) {
       const invocationId = String(event.InvocationId || '').trim();
       const outputKey = assistantOutputDedupeKey(invocationId, message);
-      if (message.eventType === 'assistant_message' && invocationId && assistantOutputKeys.has(outputKey)) {
+      if (message.eventType === 'assistant_message' && invocationId && !options.preserveDistinctEvents && assistantOutputKeys.has(outputKey)) {
         continue;
       }
       if (message.eventType === 'assistant_message' && invocationId) {

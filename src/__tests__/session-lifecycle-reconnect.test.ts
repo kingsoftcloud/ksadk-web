@@ -68,6 +68,26 @@ describe('session lifecycle reconnect errors', () => {
     } else expect(subscribeRunEvents).not.toHaveBeenCalled();
   });
 
+  it('drains the item cursor across a disconnect before resuming the live subscription', async () => {
+    const item = (seq: number) => ({ SeqId: seq, ItemId: String(seq), EventType: 'diagnostic',
+      Event: { SessionId: 's', SeqId: seq, EventId: String(seq), EventType: 'diagnostic', InvocationId: 'r' } });
+    const page = { HistoryView: 'items-v1', HistoryEpoch: 'epoch', CursorSource: 'runtime',
+      SnapshotSeqId: 10, Items: [item(10)], LatestSeqId: 10, Messages: [], HasMore: false, NextCursor: null };
+    const read = vi.fn().mockResolvedValueOnce(page)
+      .mockResolvedValueOnce({ ...page, Items: [item(11)], SnapshotSeqId: 12, HasMore: true, NextItemCursor: 'forward-11' })
+      .mockResolvedValueOnce({ ...page, Items: [item(12)], SnapshotSeqId: 12, NextItemCursor: null });
+    const subscribe = vi.fn().mockResolvedValueOnce(new ReadableStream({ start(controller) { controller.close(); } }))
+      .mockRejectedValueOnce(new CancelledError());
+    const actions = lifecycle({ listSessionMessages: read,
+      getSession: vi.fn().mockResolvedValue({ ActiveRunStatus: 'running', ActiveInvocationId: 'r' }),
+      subscribeRunEvents: subscribe });
+    await actions.loadSession('s');
+    await vi.waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(read.mock.calls[1][1]).toMatchObject({ afterSeqId: 10, historyEpoch: 'epoch' });
+    expect(read.mock.calls[2][1]).toMatchObject({ itemCursor: 'forward-11', snapshotSeqId: 12 });
+    expect(subscribe.mock.calls.map(([request]) => request.afterSeqId)).toEqual([10, 12]);
+  });
+
   it('surfaces permanent subscription auth failures instead of retrying forever', async () => {
     const subscribeRunEvents = vi.fn().mockRejectedValue(new ApiError(401, 'Unauthorized'));
     const actions = lifecycle({

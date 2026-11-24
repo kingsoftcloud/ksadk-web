@@ -6,12 +6,12 @@ import type { ApiFacade } from '../core/api/types.js';
 export async function readDshRunStatus(
   api: ApiFacade, sessionId: string,
   source: { CursorSource?: string; HistoryEpoch?: string; SnapshotSeqId?: number },
-  cached?: { events: SessionEventRecord[]; loadedCount: number; total: number }, signal?: AbortSignal,
+  cached?: { events: SessionEventRecord[]; loadedCount: number; total: number; hasMore?: boolean }, signal?: AbortSignal,
 ): Promise<SessionEventRecord | undefined> {
   if (source.CursorSource !== 'runtime') return;
   const latest = cached?.events.filter(event => event.EventType === 'run_status')
     .sort((a, b) => Number(b.SeqId) - Number(a.SeqId))[0];
-  if (latest || (cached && cached.loadedCount >= cached.total)) return latest;
+  if (latest || (cached && !cached.hasMore && cached.loadedCount >= cached.total)) return latest;
 
   // A long reply can push its start outside the visible event page.
   const page = await api.listSessionEvents(sessionId, {

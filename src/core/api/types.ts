@@ -56,33 +56,8 @@ export interface ApiFacade {
   }>;
   listSessionMessages(
     sessionId: string,
-    opts?: {
-      agentId?: string;
-      afterSeqId?: number;
-      beforeSeqId?: number;
-      cursorSource?: string;
-      historyEpoch?: string;
-      snapshotSeqId?: number;
-      limit?: number;
-      includeReasoning?: boolean;
-      includeToolEvents?: boolean;
-      includeAttachments?: boolean;
-      signal?: AbortSignal;
-    },
-  ): Promise<{
-    Messages: unknown[];
-    LatestSeqId: number;
-    HasMore: boolean;
-    NextCursor: number | null;
-    DataSource?: string;
-    Degraded?: boolean;
-    CursorSource?: string;
-    CursorCompatibleWithRuntime?: boolean;
-    SessionContractVersion?: number;
-    HistoryEpoch?: string;
-    PersistenceDegraded?: boolean;
-    SnapshotSeqId?: number;
-  }>;
+    opts?: import('../../api/messages.js').ListSessionMessagesOptions,
+  ): Promise<Omit<import('../../api/messages.js').ListSessionMessagesResponse, 'Messages'> & { Messages: unknown[] }>;
   listSessionCheckpoints(params: { agentId: string; sessionId: string; runId?: string }, opts?: { signal?: AbortSignal }): Promise<{ Checkpoints: unknown[] }>;
   listToolReceipts(params: { agentId: string; sessionId: string; runId?: string; checkpointId?: string }, opts?: { signal?: AbortSignal }): Promise<{ ToolReceipts: unknown[] }>;
   previewCheckpointResume(params: { agentId: string; sessionId: string; runId: string; checkpointId: string }, opts?: { signal?: AbortSignal }): Promise<{ Preview: unknown }>;

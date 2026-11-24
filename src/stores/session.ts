@@ -5,6 +5,8 @@ import { buildSessionPaginationState, mergeLoadedPages } from '../utils/session-
 
 export type SessionMessageHistory = {
   nextCursor: number | null;
+  historyView?: 'items-v1';
+  nextItemCursor?: string | null;
   hasMore: boolean;
   isLoadingInitial: boolean;
   isLoadingOlder: boolean;

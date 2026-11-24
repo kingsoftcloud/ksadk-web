@@ -39,6 +39,49 @@ describe('history continuation and recovery', () => {
     useMessageStore.getState().setMessages([]);
   });
 
+  it('reassembles repeated legacy text deltas across an opaque page boundary and replaces them with the final snapshot on refresh', async () => {
+    const delta = (seq: number, type = 'assistant_stream_delta', text = '哈') => ({
+      ItemId: 'e' + seq, SeqId: seq, EventType: type, InvocationId: 'r',
+      Event: { SeqId: seq, EventId: 'e' + seq, SessionId: 's', InvocationId: 'r', EventType: type, Content: { text } },
+    });
+    const page = { HistoryView: 'items-v1', HistoryEpoch: 'epoch', SnapshotSeqId: 3,
+      CursorSource: 'runtime', NextCursor: null, Messages: [], LatestSeqId: 3, HasMore: true,
+      Items: [delta(3)], NextItemCursor: 'older/3' };
+    const read = vi.fn().mockResolvedValueOnce(page).mockRejectedValueOnce(new ApiError(503, 'retry'))
+      .mockResolvedValueOnce({ ...page, HasMore: false, NextItemCursor: null, Items: [delta(1), delta(2)] })
+      .mockResolvedValueOnce({ ...page, HasMore: false, NextItemCursor: null, SnapshotSeqId: 4,
+        Items: [delta(1), delta(2), delta(3), delta(4, 'assistant_message', '哈哈哈！')] });
+    const listSessionEvents = vi.fn();
+    const actions = mount({ listSessionMessages: read, listSessionEvents });
+    await actions.loadSession('s');
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['哈']);
+    await actions.loadOlderSessionMessages('s');
+    expect(useSessionStore.getState().messageHistory.s.nextItemCursor).toBe('older/3');
+    await actions.loadOlderSessionMessages('s');
+    expect(read.mock.calls[2][1]).toMatchObject({ historyView: 'items-v1', itemCursor: 'older/3', snapshotSeqId: 3 });
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['哈哈哈']);
+    expect(useSessionStore.getState().messageHistory.s.hasMore).toBe(false);
+    await actions.loadSession('s');
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['哈哈哈！']);
+    expect(listSessionEvents).not.toHaveBeenCalled();
+  });
+
+  it('paints a deferred item before fetching its unicode body and validates every chunk', async () => {
+    const page = { HistoryView: 'items-v1', HistoryEpoch: 'epoch', CursorSource: 'runtime', SnapshotSeqId: 2,
+      NextCursor: null, NextItemCursor: null, Messages: [], LatestSeqId: 2, HasMore: false };
+    const event = { SessionId: 's', SeqId: 2, EventType: 'assistant_message', EventId: 'id' };
+    const read = vi.fn().mockResolvedValueOnce({ ...page, Items: [
+      { SeqId: 2, ItemId: 'id', EventType: event.EventType, ContentRef: { SeqId: 2 }, Event: event }] })
+      .mockResolvedValueOnce({ ...page, ContentSeqId: 2, ContentChunk: '[{"text":"第一段', NextContentOffset: 12 })
+      .mockResolvedValueOnce({ ...page, ContentSeqId: 2, ContentChunk: '🙂第二段"},{}]', NextContentOffset: null });
+    const actions = mount({ listSessionMessages: read });
+    await actions.loadSession('s');
+    expect(read).toHaveBeenCalledTimes(1);
+    await expect(useMessageStore.getState().messages[0].readHistoryContent!(new AbortController().signal))
+      .resolves.toBe('第一段🙂第二段');
+    expect(read.mock.calls.slice(1).map(([, options]) => options.contentOffset)).toEqual([0, 12]);
+  });
+
   it('keeps the original user input and reply when refreshing history fails', async () => {
     const input = { MessageId: 'original-user', Role: 'user' as const,
       Content: { text: 'Original user question' }, SeqId: 8, InvocationId: 'turn-1' };
@@ -347,4 +390,38 @@ describe('preparing older history', () => {
       expect(useMessageStore.getState().messages).toEqual([]);
     } finally { vi.useRealTimers(); }
   });
+});
+
+it('restores two same-name tool results, a resolved legacy approval, and an accepted user input exactly once', async () => {
+  const make = (seq: number, type: string, metadata = {}, content = {}) => ({
+    ItemId: 'e-' + seq, SeqId: seq, EventType: type, InvocationId: 'r',
+    Event: { SeqId: seq, EventId: 'e-' + seq, EventType: type, InvocationId: 'r', SessionId: 's',
+      Content: content, Metadata: metadata },
+  });
+  const page = { HistoryView: 'items-v1', SnapshotSeqId: 9, HistoryEpoch: 'epoch', CursorSource: 'runtime',
+    NextCursor: null, Messages: [], LatestSeqId: 9 };
+  const read = vi.fn().mockResolvedValueOnce({ ...page, HasMore: true, NextItemCursor: 'older', Items: [
+    make(6, 'tool_result', { call_id: 'b', tool_name: 'search', tool_output: 'result-b' }),
+    make(7, 'approval_response', { resume_input: { approval_request_id: 'approval', approve: true } }),
+    make(8, 'tool_result', { call_id: 'a', tool_name: 'search', tool_output: 'result-a' }),
+    make(9, 'assistant_message', {}, { text: 'answer' }),
+  ] }).mockResolvedValueOnce({ ...page, HasMore: false, NextItemCursor: null, Items: [
+    { ...make(1, 'control.accepted'), InboxInput: { CommandId: 'cmd', Text: 'question' } },
+    { ...make(2, 'user_message', {}, { text: 'question' }), InputCommandId: 'cmd' },
+    make(3, 'approval_request', { interrupt_info: { id: 'approval', tool_name: 'publish' } }),
+    make(4, 'tool_call', { call_id: 'a', tool_name: 'search', tool_args: 'args-a' }),
+    make(5, 'tool_call', { call_id: 'b', tool_name: 'search', tool_args: 'args-b' }),
+  ] });
+  const actions = mount({ listSessionMessages: read });
+  await actions.loadSession('s');
+  await actions.loadOlderSessionMessages('s');
+  const transcript = useMessageStore.getState().messages;
+  expect(transcript.filter(row => row.role === 'user').map(row => row.content)).toEqual(['question']);
+  expect(transcript.filter(row => row.content === 'answer')).toHaveLength(1);
+  const tools = transcript.flatMap(row => Object.values(row.tools || {}));
+  expect(tools.filter(row => row.name === 'search')).toHaveLength(2);
+  expect(tools).toEqual(expect.arrayContaining(['a', 'b'].map(id => expect.objectContaining({
+    name: 'search', callId: id, args: 'args-' + id, output: 'result-' + id, status: 'completed',
+  }))));
+  expect(tools).toContainEqual(expect.objectContaining({ approvalRequestId: 'approval', approvalStatus: 'approved' }));
 });

@@ -491,7 +491,9 @@ export function rebuildPersistedSessionHistory(
   for (const message of fallbackMessages) {
     const runId = String(message.invocationId || '');
     if (!runId) continue;
-    fallbackByRun.set(runId, [...(fallbackByRun.get(runId) || []), message]);
+    const list = fallbackByRun.get(runId);
+    if (list) list.push(message);
+    else fallbackByRun.set(runId, [message]);
   }
 
   // A partially persisted canonical run must never make the older Server
