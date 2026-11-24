@@ -227,3 +227,67 @@ test('displays a rich giant invocation in sequence order with distinct same-name
     expect(metrics.p95OlderMs).toBeLessThanOrEqual(Number(process.env.KSADK_HISTORY_OLDER_P95_MS));
   }
 });
+
+test('expands the exact large tool result on its earlier call without eager content reads', async ({ page }) => {
+  const offsets: number[] = [];
+  page.on('request', req => {
+    if (req.url().endsWith('/ListSessionMessages') && req.postDataJSON()?.ContentSeqId) {
+      expect(req.postDataJSON().ContentSeqId).toBe(61);
+      offsets.push(req.postDataJSON().ContentOffset);
+    }
+  });
+  await page.goto('/e2e/fixtures/local-heavy-history.html');
+  const firstRead = page.waitForResponse(r => r.url().endsWith('/ListSessionMessages'));
+  await page.getByRole('button', { name: 'Open D', exact: true }).click();
+  let { Data } = await (await firstRead).json();
+  await expect(page.getByText('deferred-final-answer', { exact: true })).toBeVisible();
+  let callPage = -1;
+  let resultPage = -1;
+  let boundary = 63;
+  for (let index = 0; ; index++) {
+    expect(Data.HistoryView).toBe('items-v1');
+    expect(Data.Items.length).toBeGreaterThan(0);
+    for (const item of [...Data.Items].reverse()) {
+      expect(item.SeqId).toBe(--boundary);
+      if (item.SeqId === 2) callPage = index;
+      if (item.SeqId === 61) {
+        resultPage = index;
+        expect(item).toMatchObject({ ContentRef: { SeqId: 61 },
+          ToolRef: { CallId: 'large-call', Kind: 'result', Status: 'completed' } });
+        expect(item.Event.Metadata?.tool_output).toBeUndefined();
+      }
+    }
+    await page.waitForFunction(next => {
+      const state = (window as any).localHistoryProbe().history['local-heavy-D'];
+      return state && !state.isLoadingOlder && state.nextItemCursor === next;
+    }, Data.NextItemCursor);
+    if (!Data.HasMore) break;
+    const before = Data.NextItemCursor;
+    const older = page.waitForResponse(r => r.url().endsWith('/ListSessionMessages'));
+    await page.getByRole('button', { name: 'Older D', exact: true }).evaluate(el => (el as HTMLButtonElement).click());
+    const received = await older;
+    expect(received.request().postDataJSON().ItemCursor).toBe(before);
+    Data = (await received.json()).Data;
+  }
+  expect(boundary).toBe(1);
+  expect(resultPage).toBeGreaterThanOrEqual(0);
+  expect(callPage).toBeGreaterThan(resultPage);
+  await expect(page.getByText('deferred-user-question', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).localHistoryProbe().messages.flatMap((m: any) =>
+    Object.values(m.tools || {}).map((tool: any) => [m.historyOrder.seq, tool.name, tool.callId, tool.status]))))
+    .toEqual([[2, 'large_lookup', 'large-call', 'completed']]);
+  const card = page.locator('details').filter({ has: page.locator('summary').filter({ hasText: 'large_lookup' }) });
+  await expect(card).toHaveCount(1);
+  await card.locator('summary').click();
+  await expect(card).toContainText('deferred-question');
+  expect(offsets).toEqual([]);
+  await card.getByRole('button', { name: '展开 完整出参' }).click();
+  await expect(card.locator('pre').filter({ hasText: 'DEFERRED_TOOL_END' }))
+    .toHaveText('结果'.repeat(110000) + 'DEFERRED_TOOL_END', { timeout: 45_000 });
+  expect(offsets.length).toBeGreaterThan(1);
+  expect(offsets[0]).toBe(0);
+  expect(offsets).toEqual([...new Set(offsets)].sort((a,b) => a-b));
+  const transcript = await page.locator('main').innerText();
+  expect(transcript.indexOf('deferred-user-question')).toBeLessThan(transcript.indexOf('deferred-question'));
+  expect(transcript.indexOf('DEFERRED_TOOL_END')).toBeLessThan(transcript.indexOf('deferred-final-answer'));
+});

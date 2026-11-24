@@ -1,4 +1,4 @@
-"""Seed the three sessions consumed by released-runtime-history.spec.ts.
+"""Seed the four sessions consumed by released-runtime-history.spec.ts.
 
 Run with the current SDK in a disposable PostgreSQL database. Point both
 KSADK_TEST_POSTGRES_DSN and KSADK_HISTORY_FIXTURE_NAMESPACE at the same
@@ -6,6 +6,7 @@ database and namespace used by the Runtime under test. Use a fresh namespace.
 Then set KSADK_RELEASED_RUNTIME_FACADE to its local Server and run
 npx playwright test -c playwright.released-runtime-history.config.mjs.
 """
+import argparse
 import asyncio
 import json
 import os
@@ -14,10 +15,39 @@ from ksadk.sessions._postgres_tables import KSADK_PG_EVENTS_TABLE
 from ksadk.sessions.postgres_service import PostgresSessionService
 
 
+async def seed_deferred_tool(service, namespace):
+    session = "local-heavy-D"
+    if await service.get_session(session) is not None:
+        raise ValueError(f"Use a fresh fixture namespace; {session} already exists")
+    await service.create_session("local-heavy-history", "user", session)
+    async with service._connection(write=True) as connection:
+        await connection.execute(f"""
+            INSERT INTO {KSADK_PG_EVENTS_TABLE}
+                (namespace,session_id,id,author,event_type,content_json,metadata_json,timestamp,seq_id,invocation_id)
+            SELECT $1,$2,'deferred-'||n,CASE WHEN n=1 THEN 'user' WHEN n=61 THEN 'tool' ELSE 'assistant' END,
+                   CASE n WHEN 1 THEN 'user_message' WHEN 2 THEN 'tool_call' WHEN 61 THEN 'tool_result'
+                        WHEN 62 THEN 'assistant_message' ELSE 'progress' END,
+                   jsonb_build_object('parts', jsonb_build_array(jsonb_build_object('text',
+                        CASE n WHEN 1 THEN 'deferred-user-question' WHEN 62 THEN 'deferred-final-answer' ELSE '' END))),
+                   CASE n WHEN 2 THEN jsonb_build_object('tool_name','large_lookup','tool_call_id','large-call',
+                                  'tool_args',jsonb_build_object('query','deferred-question'))
+                          WHEN 61 THEN jsonb_build_object('tool_name','large_lookup','tool_call_id','large-call',
+                                  'tool_output',repeat('结果',110000)||'DEFERRED_TOOL_END')
+                          ELSE '{{}}'::jsonb END,
+                   n,n,'deferred-run' FROM generate_series(1,62) n
+        """, namespace, session)
+
+
 async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--deferred-only", action="store_true", help="Add only session D to an existing fixture namespace")
+    deferred_only = parser.parse_args().deferred_only
     namespace = os.environ["KSADK_HISTORY_FIXTURE_NAMESPACE"]
     service = PostgresSessionService(dsn=os.environ["KSADK_TEST_POSTGRES_DSN"], namespace=namespace)
     try:
+        if deferred_only:
+            await seed_deferred_tool(service, namespace)
+            return
         for session in ("local-heavy-A", "local-heavy-B", "local-heavy-C"):
             if await service.get_session(session) is not None:
                 raise ValueError(f"Use a fresh fixture namespace; {session} already exists")
@@ -87,6 +117,7 @@ async def main():
             """, [(namespace, author, kind, json.dumps({'role': 'user' if author == 'user' else 'model',
                 'parts': [{'text': text}] if text else []}), json.dumps(metadata), seq)
                 for seq, author, kind, text, metadata in markers])
+        await seed_deferred_tool(service, namespace)
     finally:
         await service.aclose()
 

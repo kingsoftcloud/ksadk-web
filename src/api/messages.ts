@@ -60,6 +60,8 @@ export type SessionHistoryItem = {
   InvocationId?: string;
   EventType: string;
   ContentRef?: { SeqId: number };
+  ToolRef?: { CallId: string; Kind: 'call' | 'result'; Name?: string; ScopeId?: string; ParentScopeId?: string;
+    Status: 'running' | 'completed' | 'error' };
   InputCommandId?: string;
   InboxInput?: { CommandId: string; Text?: string; ContentRef?: { SeqId: number } };
   Event: import('../types/session-events.js').SessionEventRecord;

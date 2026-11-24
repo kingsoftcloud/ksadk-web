@@ -6,6 +6,8 @@ import { mapBackendMessage, mapBackendMessages } from './messages.js';
 import { buildMessagesFromSessionEvents } from './session-events.js';
 import { persistedRuntimeFrame, rebuildPersistedSessionHistory } from './persisted-session-history.js';
 import manifest from '../core/a2ui/assets/manifest.json';
+import { KernelRunEventTranslator } from '../core/stream/kernel-events.js';
+import { coalesceHistoryToolCalls } from './history-tool-facts.js';
 import { orderTranscript } from './transcript-order.js';
 
 type Page = Awaited<ReturnType<ApiFacade['listSessionMessages']>>;
@@ -188,6 +190,59 @@ const CHAT_EVENT_TYPES = new Set([
   'run_status', 'run.started', 'run.progress', 'run.completed', 'run.interrupted', 'run.failed', 'run.canceled',
 ]);
 
+function deferredItemMessage(
+  item: SessionHistoryItem, api: ApiFacade, sessionId: string, scope: PageScope,
+  profile: 'flat-v1' | 'agent-block-v1', messages: Message[],
+): Message {
+  const loadEvent = async (signal: AbortSignal) => {
+    const body = await readItemBody(api, sessionId, item.SeqId, scope, signal);
+    const envelope = object(body.Content?.session_event);
+    const imported = envelope.family === 'workflow' && object(object(envelope.payload).legacy_history_event);
+    return imported && imported.EventType
+      ? { ...imported, SessionId: sessionId, SeqId: item.SeqId } as SessionEventRecord
+      : { ...item.Event, ...body };
+  };
+  const bodyKey = JSON.stringify([sessionId, scope.HistoryEpoch, item.ItemId, item.SeqId]);
+  const base = { id: 'history-body:' + bodyKey, timestamp: Number(item.Event.Timestamp) || 0,
+    historyOrder: { seq: item.SeqId }, invocationId: item.InvocationId || item.Event.InvocationId };
+  const ref = item.ToolRef;
+  if (ref?.CallId && (ref.Kind === 'call' || ref.Kind === 'result')) {
+    const isResult = ref.Kind === 'result';
+    const read = async (signal: AbortSignal) => {
+      const event = await loadEvent(signal);
+      const frame = persistedRuntimeFrame(event);
+      const translated = frame && new KernelRunEventTranslator(sessionId).translate(frame);
+      const rows = buildMessagesFromSessionEvents(translated ? [{ ...translated, Timestamp: event.Timestamp,
+        SeqId: event.SeqId } as SessionEventRecord] : legacyRows([event]),
+        { preserveDistinctEvents: true }) as Message[];
+      const tool = rows.flatMap(row => Object.values(row.tools || {})).find(row => row.callId === ref.CallId);
+      const payload = isResult ? tool?.output : tool?.args;
+      if (payload === undefined) throw new Error('历史工具正文与调用标识不一致。');
+      return payload;
+    };
+    let scopeId = ref.ScopeId;
+    if (isResult && ref.ParentScopeId) {
+      const owners = messages.filter(row => (row.runId || row.invocationId) === base.invocationId
+        && Object.values(row.tools || {}).some(tool => tool.callId === ref.CallId));
+      if (!owners.some(row => row.scopeId === ref.ScopeId)
+        && owners.filter(row => row.scopeId === ref.ParentScopeId).length === 1) scopeId = ref.ParentScopeId;
+    }
+    return { ...base, role: 'model', content: '', scopeId,
+      eventType: isResult ? 'tool_result' : 'tool_call',
+      tools: { [ref.CallId]: { callId: ref.CallId, name: ref.Name || 'tool', args: '', status: ref.Status,
+        ...(isResult ? { deferredOutput: { key: bodyKey, read } } : { deferredArgs: { key: bodyKey, read } }) } } };
+  }
+  return { ...base, role: 'system', content: item.EventType,
+    readHistoryContent: async signal => {
+      const event = await loadEvent(signal);
+      const projected = rebuildPersistedSessionHistory(
+        buildMessagesFromSessionEvents(legacyRows([event])) as Message[], [event], sessionId, profile);
+      return projected.messages.flatMap(row => [
+        row.content, row.reasoning, ...Object.values(row.tools || {}).map(tool => JSON.stringify(tool, null, 2)),
+      ]).filter(Boolean).join('\n') || '此事件没有可展示的正文。';
+    } };
+}
+
 function projectSemanticItems(
   items: SessionHistoryItem[], api: ApiFacade, sessionId: string, scope: PageScope,
   profile: 'flat-v1' | 'agent-block-v1', firstSourceSeqId?: number,
@@ -211,24 +266,8 @@ function projectSemanticItems(
   const legacy = legacyRows([...records, ...inputs].sort((a, b) => Number(a.SeqId) - Number(b.SeqId)));
   const fallback = [...buildMessagesFromSessionEvents(legacy, { preserveDistinctEvents: true }), ...legacyApprovalRows(legacy), ...legacyActivityRows(legacy)] as Message[];
   const result = rebuildPersistedSessionHistory(fallback, records, sessionId, profile, firstSourceSeqId);
-  const deferred: Message[] = items.filter(item => item.ContentRef).map(item => ({
-    id: 'history-body:' + item.ItemId, role: 'system', content: item.EventType,
-    timestamp: Number(item.Event.Timestamp) || 0, historyOrder: { seq: item.SeqId },
-    invocationId: item.InvocationId,
-    readHistoryContent: async signal => {
-      const body = await readItemBody(api, sessionId, item.SeqId, scope, signal);
-      const envelope = object(body.Content?.session_event);
-      const imported = envelope.family === 'workflow' && object(object(envelope.payload).legacy_history_event);
-      const event = imported && imported.EventType
-        ? { ...imported, SessionId: sessionId, SeqId: item.SeqId } as SessionEventRecord
-        : { ...item.Event, ...body };
-      const projected = rebuildPersistedSessionHistory(
-        buildMessagesFromSessionEvents(legacyRows([event])) as Message[], [event], sessionId, profile);
-      return projected.messages.flatMap(row => [
-        row.content, row.reasoning, ...Object.values(row.tools || {}).map(tool => JSON.stringify(tool, null, 2)),
-      ]).filter(Boolean).join('\n') || '此事件没有可展示的正文。';
-    },
-  }));
+  const deferred = items.filter(item => item.ContentRef)
+    .map(item => deferredItemMessage(item, api, sessionId, scope, profile, result.messages));
   for (const item of missingInputs) {
     const input = item.InboxInput!;
     if (!input.ContentRef) continue;
@@ -255,7 +294,7 @@ function projectSemanticItems(
         return [event.SeqId, event.EventType, detail].filter(Boolean).join('  ');
       }).join('\n') });
   }
-  return { ...result, messages: deferred.length ? orderTranscript([...result.messages, ...deferred]) : result.messages };
+  return { ...result, messages: deferred.length ? coalesceHistoryToolCalls(orderTranscript([...result.messages, ...deferred])) : result.messages };
 }
 
 type ProgressChunk = { events: SessionEventRecord[]; count: number; newer?: ProgressChunk };

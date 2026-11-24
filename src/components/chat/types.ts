@@ -16,6 +16,8 @@ export type PreviewImageSize = {
   height: number;
 };
 
+type DeferredToolPayload = { key: string; read: (signal: AbortSignal) => Promise<string> };
+
 export type Message = {
   /** Fetch a body omitted from a bounded history page only when expanded. */
   readHistoryContent?: (signal: AbortSignal) => Promise<string>;
@@ -98,6 +100,8 @@ export type Message = {
       callId?: string;
       args: string;
       output?: string;
+      deferredArgs?: DeferredToolPayload;
+      deferredOutput?: DeferredToolPayload;
       summary?: string;
       durationMs?: number;
       status: 'running' | 'completed' | 'error' | 'paused' | 'unknown';

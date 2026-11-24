@@ -1,3 +1,4 @@
+import { DeferredHistoryContent } from './DeferredHistoryContent.js';
 /**
  * 交错 "思考-行动-思考-输出" 渲染,照抄 Wegent/wework 的视觉节奏:
  * - 思考块:默认折叠；流式时只显示"思考中"动效，点击后才显示实时内容
@@ -214,8 +215,10 @@ function ToolRow({
             {approvalStatus === 'approved' && errored ? <span>· 工具执行失败</span> : null}
           </div>
         )}
-        {args ? <PayloadBlock label="入参" value={args} tone="input" /> : null}
-        {output && !cancelledByInteraction ? renderToolOutput(block.toolName, output, errored) : null}
+        {tool?.deferredArgs && <DeferredHistoryContent label="完整入参" key={tool.deferredArgs.key} read={tool.deferredArgs.read} />}
+        {tool?.deferredOutput && !cancelledByInteraction && <DeferredHistoryContent label="完整出参" key={tool.deferredOutput.key} read={tool.deferredOutput.read} />}
+        {args && !tool?.deferredArgs ? <PayloadBlock label="入参" value={args} tone="input" /> : null}
+        {output && !cancelledByInteraction && !tool?.deferredOutput ? renderToolOutput(block.toolName, output, errored) : null}
       </div>
     </Collapsible>
   );
@@ -417,21 +420,14 @@ export function ProcessingBlocksView({
         }
         if (block.type === 'tool') {
           const blockExtra = (block.extra || {}) as Record<string, unknown>;
-          const tool = (typeof blockExtra.callId === 'string' && message.tools?.[blockExtra.callId])
-            || message.tools?.[block.toolName]
+          const callId = String(blockExtra.callId || blockExtra.call_id || '');
+          const named = message.tools?.[block.toolName];
+          const tool = (callId && message.tools?.[callId])
             || Object.values(message.tools || {}).find(entry =>
               (blockExtra.approvalRequestId && entry.approvalRequestId === blockExtra.approvalRequestId)
-              || (blockExtra.callId && entry.callId === blockExtra.callId));
-          const approvalId = String(
-            blockExtra.approvalRequestId
-            || tool?.approvalRequestId
-            || '',
-          );
-          const callId = String(
-            blockExtra.callId
-            || blockExtra.call_id
-            || '',
-          );
+              || (callId && entry.callId === callId))
+            || (!callId || !named?.callId || named.callId === callId ? named : undefined);
+          const approvalId = String(blockExtra.approvalRequestId || tool?.approvalRequestId || '');
           const record = approvalId
             ? interactionRecords?.find((entry) => entry.interactionId === approvalId)
             : callId

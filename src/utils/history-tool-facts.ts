@@ -48,6 +48,7 @@ export function coalesceHistoryToolCalls(messages: Message[]): Message[] {
       : { ...earlier, ...tool, ...mergeHistoryToolFacts(earlier, tool) };
     // A legacy result frequently supplies just the call id and the output.
     // Keep the original call's name when the result used the fallback label.
+    if (tool.deferredOutput) merged.status = tool.status;
     if (merged.name === 'tool') merged.name = earlier.name !== 'tool' ? earlier.name : tool.name;
     owner.message.tools![owner.key] = merged;
     owner.message.blocks = owner.message.blocks?.map(block => block.type === 'tool'

@@ -64,3 +64,47 @@ it('keeps old raw calls at their own positions while a tool is still running and
   ]);
   expect(read(rows).map(row => row.historyOrder?.seq)).toEqual([1, 2, 3, 4]);
 });
+
+it.each(['legacy', 'imported', 'canonical'])('reconciles a deferred %s result with its earlier call before loading its body', async shape => {
+  const metadata = { tool_call_id: 'large', tool_name: 'lookup', tool_output: '结果'.repeat(1000) + 'END' };
+  const ordinary = { SessionId: 's', EventType: 'tool_result', Metadata: metadata, Content: {} };
+  const frame = { schema_version: 2, event_type: 'item.completed', item_kind: 'tool_result', item_id: 'result-id',
+    scope_id: 'root', run_id: 'run', event_id: 'receipt',
+    snapshot: { parts: [{ content_type: 'tool_result', call_id: 'large', result: metadata.tool_output }] } };
+  const body = shape === 'imported' ? [{ session_event: { family: 'workflow', payload: { legacy_history_event: ordinary } } }, {}]
+    : shape === 'canonical' ? [{ runtime_event: frame }, {}] : [{}, metadata];
+  let reads = 0;
+  const api = { listSessionMessages: async () => {
+    reads++;
+    return { HistoryView: 'items-v1', ...scope, ContentSeqId: 4, NextContentOffset: null,
+      ContentChunk: JSON.stringify(body) };
+  } } as unknown as ApiFacade;
+  const deferred = { ...event(4, 'tool_result', ''), ContentRef: { SeqId: 4 },
+    ToolRef: { CallId: 'large', Name: 'lookup', Kind: 'result' as const, Status: 'completed' as const } };
+  const tail = prependItemHistory([deferred, event(5, 'assistant_message', 'done')], api, 's', scope, 'flat-v1');
+  const start = { ...event(2,'tool_call',''), Event: { ...event(2, 'tool_call', '').Event,
+    Metadata: { tool_call_id: 'large', tool_name: 'lookup', tool_args: { term: 'needle' } } } };
+  const complete = prependItemHistory([event(1, 'user_message', 'question'), start], api,'s',scope,'flat-v1',tail);
+  expect(complete.messages.map(row => row.historyOrder?.seq)).toEqual([1,2,5]);
+  const tools = complete.messages.flatMap(row => Object.values(row.tools || {}));
+  expect(tools).toHaveLength(1);
+  expect(tools[0]).toMatchObject({ name:'lookup', callId: 'large', status:'completed', args: expect.stringContaining('needle') });
+  expect(reads).toBe(0);
+  await expect(tools[0].deferredOutput!.read(new AbortController().signal)).resolves.toBe(metadata.tool_output);
+  expect(reads).toBe(1);
+});
+
+it('opens deferred arguments independently from the result and rejects an unrelated tool body', async () => {
+  const opts = { Kind: 'call' as const, CallId: 'exact', Status: 'running' as const };
+  const item = { ...event(1, 'tool_call', ''), ContentRef: { SeqId: 1 }, ToolRef: opts };
+  let id = 'unrelated';
+  const api = { listSessionMessages: async () => ({ ...scope, HistoryView: 'items-v1', ContentSeqId: 1,
+    NextContentOffset: null, ContentChunk: JSON.stringify([{}, { tool_call_id: id, tool_args: { value: '长参数' } }]) }) } as unknown as ApiFacade;
+  const state = prependItemHistory([item], api, 's', scope, 'flat-v1');
+  const tool = Object.values(state.messages[0].tools!)[0];
+  expect(tool.deferredOutput).toBeUndefined();
+  const signal = new AbortController().signal;
+  await expect(tool.deferredArgs!.read(signal)).rejects.toThrow('调用标识');
+  id = 'exact';
+  expect(JSON.parse(await tool.deferredArgs!.read(signal))).toEqual({ value: '长参数' });
+});
