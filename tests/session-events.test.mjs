@@ -161,6 +161,7 @@ test('session event utils replay RuntimeEvent deltas emitted by LangGraph', asyn
       reasoning: '先分析可用工具。',
       tools: {
         list_skills: {
+          callId: 'call-1',
           name: 'list_skills',
           args: '{\n  "include": "skill"\n}',
           output: '{\n  "ok": true\n}',
