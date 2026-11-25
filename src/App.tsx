@@ -203,6 +203,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSettledRun,
+    onRunRecovered: loadSession,
     onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
     waitForPendingSessionCreation,
   });
