@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   hostedRuntime: undefined as boolean | undefined,
   history: {
     nextCursor: null, hasMore: false, isLoadingInitial: false, isLoadingOlder: false,
+    dataSource: undefined as string | undefined, degraded: false,
     persistenceDegraded: true, historyEpoch: 'epoch-1', snapshotSeqId: 0,
   },
 }));
@@ -47,4 +48,23 @@ describe('history persistence warning', () => {
     state.history.persistenceDegraded = false;
     expect(render()).not.toContain('history-persistence-warning');
   });
+});
+
+
+it('identifies the partial control transcript and offers to reload complete history', () => {
+  const render = () => renderToStaticMarkup(<ConnectedMessageList
+    agentName="Agent" isMobile={false} onDeleteFeedback={() => {}}
+    onSubmitFeedback={() => {}} onRespondToApproval={() => {}} onRetryHistory={vi.fn()} />);
+  state.history.persistenceDegraded = false;
+  state.history.dataSource = 'control_fallback';
+  state.history.degraded = true;
+  try {
+    expect(render()).toContain('data-testid="history-fallback-warning"');
+    expect(render()).toContain('重试完整历史');
+    state.history.dataSource = 'runtime';
+    expect(render()).not.toContain('history-fallback-warning');
+  } finally {
+    state.history.dataSource = undefined;
+    state.history.degraded = false;
+  }
 });
