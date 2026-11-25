@@ -141,6 +141,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     fetchSessions,
     loadMoreSessions,
     loadSession,
+    recoverSessionRun,
     followAcceptedInteraction,
     loadOlderSessionMessages,
     createNewSession,
@@ -203,7 +204,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSettledRun,
-    onRunRecovered: loadSession,
+    onRunRecovered: recoverSessionRun,
     onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
     waitForPendingSessionCreation,
   });

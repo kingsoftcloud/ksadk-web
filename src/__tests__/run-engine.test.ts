@@ -356,7 +356,7 @@ describe('RunEngineImpl', () => {
     })));
     expect(events.flatMap(event => event.type === 'stream_event' ? [event.event.SeqId] : [])).toEqual([8, 9, 10]);
     expect(useMessageStore.getState().messages.map(message => message.content)).toEqual(['one input', 'complete output']);
-    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live');
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live', calls[0].InvocationId);
   });
 
   it('reconciles an empty subscription only with a completed status for the submitted invocation', async () => {
@@ -382,7 +382,7 @@ describe('RunEngineImpl', () => {
     await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('session-live', 'completed'), { timeout: 3000 });
     expect(api.getSession).toHaveBeenCalledTimes(2);
     expect(calls).toHaveLength(1);
-    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live');
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live', calls[0].InvocationId);
   });
 
   it('keeps the original run recoverable while the browser is offline beyond its retry delays', async () => {
@@ -449,7 +449,7 @@ describe('RunEngineImpl', () => {
     expect(calls).toHaveLength(1);
     expect(api.subscribeRunEvents).toHaveBeenCalledTimes(1);
     expect(api.listSessionEvents).toHaveBeenCalledExactlyOnceWith('session-live', expect.objectContaining({ limit: 20 }));
-    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live');
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live', calls[0].InvocationId);
   });
 
   afterEach(async () => {

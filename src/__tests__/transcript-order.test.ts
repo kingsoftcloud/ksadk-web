@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { mapBackendMessages } from '../utils/messages.js';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
-import { mergeHistoryWithLive, orderTranscript } from '../utils/transcript-order.js';
+import { mergeHistoryWithLive, orderTranscript, preserveRecoveredUserInput } from '../utils/transcript-order.js';
 import type { Message } from '../components/chat/types.js';
 
 const row = (id: string, seq: number, run: string, role = 'assistant') => ({
@@ -77,6 +77,15 @@ describe('transcript order independent of wall clocks', () => {
 });
 
 describe('history/live merge', () => {
+  it('preserves the recovered run input until its durable row arrives without merging identical text from other turns', () => {
+    const [previousInput, previousAnswer, durableInput, answer] = rounds();
+    const optimisticInput = { ...durableInput, id: 'optimistic', content: previousInput.content };
+    const partial = [previousInput, previousAnswer, answer];
+    expect(ids(preserveRecoveredUserInput(partial, optimisticInput))).toEqual(['q1', 'a1', 'optimistic', 'a2']);
+    const complete = [previousInput, previousAnswer, { ...durableInput, content: previousInput.content }, answer];
+    expect(preserveRecoveredUserInput(complete, optimisticInput)).toBe(complete);
+  });
+
   it('keeps a streamed update in its round when an older page arrives', () => {
     const baseline = rounds().slice(2);
     const current = baseline.map(m => m.id === 'a2' ? { ...m, content: 'new streamed answer' } : m);

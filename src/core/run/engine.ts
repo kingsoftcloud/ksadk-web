@@ -357,7 +357,7 @@ export class RunEngineImpl implements RunEngine {
     onSessionUpsert?: (sessionId: string) => void;
     /** Legacy Responses HTTP admission, before the output stream finishes. */
     onDispatchResult?: (accepted: boolean) => void;
-    onRecovered?: (sessionId: string) => void;
+    onRecovered?: (sessionId: string, invocationId: string) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
@@ -623,7 +623,7 @@ export class RunEngineImpl implements RunEngine {
                 invocationId: resumeInvocationId,
                 afterSeqId: this.lastSeqId,
                 reconnect: true,
-                onSessionReloadNeeded: () => draft.onRecovered?.(recoverySessionId),
+                onSessionReloadNeeded: () => draft.onRecovered?.(recoverySessionId, resumeInvocationId),
               });
               return;
             }

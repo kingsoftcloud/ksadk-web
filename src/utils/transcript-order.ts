@@ -4,6 +4,15 @@ import { coalesceHistoryToolCalls } from './history-tool-facts.js';
 
 const runOf = (message: Message) => message.runId || message.invocationId;
 
+export function preserveRecoveredUserInput(history: Message[], input?: Message): Message[] {
+  if (!input) return history;
+  const runId = runOf(input);
+  if (!runId || history.some(message => message.role === 'user' && runOf(message) === runId)) return history;
+  const firstOwned = history.findIndex(message => runOf(message) === runId);
+  if (firstOwned < 0) return history;
+  return [...history.slice(0, firstOwned), input, ...history.slice(firstOwned)];
+}
+
 /** Sort sequenced rows without turning clocks into log positions. Legacy rows
  * lacking a sequence stay attached to their nearest received neighbour. When
  * no sequence is available, the endpoint's existing order is authoritative. */

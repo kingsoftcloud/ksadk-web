@@ -324,6 +324,7 @@ test('Hosted chat reloads the original run history after its live Responses stre
   const subscriptions = [];
   let terminalReplayed = false;
   let recoveryHistoryReads = 0;
+  let olderHistoryReads = 0;
 
   await page.route('**/RunAgent', async route => {
     submissions.push(route.request().postDataJSON());
@@ -334,19 +335,31 @@ test('Hosted chat reloads the original run history after its live Responses stre
     subscriptions.push(Object.fromEntries(new URL(route.request().url()).searchParams));
     terminalReplayed = true;
     const terminal = { SessionId: SESSION_ID, InvocationId: submissions[0].InvocationId,
-      EventType: 'run_status', SeqId: 4, Content: { status: 'completed' } };
+      EventType: 'run.completed', SeqId: 4, Content: { status: 'completed' } };
     await route.fulfill({ status: 200, contentType: 'text/event-stream',
       body: `data: ${JSON.stringify(terminal)}\n\n` });
   });
+  await page.route('**/GetSession', async route => {
+    if (!terminalReplayed) return route.fallback();
+    // The compatibility status update can lag behind the canonical terminal.
+    await route.fulfill({json: envelope({Session:{SessionId:SESSION_ID, ActiveRunStatus:'in_progress',
+      ActiveInvocationId:submissions[0].InvocationId}})});
+  });
   await page.route('**/ListSessionMessages', async route => {
     if (!terminalReplayed) return route.fallback();
-    recoveryHistoryReads++;
     const invocationId = submissions[0].InvocationId;
+    if (route.request().postDataJSON().BeforeSeqId) {
+      olderHistoryReads++;
+      await route.fulfill({ json: envelope({ Messages: [
+        { MessageId: 'durable-user', Role: 'user', Content: { text: question }, SeqId: 2, InvocationId: invocationId },
+      ], LatestSeqId: 4, HasMore: false, NextCursor: null }) });
+      return;
+    }
+    recoveryHistoryReads++;
     await route.fulfill({ json: envelope({ Messages: [
       { MessageId: 'partial-runtime-message', Role: 'assistant', Content: { text: previous }, SeqId: 1 },
-      { MessageId: 'durable-user', Role: 'user', Content: { text: question }, SeqId: 2, InvocationId: invocationId },
       { MessageId: 'durable-assistant', Role: 'assistant', Content: { text: answer }, SeqId: 3, InvocationId: invocationId },
-    ], LatestSeqId: 4, HasMore: false, NextCursor: null }) });
+    ], LatestSeqId: 4, HasMore: true, NextCursor: 3 }) });
   });
 
   await page.goto('/');
@@ -355,6 +368,11 @@ test('Hosted chat reloads the original run history after its live Responses stre
   await page.getByTitle('发送消息', { exact: true }).click();
   await expect(page.getByText(answer, { exact: true })).toBeVisible();
   await expect(page.getByText(question, { exact: true })).toHaveCount(1);
+  await page.getByTestId('history-load-older').click();
+  await expect.poll(() => olderHistoryReads).toBe(1);
+  await expect(page.locator('[data-message-id="durable-user"]')).toContainText(question);
+  await expect(page.getByText(question, { exact: true })).toHaveCount(1);
+  await expect(page.getByText(answer, { exact: true })).toHaveCount(1);
   expect(submissions).toHaveLength(1);
   expect(subscriptions).toMatchObject([{ SessionId: SESSION_ID, InvocationId: submissions[0].InvocationId, AfterSeqId: '0' }]);
   expect(recoveryHistoryReads).toBe(1);

@@ -43,7 +43,7 @@ type RunAgentContext = {
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
   onRunSettled?: (sessionId: string | null, agentId?: string, outcome?: import('../core/run/types.js').RunSettlement) => void;
-  onRunRecovered?: (sessionId: string) => void;
+  onRunRecovered?: (sessionId: string, invocationId: string) => void;
   onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
   /** Stable owner before native creation. Omit for the legacy Hosted shell. */
   conversationIdRef?: React.MutableRefObject<ConversationId | undefined>;
@@ -325,8 +325,8 @@ export function useRunAgent(ctx: RunAgentContext) {
         },
         onSessionUpsert: () => {},
         onDispatchResult: confirmDispatch,
-        onRecovered: sessionId => {
-          if (owner.isVisible() && owner.sessionId === sessionId) onRunRecovered?.(sessionId);
+        onRecovered: (sessionId, invocationId) => {
+          if (owner.isVisible() && owner.sessionId === sessionId) onRunRecovered?.(sessionId, invocationId);
         },
         onSettled: (sessionId, outcome = 'unknown') => {
           if (outboxEntry) outboxRequestsRef.current.delete(outboxEntry.requestId);

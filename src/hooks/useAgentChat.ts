@@ -108,6 +108,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     fetchSessions,
     loadMoreSessions,
     loadSession,
+    recoverSessionRun,
     followAcceptedInteraction,
     loadOlderSessionMessages,
     historySearchSnapshot,
@@ -134,10 +135,6 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     if (!sessionId || submittedAgentId !== agentIdRef.current) return;
     void fetchSessions(submittedAgentId, sessionId);
   }, [agentIdRef, fetchSessions]);
-
-  const refreshRecoveredRun = useCallback((sessionId: string) => {
-    if (currentSessionIdRef.current === sessionId) void loadSession(sessionId);
-  }, [currentSessionIdRef, loadSession]);
 
   const selectedModelMetadata = useMemo(
     () => (availableModels as ModelCatalogItem[]).find((model) => model.id === selectedModel) || null,
@@ -168,7 +165,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSessionsAfterRun,
-    onRunRecovered: refreshRecoveredRun,
+    onRunRecovered: recoverSessionRun,
     conversationIdRef: controller ? activeConversationIdRef : undefined,
     conversationId,
     onSessionCreated: (sessionId, submittedConversationId, submittedAgentId = agentId) => {

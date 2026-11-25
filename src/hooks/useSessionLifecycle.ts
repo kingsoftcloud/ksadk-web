@@ -1,4 +1,4 @@
-import { mergeHistoryWithLive, orderTranscript } from '../utils/transcript-order.js';
+import { mergeHistoryWithLive, orderTranscript, preserveRecoveredUserInput } from '../utils/transcript-order.js';
 import { isHistoryPreparing, readPreparedHistory } from '../utils/history-preparation.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
@@ -238,6 +238,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
   const persistedTranscriptBySessionRef = useRef(new Map<string, Message[]>());
+  const recoveredInputBySessionRef = useRef(new Map<string, Message>());
   const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
   const historyProfileBySessionRef = useRef(new Map<string, 'flat-v1' | 'agent-block-v1'>());
   const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
@@ -572,7 +573,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [agentId, subscribeRunEvents]);
 
   const loadSession = useCallback(
-    async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
+    async (sessionId: string, historyReload = false, signal?: AbortSignal, recoveredInvocationId?: string) => {
       if (signal?.aborted) return;
       localDraftAgentRef.current = null;
       // Bootstrap can invoke the initial list callback before React replaces
@@ -596,6 +597,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         );
       };
       const cachedHistory = sessionTranscriptCacheRef.current.get(sessionId);
+      const recoveredInput = recoveredInputBySessionRef.current.get(sessionId);
       // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
       // 切回时用历史快照和 afterSeqId 订阅追平遗漏内容。
       if (previousSessionId && previousSessionId !== sessionId) {
@@ -661,7 +663,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           fallbackHistory,
           currentSessionIdRef.current,
         );
-        let history = itemTranscript?.messages ?? fallbackHistory;
+        let history = preserveRecoveredUserInput(itemTranscript?.messages ?? fallbackHistory, recoveredInput);
         let latestEventSeqId = 0;
         let canonicalRunIds: string[] = itemTranscript?.canonicalRunIds ?? [];
 
@@ -747,7 +749,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               profile,
             );
             canonicalRunIds = rebuilt.canonicalRunIds;
-            history = rebuilt.messages;
+            history = preserveRecoveredUserInput(rebuilt.messages, recoveredInput);
           }
           if (compatible) {
             const interactionHistory = await hydrateVisibleInteractionHistory(
@@ -845,7 +847,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               ACTIVE_RUN_STATUSES.has(status)
               || (status === '' && isRecentlyUpdatedSession(session))
             );
-            if (isActive) {
+            if (isActive && session.ActiveInvocationId !== recoveredInvocationId) {
               const activity = useStreamingStore.getState().getSessionActivity(sessionId);
               const nativeOwner = (capabilities.KernelSessionEventsByCommand === true || dshReplay)
                 && useStreamingStore.getState().isSessionStreaming(sessionId)
@@ -939,6 +941,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       uiCapabilities,
     ],
   );
+
+  const recoverSessionRun = useCallback((sessionId: string, invocationId: string) => {
+    if (currentSessionIdRef.current !== sessionId) return;
+    const input = useMessageStore.getState().messages.find(message => message.role === 'user'
+      && (message.runId || message.invocationId) === invocationId);
+    if (input) rememberSessionCache(recoveredInputBySessionRef.current, sessionId, input, sessionId);
+    void loadSession(sessionId, false, undefined, invocationId);
+  }, [loadSession]);
 
   const fetchSessions = useCallback(
     async (
@@ -1172,6 +1182,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         eventHistoryBySessionRef.current.delete(sessionId);
         canonicalRunIdsBySessionRef.current.delete(sessionId);
         persistedTranscriptBySessionRef.current.delete(sessionId);
+        recoveredInputBySessionRef.current.delete(sessionId);
         pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
           loadSessionGenerationRef.current += 1;
@@ -1387,11 +1398,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       const rebuilt = itemTranscript ?? rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
+      const rebuiltMessages = preserveRecoveredUserInput(rebuilt.messages, recoveredInputBySessionRef.current.get(sessionId));
       if (nextItemCache) rememberSessionCache(eventHistoryBySessionRef.current, sessionId, nextItemCache, currentSessionIdRef.current);
-      ingestLegacyApprovalHistory(rebuilt.messages, sessionId);
-      rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuilt.messages, currentSessionIdRef.current);
+      ingestLegacyApprovalHistory(rebuiltMessages, sessionId);
+      rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuiltMessages, currentSessionIdRef.current);
       const mergedHistory = mergeHistoryWithLive(
-        rebuilt.messages, visibleBaseline, useMessageStore.getState().messages, Boolean(itemTranscript));
+        rebuiltMessages, visibleBaseline, useMessageStore.getState().messages, Boolean(itemTranscript));
       rememberSessionCache(
         canonicalRunIdsBySessionRef.current,
         sessionId,
@@ -1502,6 +1514,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     fetchSessions,
     loadMoreSessions,
     loadSession,
+    recoverSessionRun,
     loadOlderSessionMessages,
     createNewSession,
     startNewConversation,
