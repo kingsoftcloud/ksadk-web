@@ -282,6 +282,7 @@ type ProgressChunk = { events: SessionEventRecord[]; count: number; newer?: Prog
 type ItemProjection = {
   firstSeq?: number;
   semanticItems: SessionHistoryItem[];
+  hasOnlyPlainChatItems: boolean;
   progress: Map<string, ProgressChunk>;
   semantic: ReturnType<typeof projectSemanticItems>;
   messages: Message[];
@@ -294,6 +295,32 @@ function legacyDeltaText(item: SessionHistoryItem) {
     || persistedRuntimeFrame(item.Event) || item.Event.Content?.session_event) return;
   const content = item.Event.Content as (SessionEventRecord['Content'] & { text?: string }) | undefined;
   return content?.parts?.map(part => part.text || '').join('') || content?.text || content?.payload?.text || '';
+}
+
+const plainChatTypes = new Set(['user_message', 'assistant_message', 'tool_call', 'tool_result']);
+
+function isPlainChatItem(item: SessionHistoryItem): boolean {
+  const event = item.Event;
+  return plainChatTypes.has(item.EventType) && item.EventType === event.EventType
+    && Boolean(event.EventId?.trim() && item.InvocationId && item.InvocationId === event.InvocationId?.trim())
+    && Number.isSafeInteger(item.SeqId) && item.SeqId > 0 && item.SeqId === event.SeqId
+    && !item.ContentRef && !item.InboxInput && !item.InputCommandId
+    && !event.Metadata?.RuntimeItem && !event.Metadata?.responses_mirror
+    && Object.keys(event.Content || {}).every(key => ['role', 'parts', 'text'].includes(key));
+}
+
+// Plain transcript rows reconcile tools within an invocation and deduplicate
+// by event ID. Retain a newer suffix only if neither identity crosses the cut.
+function reusableChatSuffix(items: SessionHistoryItem[], olderCount: number): number {
+  if (!olderCount || olderCount >= items.length || items[olderCount - 1].SeqId >= items[olderCount].SeqId) return items.length;
+  const runs = new Set(items.slice(0, olderCount).map(item => item.InvocationId));
+  let split = olderCount;
+  while (split < items.length && runs.has(items[split].InvocationId)) split++;
+  const ids = new Set(items.slice(0, split).map(item => item.Event.EventId!.trim()));
+  for (let i = split; i < items.length; i++) {
+    if (runs.has(items[i].InvocationId) || ids.has(items[i].Event.EventId!.trim())) return items.length;
+  }
+  return split;
 }
 
 /** New pages precede the cached window. Plain v1 progress has no effect on
@@ -331,6 +358,9 @@ export function prependItemHistory(
     progress.set(run, { events, count: events.length + (newer?.count || 0), newer });
   }
 
+  const hasOnlyPlainChatItems = (previous?.hasOnlyPlainChatItems ?? true) && semanticPage.every((item, i) =>
+    isPlainChatItem(item) && (!i || semanticPage[i - 1].SeqId < item.SeqId));
+  const olderCount = semanticPage.length;
   const newer = previous?.semanticItems || [];
   let semanticItems = newer;
   let semantic = previous?.semantic;
@@ -338,7 +368,15 @@ export function prependItemHistory(
   if (semanticPage.length || !semantic || (firstSeq === 1 && previous?.firstSeq !== 1)) {
     if (newer.length) addSemantic(newer[0]);
     semanticItems = semanticPage.concat(newer.slice(1));
-    semantic = projectSemanticItems(semanticItems, api, sessionId, scope, profile, firstSeq);
+    const split = hasOnlyPlainChatItems && previous ? reusableChatSuffix(semanticItems, olderCount) : semanticItems.length;
+    if (previous && split < semanticItems.length) {
+      const head = projectSemanticItems(semanticItems.slice(0, split), api, sessionId, scope, profile, firstSeq);
+      const firstRetainedSeq = semanticItems[split].SeqId;
+      const tail = previous.semantic.messages.filter(row => row.historyOrder!.seq >= firstRetainedSeq);
+      semantic = { ...head, messages: head.messages.concat(tail) };
+    } else {
+      semantic = projectSemanticItems(semanticItems, api, sessionId, scope, profile, firstSeq);
+    }
   }
   const details: Message[] = [];
   for (const [run, chunk] of progress) {
@@ -356,7 +394,7 @@ export function prependItemHistory(
         return lines.join('\n');
       } });
   }
-  return { firstSeq, semantic, progress, semanticItems,
+  return { firstSeq, semantic, progress, semanticItems, hasOnlyPlainChatItems,
     canonicalRunIds: semantic.canonicalRunIds,
     messages: details.length ? orderTranscript([...semantic.messages, ...details]) : semantic.messages };
 }

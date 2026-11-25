@@ -25,6 +25,27 @@ it('reads 17,328 legacy events while projecting chat semantics only when the vis
   expect(details.split('\n')).toEqual(Array.from({ length: 17326 }, (_, i) => (i + 2) + '  progress  read-' + (i + 2)));
 });
 
+it('reuses independent turns and replays across interleaved invocations or repeated event identities', () => {
+  function row(seq: number, run: string, id = String(seq)) {
+    const item = event(seq, 'assistant_message', 'text-' + seq);
+    return { ...item, InvocationId: run, Event: { ...item.Event, EventId: id, InvocationId: run, Timestamp: 100 - seq } };
+  }
+  for (const rows of [
+    [row(1, 'a'), row(2, 'b'), row(3, 'b'), row(4, 'c')],
+    [row(1, 'a'), row(2, 'b'), row(3, 'c'), row(4, 'a')],
+    [row(1, 'a', 'duplicate'), row(2, 'b'), row(3, 'c'), row(4, 'c', 'duplicate')],
+  ]) {
+    const read = (items: typeof rows, previous?: ReturnType<typeof prependItemHistory>) =>
+      prependItemHistory(items, api, 's', scope, 'flat-v1', previous);
+    const tail = read(rows.slice(2));
+    const full = read(rows.slice(0, 2), tail);
+    expect(full.messages).toEqual(read(rows).messages);
+    if (rows[3].InvocationId === 'c' && rows[3].Event.EventId === '4') {
+      expect(full.messages.at(-1)).toBe(tail.messages.at(-1));
+    }
+  }
+});
+
 it('compacts adjacent legacy token pages while preserving repeated tokens, snapshot boundaries', () => {
   const delta = (seq: number) => event(seq, 'assistant_stream_delta', '哈');
   let state = prependItemHistory([delta(4), delta(5)], api, 's', scope, 'flat-v1');

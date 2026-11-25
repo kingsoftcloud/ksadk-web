@@ -37,3 +37,34 @@ it('retains each prompt, tool result and reply across 4,332 turns in physical se
   });
   expect(actual).toEqual(expected);
 }, 90_000);
+
+it('keeps repeated prompts, attachments and reversed same-name tool results with their own turn across pages', () => {
+  const items: SessionHistoryItem[] = [];
+  for (const run of ['first', 'second', 'third']) {
+    const add = (type: string, content: SessionHistoryItem['Event']['Content'], metadata = {}) => {
+      const seq = items.length + 1;
+      items.push({ ItemId: String(seq), SeqId: seq, InvocationId: run, EventType: type,
+        Event: { EventId: 'event-' + seq, SeqId: seq, SessionId: 'repeat', InvocationId: run,
+          Timestamp: 100 - seq, EventType: type, Content: content, Metadata: metadata } });
+    };
+    add('user_message', { parts: [{ text: 'check this file' }, { type: 'input_file',
+      fileData: { fileUri: 'file:///' + run + '.txt', displayName: run + '.txt', mimeType: 'text/plain' } }] });
+    for (const key of ['A', 'B']) add('tool_call', {}, { tool_name: 'lookup', tool_call_id: key, tool_args: { run, key } });
+    for (const key of ['B', 'A']) add('tool_result', {}, { tool_name: 'lookup', tool_call_id: key, tool_output: run + key });
+    add('assistant_message', { parts: [{ text: 'done' }] });
+  }
+  const read = (rows: SessionHistoryItem[], previous?: ReturnType<typeof prependItemHistory>) =>
+    prependItemHistory(rows, {} as ApiFacade, 'repeat', { HistoryEpoch: 'repeat', SnapshotSeqId: items.length }, 'flat-v1', previous);
+  let paged: ReturnType<typeof read> | undefined;
+  for (let end = items.length; end > 0; end -= 4) paged = read(items.slice(Math.max(0, end - 4), end), paged);
+  const rows = paged!.messages;
+  expect(rows).toEqual(read(items).messages);
+  for (const run of ['first', 'second', 'third']) {
+    const turn = rows.filter(message => message.invocationId === run);
+    expect(turn.map(message => message.content)).toEqual(['check this file', '', '', 'done']);
+    expect(turn[0].attachments?.map(file => file.name)).toEqual([run + '.txt']);
+    const tools = turn.flatMap(message => Object.values(message.tools || {}));
+    expect(tools.map(tool => [tool.name, tool.callId, JSON.parse(tool.args), tool.output])).toEqual(
+      ['A', 'B'].map(key => ['lookup', key, { run, key }, run + key]));
+  }
+});
