@@ -1,3 +1,4 @@
+import { readItemJson, type HistoryContentCheckpoint } from './history-content.js';
 import type { SessionHistoryItem } from '../api/messages.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { Message } from '../components/chat/types.js';
@@ -32,30 +33,8 @@ export function itemPageRecords(page: Page, sessionId: string, previousCursor?: 
   return page.Items;
 }
 
-async function readItemJson(api: ApiFacade, sessionId: string, seq: number, scope: PageScope,
-  signal: AbortSignal, contentPart?: 'inbox'): Promise<unknown> {
-  const chunks: string[] = [];
-  let offset = 0;
-  while (true) {
-    signal.throwIfAborted();
-    const page = await api.listSessionMessages(sessionId, { historyView: 'items-v1', contentSeqId: seq,
-      contentOffset: offset, contentPart, historyEpoch: scope.HistoryEpoch, snapshotSeqId: scope.SnapshotSeqId, signal });
-    if (page.HistoryView !== 'items-v1' || page.HistoryEpoch !== scope.HistoryEpoch
-      || page.SnapshotSeqId !== scope.SnapshotSeqId || page.ContentSeqId !== seq || typeof page.ContentChunk !== 'string') {
-      throw new Error('历史正文快照已变化，请重新打开会话。');
-    }
-    chunks.push(page.ContentChunk);
-    if (page.NextContentOffset === null) break;
-    if (!Number.isSafeInteger(page.NextContentOffset) || page.NextContentOffset! <= offset) {
-      throw new Error('历史正文游标无效。');
-    }
-    offset = page.NextContentOffset!;
-  }
-  return JSON.parse(chunks.join(''));
-}
-
-async function readItemBody(api: ApiFacade, sessionId: string, seq: number, scope: PageScope, signal: AbortSignal) {
-  const body = await readItemJson(api, sessionId, seq, scope, signal);
+async function readItemBody(api: ApiFacade, sessionId: string, seq: number, scope: PageScope, signal: AbortSignal, checkpoint?: HistoryContentCheckpoint) {
+  const body = await readItemJson(api, sessionId, seq, scope, signal, checkpoint);
   if (!Array.isArray(body) || body.length !== 2 || !body[0] || typeof body[0] !== 'object') {
     throw new Error('历史正文格式无效。');
   }
@@ -194,22 +173,22 @@ function deferredItemMessage(
   item: SessionHistoryItem, api: ApiFacade, sessionId: string, scope: PageScope,
   profile: 'flat-v1' | 'agent-block-v1', messages: Message[],
 ): Message {
-  const loadEvent = async (signal: AbortSignal) => {
-    const body = await readItemBody(api, sessionId, item.SeqId, scope, signal);
+  const loadEvent = async (signal: AbortSignal, checkpoint?: HistoryContentCheckpoint) => {
+    const body = await readItemBody(api, sessionId, item.SeqId, scope, signal, checkpoint);
     const envelope = object(body.Content?.session_event);
     const imported = envelope.family === 'workflow' && object(object(envelope.payload).legacy_history_event);
     return imported && imported.EventType
       ? { ...imported, SessionId: sessionId, SeqId: item.SeqId } as SessionEventRecord
       : { ...item.Event, ...body };
   };
-  const bodyKey = JSON.stringify([sessionId, scope.HistoryEpoch, item.ItemId, item.SeqId]);
+  const bodyKey = JSON.stringify([sessionId, scope.HistoryEpoch, scope.SnapshotSeqId, scope.CursorSource, item.ItemId, item.SeqId]);
   const base = { id: 'history-body:' + bodyKey, timestamp: Number(item.Event.Timestamp) || 0,
     historyOrder: { seq: item.SeqId }, invocationId: item.InvocationId || item.Event.InvocationId };
   const ref = item.ToolRef;
   if (ref?.CallId && (ref.Kind === 'call' || ref.Kind === 'result')) {
     const isResult = ref.Kind === 'result';
-    const read = async (signal: AbortSignal) => {
-      const event = await loadEvent(signal);
+    const read = async (signal: AbortSignal, checkpoint?: HistoryContentCheckpoint) => {
+      const event = await loadEvent(signal, checkpoint);
       const frame = persistedRuntimeFrame(event);
       const translated = frame && new KernelRunEventTranslator(sessionId).translate(frame);
       const rows = buildMessagesFromSessionEvents(translated ? [{ ...translated, Timestamp: event.Timestamp,
@@ -233,8 +212,8 @@ function deferredItemMessage(
         ...(isResult ? { deferredOutput: { key: bodyKey, read } } : { deferredArgs: { key: bodyKey, read } }) } } };
   }
   return { ...base, role: 'system', content: item.EventType,
-    readHistoryContent: async signal => {
-      const event = await loadEvent(signal);
+    readHistoryContent: async (signal, checkpoint) => {
+      const event = await loadEvent(signal, checkpoint);
       const projected = rebuildPersistedSessionHistory(
         buildMessagesFromSessionEvents(legacyRows([event])) as Message[], [event], sessionId, profile);
       return projected.messages.flatMap(row => [
@@ -273,8 +252,9 @@ function projectSemanticItems(
     if (!input.ContentRef) continue;
     deferred.push({ id: 'inbox:' + input.CommandId, role: 'user', content: '用户输入',
       timestamp: Number(item.Event.Timestamp) || 0, historyOrder: { seq: item.SeqId },
-      invocationId: item.InvocationId, readHistoryContent: async signal =>
-        inputText(await readItemJson(api, sessionId, item.SeqId, scope, signal, 'inbox')) });
+      historyContentKey: JSON.stringify([sessionId, scope.HistoryEpoch, scope.SnapshotSeqId, scope.CursorSource, item.SeqId, 'inbox']),
+      invocationId: item.InvocationId, readHistoryContent: async (signal, checkpoint) =>
+        inputText(await readItemJson(api, sessionId, item.SeqId, scope, signal, checkpoint, 'inbox')) });
   }
   // Historical adapters can carry extension event types. Keep their positions
   // inspectable while keeping internal provider and state payloads out of the UI.

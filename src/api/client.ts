@@ -1,12 +1,18 @@
 export class ApiError extends Error {
   code: number;
   detail?: unknown;
+  retryAfterMs?: number;
 
-  constructor(code: number, message: string, detail?: unknown) {
+  constructor(code: number, message: string, detail?: unknown, retryAfter?: string | null) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.detail = detail;
+    if (code === 429 && retryAfter) {
+      const value = retryAfter.trim();
+      const delay = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+      if (Number.isFinite(delay)) this.retryAfterMs = Math.max(0, delay);
+    }
   }
 }
 
@@ -72,7 +78,7 @@ async function parseActionResponse<T>(response: Response): Promise<T> {
         plainMessage && plainMessage.length <= 256 && !plainMessage.startsWith('<')
           ? plainMessage
           : response.statusText || `HTTP ${response.status}`,
-        raw,
+        raw, response.headers.get('retry-after'),
       );
     }
     throw new ApiError(-2, '响应格式异常');
@@ -82,7 +88,7 @@ async function parseActionResponse<T>(response: Response): Promise<T> {
     throw new ApiError(
       response.status,
       (data?.Message as string) || `HTTP ${response.status}`,
-      data,
+      data, response.headers.get('retry-after'),
     );
   }
 
@@ -90,7 +96,7 @@ async function parseActionResponse<T>(response: Response): Promise<T> {
     throw new ApiError(
       data.Code as number,
       (data.Message as string) || '请求失败',
-      data,
+      data, response.headers.get('retry-after'),
     );
   }
 

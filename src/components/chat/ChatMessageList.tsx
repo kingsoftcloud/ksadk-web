@@ -1184,7 +1184,7 @@ export function ChatMessageList({
                 top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >
-                {entry.item.readHistoryContent ? <DeferredHistoryContent label={entry.item.content} read={entry.item.readHistoryContent} /> : entry.item.role === 'system' ? (
+                {entry.item.readHistoryContent ? <DeferredHistoryContent key={entry.item.historyContentKey || entry.item.id} label={entry.item.content} read={entry.item.readHistoryContent} /> : entry.item.role === 'system' ? (
                   <SystemMessage message={entry.item} />
                 ) : (
                   <ChatMessage

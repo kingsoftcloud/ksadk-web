@@ -1,3 +1,5 @@
+import type { ReadHistoryContent } from '../../utils/history-content.js';
+
 export type MessageAttachment = {
   name: string;
   url: string;
@@ -16,11 +18,12 @@ export type PreviewImageSize = {
   height: number;
 };
 
-type DeferredToolPayload = { key: string; read: (signal: AbortSignal) => Promise<string> };
+type DeferredToolPayload = { key: string; read: ReadHistoryContent };
 
 export type Message = {
   /** Fetch a body omitted from a bounded history page only when expanded. */
-  readHistoryContent?: (signal: AbortSignal) => Promise<string>;
+  readHistoryContent?: ReadHistoryContent;
+  historyContentKey?: string;
   agentBlock?: {
     /** Sanitized excerpt of an explicitly public child text item, prepared by the shared projector. */
     summary?: string;
