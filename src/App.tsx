@@ -139,6 +139,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
 
   const {
     fetchSessions,
+    fetchInitialSessions,
     loadMoreSessions,
     loadSession,
     recoverSessionRun,
@@ -302,11 +303,11 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     },
   });
 
-  useBootstrap({ fetchSessions }, undefined, api, bootstrapData);
+  useBootstrap({ fetchSessions: fetchInitialSessions }, undefined, api, bootstrapData);
 
   useEffect(() => {
     agentIdRef.current = agentId;
-    writePersistedSessionId(agentId, currentSessionId);
+    if (currentSessionId) writePersistedSessionId(agentId, currentSessionId);
   }, [agentId, currentSessionId, agentIdRef]);
 
   useEffect(() => {

@@ -106,6 +106,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
 
   const {
     fetchSessions,
+    fetchInitialSessions,
     loadMoreSessions,
     loadSession,
     recoverSessionRun,
@@ -272,11 +273,11 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     useModelStore.getState().resetCatalog();
   }, [agentIdRef, currentSessionIdRef, explicitAgentId, runSubscriptionAbortRef]);
 
-  useBootstrap({ fetchSessions }, explicitAgentId, api);
+  useBootstrap({ fetchSessions: fetchInitialSessions }, explicitAgentId, api);
 
   useEffect(() => {
     agentIdRef.current = agentId;
-    writePersistedSessionId(agentId, currentSessionId);
+    if (currentSessionId) writePersistedSessionId(agentId, currentSessionId);
   }, [agentId, currentSessionId, agentIdRef]);
 
   useEffect(() => () => runSubscriptionAbortRef.current?.abort(), [runSubscriptionAbortRef]);

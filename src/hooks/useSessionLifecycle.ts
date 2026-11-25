@@ -27,6 +27,7 @@ import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedba
 import {
   mergePendingSessions,
   readPersistedSessionId,
+  writePersistedSessionId,
   resolveSessionToRestore,
 } from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
@@ -247,6 +248,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   // Keep those optimistic rows until the server returns them so a settled-run
   // refresh cannot evict the active transcript in that short window.
   const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
+  const initialDirectoryRef = useRef<{ ready: Promise<void>; cancelled: boolean } | null>(null);
   const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
   const localDraftAgentRef = useRef<string | null>(null);
   const loadSessionRef = useRef<((sessionId: string, historyReload?: boolean, signal?: AbortSignal) => Promise<void>) | null>(null);
@@ -1019,6 +1021,31 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     [api, loadSession, restoreSession],
   );
 
+  const fetchInitialSessions = useCallback((targetAgentId: string, preferredSessionId: string | null) => {
+    // The selection belongs to this authorized Agent scope. Page one of the
+    // directory may omit it, and neither that page nor transcript hydration
+    // should choose the destination of a send made immediately after refresh.
+    if (restoreSession && preferredSessionId && !currentSessionIdRef.current
+      && !sessionCreationPromiseRef.current && localDraftAgentRef.current !== targetAgentId) {
+      agentIdRef.current = targetAgentId;
+      void loadSession(preferredSessionId);
+    }
+    const ready = fetchSessions(targetAgentId, preferredSessionId);
+    if (restoreSession && !currentSessionIdRef.current && localDraftAgentRef.current !== targetAgentId) {
+      const initial = { ready, cancelled: false };
+      initialDirectoryRef.current = initial;
+      void ready.finally(() => {
+        if (initialDirectoryRef.current === initial) initialDirectoryRef.current = null;
+      });
+    }
+    return ready;
+  }, [fetchSessions, loadSession, restoreSession]);
+
+  const selectSession = useCallback((...args: Parameters<typeof loadSession>) => {
+    if (initialDirectoryRef.current) initialDirectoryRef.current.cancelled = true;
+    return loadSession(...args);
+  }, [loadSession]);
+
   const loadMoreSessions = useCallback(async () => {
     const store = useSessionStore.getState();
     if (store.isLoadingSessions || !store.hasMoreSessions) {
@@ -1101,6 +1128,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [isMobile]);
 
   const startNewConversation = useCallback(() => {
+    if (initialDirectoryRef.current) initialDirectoryRef.current.cancelled = true;
+    writePersistedSessionId(agentIdRef.current, null);
     localDraftAgentRef.current = agentIdRef.current;
     loadSessionGenerationRef.current += 1;
     runSubscriptionAbortRef.current?.abort();
@@ -1120,6 +1149,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       await sessionCreationPromiseRef.current;
       return;
     }
+    if (initialDirectoryRef.current) initialDirectoryRef.current.cancelled = true;
+    writePersistedSessionId(agentId, null);
     // Invalidate an older session hydrate immediately. A fast user can type
     // and send while CreateSession is in flight; submitDraft waits on this
     // exact promise instead of starting a second session or using the prior one.
@@ -1158,7 +1189,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const waitForPendingSessionCreation = useCallback(async () => {
     const pending = sessionCreationPromiseRef.current;
-    return pending ? await pending : currentSessionIdRef.current;
+    if (pending) return await pending;
+    const initial = initialDirectoryRef.current;
+    if (!currentSessionIdRef.current && initial && !initial.cancelled) {
+      await initial.ready;
+      if (initial.cancelled) throw new CancelledError();
+    }
+    return currentSessionIdRef.current;
   }, []);
 
   const deleteSession = useCallback(
@@ -1185,6 +1222,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         recoveredInputBySessionRef.current.delete(sessionId);
         pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
+          writePersistedSessionId(agentId, null);
           loadSessionGenerationRef.current += 1;
           runSubscriptionAbortRef.current?.abort();
           disconnectRun?.();
@@ -1512,8 +1550,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     historySearchSnapshot,
     followAcceptedInteraction,
     fetchSessions,
+    fetchInitialSessions,
     loadMoreSessions,
-    loadSession,
+    loadSession: selectSession,
     recoverSessionRun,
     loadOlderSessionMessages,
     createNewSession,
