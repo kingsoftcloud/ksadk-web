@@ -27,10 +27,16 @@ test('root answers remain JSON values across new interactions', async ({ page })
   for (const [scenario, value] of [['arbitrary', 'null'], ['boolean', 'false'], ['integer', '0'], ['string', ''], ['array', '[]']]) {
     await page.getByLabel('Scenario').selectOption(scenario);
     const field = page.getByTestId('interaction-field-value');
+    if (scenario === 'arbitrary') {
+      await field.fill(value);
+      await page.getByTestId('interaction-submit').click();
+      await expect(page.getByTestId('answers')).toHaveText('["null"]');
+      await page.getByLabel('答案格式').selectOption('json');
+    }
     if (scenario === 'boolean') await field.selectOption(value);
     else if (scenario === 'string') { await field.fill('x'); await field.fill(''); }
     else await field.fill(value);
     await page.getByTestId('interaction-submit').click();
   }
-  await expect(page.getByTestId('answers')).toHaveText('[null,false,0,"",[]]');
+  await expect(page.getByTestId('answers')).toHaveText('["null",null,false,0,"",[]]');
 });
