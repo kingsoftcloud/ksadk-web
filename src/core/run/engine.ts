@@ -18,6 +18,7 @@ import { MCP_AUTHORIZATION_CAPABILITY } from '../mcp-authorization/contract.js';
 import type { StreamAction } from '../stream/types.js';
 import { createProtocol } from '../stream/index.js';
 import { shouldStopReadingRunStream } from '../../utils/stream-control.js';
+import { sessionEventRunStatus } from '../../utils/session-events.js';
 import { parseSseChunk, splitSseBuffer } from '../transport/sse-parser.js';
 import type { SessionEventRecord } from '../../types/session-events.js';
 import { getErrorMessage } from '../../utils/error.js';
@@ -48,10 +49,39 @@ import type {
 type StreamConsumeResult = { terminalStatus?: string; awaitingInput?: boolean; outcomeUnknown?: boolean };
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'canceled', 'aborted', 'interrupted', 'resume_failed']);
+const RUN_RECONNECT_DELAYS_MS = [0, 500, 1000, 2000, 4000, 8000];
+
+function waitForRunReconnect(delay: number, signal: AbortSignal): Promise<void> {
+  if (!delay || signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delay);
+    signal.addEventListener('abort', finish, { once: true });
+  });
+}
+
+function waitWhileOffline(signal: AbortSignal): Promise<void> {
+  if (typeof window === 'undefined' || window.navigator.onLine !== false || signal.aborted) return Promise.resolve();
+  const browser = window;
+  return new Promise((resolve) => {
+    const finish = () => {
+      browser.removeEventListener('online', finish);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    browser.addEventListener('online', finish, { once: true });
+    signal.addEventListener('abort', finish, { once: true });
+  });
+}
 
 function terminalStatusFromSessionEvent(event: SessionEventRecord): string | null {
-  if (event.EventType !== 'run_status') return null;
-  const rawStatus = String((event.Content as { status?: unknown } | undefined)?.status || '').trim().toLowerCase();
+  const frame = (event.Content as { runtime_event?: { parent_scope_id?: string } } | undefined)?.runtime_event;
+  if (frame?.parent_scope_id) return null;
+  const rawStatus = sessionEventRunStatus(event);
   return TERMINAL_RUN_STATUSES.has(rawStatus) ? rawStatus : null;
 }
 
@@ -113,7 +143,7 @@ const VALID_TRANSITIONS: Record<RunStage, RunStage[]> = {
   streaming: ['completing', 'stopping', 'recovering', 'error'],
   stopping: ['cancelled', 'idle'],
   completing: ['idle'],
-  recovering: ['streaming', 'error', 'idle'],
+  recovering: ['connecting', 'streaming', 'error', 'idle'],
   error: ['connecting', 'idle'],
   cancelled: ['idle'],
 };
@@ -327,6 +357,7 @@ export class RunEngineImpl implements RunEngine {
     onSessionUpsert?: (sessionId: string) => void;
     /** Legacy Responses HTTP admission, before the output stream finishes. */
     onDispatchResult?: (accepted: boolean) => void;
+    onRecovered?: (sessionId: string, invocationId: string) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean {
     if (this._stage !== 'idle') return false;
@@ -350,6 +381,7 @@ export class RunEngineImpl implements RunEngine {
     (async () => {
       let sessionId: string | null = draft.sessionId || null;
       let settlement: RunSettlement = 'unknown';
+      let admittedResponses = false;
       try {
         if (!sessionId) {
           sessionId = await this.createSession(draft);
@@ -489,6 +521,7 @@ export class RunEngineImpl implements RunEngine {
           await stream.cancel();
           return;
         }
+        admittedResponses = apiFormat === 'responses' && !this.config.kernelSessionEventsEnabled;
         if (!this.config.kernelSessionEventsEnabled) reportDispatch(true);
         this.setStage('streaming');
         this.emit({ type: 'activity', phase: '等待首个输出', status: 'waiting', countEvent: false });
@@ -567,8 +600,10 @@ export class RunEngineImpl implements RunEngine {
         this.emit({ type: 'activity', phase: '运行完成', status: 'completed', countEvent: false });
         this.emit({ type: 'stream_ended' });
       } catch (error) {
+        if (this.operationEpoch !== operationEpoch) return;
         this.failCompaction();
-        const isAbort = (error instanceof DOMException && error.name === 'AbortError')
+        const isAbort = this.abortController?.signal.aborted || error instanceof CancelledError
+          || (error instanceof DOMException && error.name === 'AbortError')
           || (error instanceof ConversationClientError && error.code === 'conversation_aborted');
         if (!isAbort) {
           const isNetwork = error instanceof TypeError;
@@ -577,21 +612,20 @@ export class RunEngineImpl implements RunEngine {
           if (isNetwork) {
             this.setStage('recovering');
             this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
-            // 断线续订:有 lastSeqId + invocationId 时用 subscribeRunEvents(afterSeqId) 续订,
-            // 避免从头 runAgent 导致已流式内容重复。续订失败再回退普通 error。
-            const lastSeq = this.lastSeqId;
+            // Ordinary Responses deltas need not have a session-event cursor.
+            // Replay the admitted invocation from zero without sending its input again.
             const resumeInvocationId = this.invocationId;
-            if (lastSeq > 0 && resumeInvocationId && this.activeSessionId) {
-              try {
-                await this.resumeRun({
-                  sessionId: this.activeSessionId,
-                  invocationId: resumeInvocationId,
-                  afterSeqId: lastSeq,
-                });
-                return;
-              } catch (resumeErr) {
-                console.warn('[RunEngine] afterSeqId resume failed, fall back to error:', resumeErr);
-              }
+            const recoverySessionId = this.activeSessionId;
+            if ((admittedResponses || this.lastSeqId > 0) && resumeInvocationId
+              && recoverySessionId && sessionId === recoverySessionId) {
+              settlement = await this.resumeRun({
+                sessionId: recoverySessionId,
+                invocationId: resumeInvocationId,
+                afterSeqId: this.lastSeqId,
+                reconnect: true,
+                onSessionReloadNeeded: () => draft.onRecovered?.(recoverySessionId, resumeInvocationId),
+              });
+              return;
             }
             this.setStage('error');
             this.emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) });
@@ -681,9 +715,13 @@ export class RunEngineImpl implements RunEngine {
     invocationId: string;
     afterSeqId: number;
     onSessionReloadNeeded?: () => void;
-  }): Promise<void> {
+    reconnect?: boolean;
+  }): Promise<RunSettlement> {
     this.abortController?.abort();
-    this.abortController = new AbortController();
+    const controller = new AbortController();
+    this.abortController = controller;
+    const operationEpoch = this.operationEpoch;
+    const ownsRun = () => this.operationEpoch === operationEpoch && this.abortController === controller;
     this.activeSessionId = params.sessionId;
     this.publishInvocation(params.invocationId);
     this.setStage('connecting');
@@ -691,42 +729,39 @@ export class RunEngineImpl implements RunEngine {
 
     let terminalStatus: string | null = null;
     try {
-      const stream = await this.api.subscribeRunEvents(
-        {
-          sessionId: params.sessionId,
-          invocationId: params.invocationId,
-          afterSeqId: params.afterSeqId,
-        },
-        { signal: this.abortController?.signal },
-      );
-      this.setStage('streaming');
-      this.emit({ type: 'activity', phase: '等待恢复事件', status: 'waiting', countEvent: false });
-
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const { chunks, remainder } = splitSseBuffer(buffer);
-        buffer = remainder;
-
-        for (const chunk of chunks) {
-          if (!chunk.trim()) continue;
-          const events = parseSseChunk(chunk);
-          for (const event of events) {
-            if (event.eventName === '__done__' || event.eventName === '__ping__') continue;
-            this.emit({ type: 'activity', phase: '收到恢复事件', status: 'running' });
-            this.emit({ type: 'stream_event', event: event.data as SessionEventRecord });
-            terminalStatus = terminalStatusFromSessionEvent(event.data as SessionEventRecord) || terminalStatus;
+      const delays = params.reconnect ? RUN_RECONNECT_DELAYS_MS : [0];
+      let afterSeqId = params.afterSeqId;
+      let subscriptionAvailable = true;
+      for (const delay of delays) {
+        await waitForRunReconnect(delay, controller.signal);
+        if (params.reconnect) await waitWhileOffline(controller.signal);
+        if (!ownsRun() || controller.signal.aborted) return 'cancelled';
+        try {
+          if (subscriptionAvailable) {
+            try {
+              terminalStatus = await this.readRecoveredRunEvents(params, afterSeqId, controller.signal, ownsRun, seq => {
+                afterSeqId = Math.max(afterSeqId, seq);
+              });
+            } catch (error) {
+              if (!params.reconnect || !(error instanceof ApiError) || error.code !== 404) throw error;
+              subscriptionAvailable = false;
+            }
           }
+          if (!terminalStatus && params.reconnect && ownsRun() && !controller.signal.aborted) {
+            terminalStatus = await this.readRecoveredRunStatus(params, controller.signal);
+          }
+          if (terminalStatus) break;
+        } catch (error) {
+          if (!ownsRun() || controller.signal.aborted || error instanceof CancelledError) return 'cancelled';
+          const retryable = error instanceof TypeError || (error instanceof ApiError
+            && (error.code >= 500 || error.code === 408 || error.code === 429));
+          if (!params.reconnect || !retryable) throw error;
+          this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
         }
       }
 
-      this.setStage('completing');
+      if (!ownsRun() || controller.signal.aborted) return 'cancelled';
+      if (terminalStatus) this.setStage('completing');
       if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') {
         this.emit({ type: 'activity', phase: '后台长任务已取消', status: 'stopped', countEvent: false });
       } else if (terminalStatus === 'interrupted') {
@@ -749,19 +784,92 @@ export class RunEngineImpl implements RunEngine {
           countEvent: false,
         });
       }
-      if (terminalStatus) this.emit({ type: 'stream_ended' });
-      params.onSessionReloadNeeded?.();
+      if (terminalStatus) this.emit({ type: 'stream_ended', runId: params.invocationId });
+      if (terminalStatus || !params.reconnect) params.onSessionReloadNeeded?.();
+      if (terminalStatus === 'completed') return 'completed';
+      if (terminalStatus === 'cancelled' || terminalStatus === 'canceled' || terminalStatus === 'aborted') return 'cancelled';
+      return terminalStatus ? 'failed' : 'unknown';
     } catch (error) {
       const isAbort = error instanceof DOMException && error.name === 'AbortError';
       if (!isAbort) {
         console.error('Failed to subscribe to run events:', error);
       }
+      return isAbort ? 'cancelled' : 'unknown';
     } finally {
-      useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
-      this.publishInvocation('');
-      this.setStage('idle');
-      this.activeSessionId = null;
+      if (ownsRun()) {
+        useStreamingStore.getState().setSessionStreaming(params.sessionId, false);
+        this.publishInvocation('');
+        this.setStage('idle');
+        this.activeSessionId = null;
+      }
     }
+  }
+
+  private async readRecoveredRunEvents(
+    run: { sessionId: string; invocationId: string; reconnect?: boolean },
+    afterSeqId: number,
+    signal: AbortSignal,
+    ownsRun: () => boolean,
+    updateCursor: (seq: number) => void,
+  ): Promise<string | null> {
+    const { sessionId, invocationId } = run;
+    const stream = await this.api.subscribeRunEvents({ sessionId, invocationId, afterSeqId }, { signal });
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      if (!ownsRun() || signal.aborted) return null;
+      this.setStage('streaming');
+      this.emit({ type: 'activity', phase: '等待恢复事件', status: 'waiting', countEvent: false });
+      while (ownsRun() && !signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done || !ownsRun() || signal.aborted) break;
+        buffer += decoder.decode(value, { stream: true });
+        const { chunks, remainder } = splitSseBuffer(buffer);
+        buffer = remainder;
+        for (const chunk of chunks) {
+          for (const { data } of parseSseChunk(chunk)) {
+            if (!ownsRun() || signal.aborted) return null;
+            if (!data || typeof data !== 'object') continue;
+            const event = data as SessionEventRecord;
+            if ((event.SessionId ?? sessionId) !== sessionId || (event.InvocationId ?? invocationId) !== invocationId) continue;
+            if (run.reconnect && (!event.SessionId || !event.InvocationId)) continue;
+            if (event.SeqId && event.SeqId <= afterSeqId) continue;
+            this.emit({ type: 'stream_event', event, sessionId });
+            if (event.SeqId) {
+              afterSeqId = event.SeqId;
+              updateCursor(afterSeqId);
+            }
+            const status = terminalStatusFromSessionEvent(event);
+            if (status) return status;
+          }
+        }
+      }
+      return null;
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+  }
+
+  private async readRecoveredRunStatus(
+    { sessionId, invocationId }: { sessionId: string; invocationId: string },
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const session = await this.api.getSession(sessionId, { signal });
+    const status = String(session.ActiveRunStatus || '').trim().toLowerCase();
+    if (session.SessionId === sessionId && session.ActiveInvocationId === invocationId
+      && TERMINAL_RUN_STATUSES.has(status)) return status;
+    if (signal.aborted) return null;
+    const history = await this.api.listSessionEvents(sessionId, {
+      eventTypes: ['run_status', 'run.completed', 'run.failed', 'run.cancelled'], limit: 20, signal,
+    });
+    for (const event of history.Events as SessionEventRecord[]) {
+      if (event.SessionId === sessionId && event.InvocationId === invocationId) {
+        const terminal = terminalStatusFromSessionEvent(event);
+        if (terminal) return terminal;
+      }
+    }
+    return null;
   }
 
   resumeCheckpoint(params: {

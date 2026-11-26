@@ -139,8 +139,10 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
 
   const {
     fetchSessions,
+    fetchInitialSessions,
     loadMoreSessions,
     loadSession,
+    recoverSessionRun,
     followAcceptedInteraction,
     loadOlderSessionMessages,
     createNewSession,
@@ -203,6 +205,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     agentIdRef,
     queuedDraftRef,
     onRunSettled: refreshSettledRun,
+    onRunRecovered: recoverSessionRun,
     onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
     waitForPendingSessionCreation,
   });
@@ -300,11 +303,11 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     },
   });
 
-  useBootstrap({ fetchSessions }, undefined, api, bootstrapData);
+  useBootstrap({ fetchSessions: fetchInitialSessions }, undefined, api, bootstrapData);
 
   useEffect(() => {
     agentIdRef.current = agentId;
-    writePersistedSessionId(agentId, currentSessionId);
+    if (currentSessionId) writePersistedSessionId(agentId, currentSessionId);
   }, [agentId, currentSessionId, agentIdRef]);
 
   useEffect(() => {

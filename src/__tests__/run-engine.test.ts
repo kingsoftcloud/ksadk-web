@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { RunEngineImpl } from '../core/run/engine.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
+import { ApiError } from '../api/errors.js';
 import { MCP_AUTHORIZATION_CAPABILITY as oauth } from '../core/mcp-authorization/contract.js';
 import type { RunEvent } from '../core/run/types.js';
 import { useStreamingStore } from '../stores/streaming.js';
@@ -282,6 +283,7 @@ describe('RunEngineImpl', () => {
   it.each(['disconnect', 'eof'] as const)('keeps partial output %s uncertain and publishes its invocation identity', async (ending) => {
     const calls: Record<string, unknown>[] = [];
     const api = createApiFacade(calls);
+    api.subscribeRunEvents = async () => { throw new ApiError(409, 'Run does not belong to the session'); };
     let streamController!: ReadableStreamDefaultController<Uint8Array>;
     api.runAgent = async body => {
       calls.push(body);
@@ -304,6 +306,150 @@ describe('RunEngineImpl', () => {
     expect(invocation).toHaveBeenCalledWith(calls[0].InvocationId);
     expect(events.some(event => event.type === 'stream_ended')).toBe(false);
     expect(calls).toHaveLength(1);
+  });
+
+  it('retries a zero-cursor Responses disconnect against the original session and run without resending input', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    const encoder = new TextEncoder();
+    let original!: ReadableStreamDefaultController<Uint8Array>;
+    api.runAgent = async body => {
+      calls.push(body);
+      return new ReadableStream({ start(controller) {
+        original = controller;
+        controller.enqueue(encoder.encode('event: response.output_text.delta\ndata: {"delta":"partial"}\n\n'));
+      } });
+    };
+    const resume = vi.fn<ApiFacade['subscribeRunEvents']>()
+      .mockRejectedValueOnce(new TypeError('Network unavailable'))
+      .mockImplementation(async ({ sessionId, invocationId }) => {
+        const identity = { SessionId: sessionId, InvocationId: invocationId };
+        const terminal = { EventType: 'run_status', Content: { status: 'completed' } };
+        const records = [
+          { ...terminal, ...identity, SessionId: 'other-session', SeqId: 800 },
+          { ...terminal, ...identity, InvocationId: 'other-run', SeqId: 900 },
+          { ...identity, EventType: 'user_message', Author: 'user', Content: { parts: [{ text: 'one input' }] }, SeqId: 8 },
+          { ...identity, EventType: 'assistant_message', Author: 'assistant', Content: { parts: [{ text: 'complete output' }] }, SeqId: 9 },
+          { ...terminal, ...identity, SeqId: 10 },
+        ];
+        return new ReadableStream({ start(controller) {
+          controller.enqueue(encoder.encode(records.map(record => `data: ${JSON.stringify(record)}\n\n`).join('')));
+          controller.close();
+        } });
+      });
+    api.subscribeRunEvents = resume;
+    const engine = createRunEngine(api);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework: 'langgraph', apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+    useSessionStore.getState().setCurrentSessionId('session-live');
+    useMessageStore.getState().setMessages([{ id: 'optimistic-user', role: 'user', content: 'one input', timestamp: 1 }]);
+    const events: RunEvent[] = [];
+    engine.subscribe(event => { events.push(event); dispatchRunEventToStores(event); });
+    const onRecovered = vi.fn();
+    const onSettled = vi.fn();
+    engine.start({ text: 'one input', sessionId: 'session-live', attachments: [], onRecovered, onSettled });
+    await vi.waitFor(() => expect(events.some(event => event.type === 'text_delta')).toBe(true));
+    original.error(new TypeError('Connection closed'));
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('session-live', 'completed'), { timeout: 3000 });
+    expect(calls).toHaveLength(1);
+    expect(resume.mock.calls.map(([params]) => params)).toEqual(Array.from({ length: 2 }, () => ({
+      sessionId: 'session-live', invocationId: calls[0].InvocationId, afterSeqId: 0,
+    })));
+    expect(events.flatMap(event => event.type === 'stream_event' ? [event.event.SeqId] : [])).toEqual([8, 9, 10]);
+    expect(useMessageStore.getState().messages.map(message => message.content)).toEqual(['one input', 'complete output']);
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live', calls[0].InvocationId);
+  });
+
+  it('reconciles an empty subscription only with a completed status for the submitted invocation', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    api.runAgent = async body => {
+      calls.push(body);
+      return new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: response.in_progress\ndata: {}\n\n'));
+        controller.close();
+      } });
+    };
+    api.subscribeRunEvents = vi.fn(async () => new ReadableStream({ start(controller) { controller.close(); } }));
+    api.getSession = vi.fn(async (sessionId) => ({ SessionId: sessionId, ActiveRunStatus: 'completed',
+      ActiveInvocationId: String(calls[0].InvocationId) })).mockResolvedValueOnce({
+      SessionId: 'session-live', ActiveRunStatus: 'completed', ActiveInvocationId: 'different-run',
+    });
+    const engine = createRunEngine(api);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework: 'langgraph', apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+    const onRecovered = vi.fn();
+    const onSettled = vi.fn();
+    engine.start({ text: 'one input', sessionId: 'session-live', attachments: [], onRecovered, onSettled });
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('session-live', 'completed'), { timeout: 3000 });
+    expect(api.getSession).toHaveBeenCalledTimes(2);
+    expect(calls).toHaveLength(1);
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live', calls[0].InvocationId);
+  });
+
+  it('keeps the original run recoverable while the browser is offline beyond its retry delays', async () => {
+    vi.useFakeTimers();
+    const browser = Object.assign(new EventTarget(), { navigator: { onLine: false } });
+    vi.stubGlobal('window', browser);
+    try {
+      const calls: Record<string, unknown>[] = [];
+      const api = createApiFacade(calls);
+      api.runAgent = async body => {
+        calls.push(body);
+        return new ReadableStream({ start(controller) {
+          controller.enqueue(new TextEncoder().encode('event: response.created\ndata: {}\n\n'));
+          controller.close();
+        } });
+      };
+      api.subscribeRunEvents = vi.fn(async () => new ReadableStream({ start(controller) { controller.close(); } }));
+      api.getSession = vi.fn(async (sessionId) => ({ SessionId: sessionId, ActiveRunStatus: 'completed',
+        ActiveInvocationId: String(calls[0].InvocationId) }));
+      const engine = createRunEngine(api);
+      engine.updateConfig({ agentId: 'agent-a', agentFramework: 'langgraph', apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+      const onSettled = vi.fn();
+      engine.start({ text: 'one input', sessionId: 'session-live', attachments: [], onSettled });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls).toHaveLength(1);
+      expect(api.subscribeRunEvents).not.toHaveBeenCalled();
+      expect(onSettled).not.toHaveBeenCalled();
+      browser.navigator.onLine = true;
+      browser.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onSettled).toHaveBeenCalledExactlyOnceWith('session-live', 'completed');
+      expect(api.subscribeRunEvents).toHaveBeenCalledExactlyOnceWith({ sessionId: 'session-live',
+        invocationId: calls[0].InvocationId, afterSeqId: 0 }, expect.anything());
+      expect(calls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses terminal history for the original invocation when an older Runtime has no subscription route', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const api = createApiFacade(calls);
+    api.runAgent = async body => {
+      calls.push(body);
+      return new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: response.in_progress\ndata: {}\n\n'));
+        controller.close();
+      } });
+    };
+    api.subscribeRunEvents = vi.fn().mockRejectedValue(new ApiError(404, 'Unsupported'));
+    api.getSession = vi.fn(async (sessionId) => ({ SessionId: sessionId, ActiveRunStatus: 'failed', ActiveInvocationId: 'other-run' }));
+    api.listSessionEvents = vi.fn(async (sessionId) => ({ Events: [
+      { SessionId: sessionId, InvocationId: 'other-run', EventType: 'run.failed', SeqId: 14 },
+      { SessionId: sessionId, InvocationId: calls[0].InvocationId, EventType: 'run.failed', SeqId: 13,
+        Content: { runtime_event: { parent_scope_id: 'downstream' } } },
+      { SessionId: sessionId, InvocationId: calls[0].InvocationId, EventType: 'run.completed', SeqId: 12 },
+    ] }));
+    const engine = createRunEngine(api);
+    engine.updateConfig({ agentId: 'agent-a', agentFramework: 'langgraph', apiFormats: ['responses'], selectedModel: '', thinkingMode: 'auto' });
+    const onRecovered = vi.fn();
+    const onSettled = vi.fn();
+    engine.start({ text: 'one input', sessionId: 'session-live', attachments: [], onRecovered, onSettled });
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('session-live', 'completed'));
+    expect(calls).toHaveLength(1);
+    expect(api.subscribeRunEvents).toHaveBeenCalledTimes(1);
+    expect(api.listSessionEvents).toHaveBeenCalledExactlyOnceWith('session-live', expect.objectContaining({ limit: 20 }));
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith('session-live', calls[0].InvocationId);
   });
 
   afterEach(async () => {

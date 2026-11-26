@@ -46,6 +46,10 @@ export function coalesceHistoryToolCalls(messages: Message[]): Message[] {
     const merged = preferOwner
       ? { ...tool, ...earlier, ...mergeHistoryToolFacts(tool, earlier) }
       : { ...earlier, ...tool, ...mergeHistoryToolFacts(earlier, tool) };
+    // A legacy result frequently supplies just the call id and the output.
+    // Keep the original call's name when the result used the fallback label.
+    if (tool.deferredOutput) merged.status = tool.status;
+    if (merged.name === 'tool') merged.name = earlier.name !== 'tool' ? earlier.name : tool.name;
     owner.message.tools![owner.key] = merged;
     owner.message.blocks = owner.message.blocks?.map(block => block.type === 'tool'
       && block.extra?.callId === tool.callId
@@ -85,5 +89,10 @@ export function coalesceHistoryToolCalls(messages: Message[]): Message[] {
       changed = true;
     }
   }
-  return changed ? mapped : messages;
+  // A raw result can now have an earlier call owner after another page
+  // loads. Remove its empty compatibility row along with the duplicate tool.
+  return changed ? mapped.filter(message => message.itemId || !['tool_result', 'stage_tool_result',
+    'tool_call', 'stage_tool_call'].includes(message.eventType || '')
+    || message.content || message.reasoning || message.blocks?.length || message.attachments?.length
+    || Object.keys(message.tools || {}).length) : messages;
 }

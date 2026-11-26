@@ -144,6 +144,7 @@ export interface RunEngine {
     onSessionUpsert?: (sessionId: string) => void;
     /** Legacy Responses HTTP admission, before the output stream finishes. */
     onDispatchResult?: (accepted: boolean) => void;
+    onRecovered?: (sessionId: string, invocationId: string) => void;
     onSettled?: (sessionId: string | null, outcome?: RunSettlement) => void;
   }): boolean;
   disconnect(): void;

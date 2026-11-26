@@ -14,6 +14,7 @@ const agentId = 'local-heavy-history';
 useBootstrapStore.getState().setAgentId(agentId);
 useBootstrapStore.getState().setAgentFramework('langgraph');
 useBootstrapStore.getState().setCapabilities(capabilities);
+useSessionStore.getState().setLoadingSessions(false);
 useSessionStore.getState().setCurrentSessionId('local-heavy-A');
 const api = new ApiFacadeImpl({ agentId });
 // Test-only read probe, so assertions can distinguish virtualization from loss.
@@ -28,9 +29,10 @@ function Harness() {
     isMobile: false, uiCapabilities: capabilities, api, resetCompaction: () => {}, restoreSession: false });
   return <main style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <nav style={{ zIndex: 9999, background: 'white', padding: 8 }}>
-      {['A', 'B', 'C'].map(slot => <button key={slot} type="button"
+      {['A', 'B', 'C', 'D'].map(slot => <button key={slot} type="button"
         onClick={() => void actions.loadSession('local-heavy-' + slot)}>Open {slot}</button>)}
-      <button type="button" onClick={() => void actions.loadOlderSessionMessages('local-heavy-A')}>Older A</button>
+      {['A', 'C', 'D'].map(slot => <button key={'older-' + slot} type="button"
+        onClick={() => void actions.loadOlderSessionMessages('local-heavy-' + slot)}>Older {slot}</button>)}
     </nav>
     <ConnectedMessageList agentName="Local Docker LangGraph" isMobile={false}
       onDeleteFeedback={() => {}} onSubmitFeedback={() => {}}

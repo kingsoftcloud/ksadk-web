@@ -4,6 +4,15 @@ import { coalesceHistoryToolCalls } from './history-tool-facts.js';
 
 const runOf = (message: Message) => message.runId || message.invocationId;
 
+export function preserveRecoveredUserInput(history: Message[], input?: Message): Message[] {
+  if (!input) return history;
+  const runId = runOf(input);
+  if (!runId || history.some(message => message.role === 'user' && runOf(message) === runId)) return history;
+  const firstOwned = history.findIndex(message => runOf(message) === runId);
+  if (firstOwned < 0) return history;
+  return [...history.slice(0, firstOwned), input, ...history.slice(firstOwned)];
+}
+
 /** Sort sequenced rows without turning clocks into log positions. Legacy rows
  * lacking a sequence stay attached to their nearest received neighbour. When
  * no sequence is available, the endpoint's existing order is authoritative. */
@@ -56,7 +65,7 @@ function contentChanged(message: Message, previous?: Message): boolean {
  * Feedback updates are presentation changes, not new runtime content. Keep
  * them without replacing the run's newly hydrated historical items. */
 export function mergeHistoryWithLive(
-  history: Message[], baseline: Message[], current: Message[],
+  history: Message[], baseline: Message[], current: Message[], preserveOlderItems = false,
 ): Message[] {
   const before = new Map(baseline.map(message => [message.id, message]));
   const feedback = current.filter(message => before.has(message.id)
@@ -83,7 +92,9 @@ export function mergeHistoryWithLive(
     const run = live.filter(message => runOf(message) === runId);
     const original = history.filter(message => runOf(message) === runId);
     const first = result.findIndex(message => runOf(message) === runId);
-    const input = run.some(message => message.role === 'user') ? []
+    const liveIds = new Set(run.map(message => message.id));
+    const input = preserveOlderItems ? original.filter(message => !liveIds.has(message.id) && !before.has(message.id))
+      : run.some(message => message.role === 'user') ? []
       : original.filter(message => message.role === 'user');
     result = result.filter(message => runOf(message) !== runId);
     const insertion = first < 0 ? result.length : Math.min(first, result.length);

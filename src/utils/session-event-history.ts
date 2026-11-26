@@ -5,19 +5,33 @@ import type { ApiFacade } from '../core/api/types.js';
 /** The DSH control directory may omit the invocation that owns the native stream. */
 export async function readDshRunStatus(
   api: ApiFacade, sessionId: string,
-  source: { CursorSource?: string; HistoryEpoch?: string; SnapshotSeqId?: number },
-  cached?: { events: SessionEventRecord[]; loadedCount: number; total: number }, signal?: AbortSignal,
+  source: { CursorSource?: string; HistoryEpoch?: string; HistoryEpochSource?: string; SnapshotSeqId?: number },
+  cached?: { events: SessionEventRecord[]; loadedCount: number; total: number; hasMore?: boolean }, signal?: AbortSignal,
 ): Promise<SessionEventRecord | undefined> {
   if (source.CursorSource !== 'runtime') return;
   const latest = cached?.events.filter(event => event.EventType === 'run_status')
     .sort((a, b) => Number(b.SeqId) - Number(a.SeqId))[0];
-  if (latest || (cached && cached.loadedCount >= cached.total)) return latest;
+  if (latest || (cached && !cached.hasMore && cached.loadedCount >= cached.total)) return latest;
 
   // A long reply can push its start outside the visible event page.
+  const serverAnchor = source.HistoryEpochSource === 'server-event-anchor';
   const page = await api.listSessionEvents(sessionId, {
     eventTypes: ['run_status'], limit: 1, cursorSource: source.CursorSource,
-    historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId, signal,
+    ...(serverAnchor ? { beforeSeqId: (source.SnapshotSeqId ?? 0) + 1 }
+      : { historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId }), signal,
   });
+  if (serverAnchor) {
+    // Only the facade understands this epoch. Confirm a candidate from the
+    // unpinned legacy event index against the same immutable history window.
+    const seq = (page.Events[0] as SessionEventRecord | undefined)?.SeqId;
+    if (page.CursorSource !== 'runtime' || !seq || !source.SnapshotSeqId || seq > source.SnapshotSeqId) return;
+    const exact = await api.listSessionMessages(sessionId, { historyView: 'items-v1', afterSeqId: seq - 1,
+      historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId, limit: 1, signal });
+    const row = exact.Items?.[0]?.Event;
+    return exact.HistoryView === 'items-v1' && exact.CursorSource === source.CursorSource && exact.HistoryEpoch === source.HistoryEpoch
+      && exact.SnapshotSeqId === source.SnapshotSeqId && row?.SessionId === sessionId
+      && row.SeqId === seq && row.EventType === 'run_status' ? row : undefined;
+  }
   if (page.CursorSource === source.CursorSource && page.HistoryEpoch === source.HistoryEpoch
     && page.SnapshotSeqId === source.SnapshotSeqId) return page.Events[0] as SessionEventRecord | undefined;
 }

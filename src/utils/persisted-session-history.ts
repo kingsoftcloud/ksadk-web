@@ -434,6 +434,7 @@ export function rebuildPersistedSessionHistory(
   records: PersistedSessionEventRecord[],
   sessionId: string,
   profile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
+  firstSourceSeqId?: number,
 ): {
   messages: Message[];
   canonicalRunIds: string[];
@@ -457,7 +458,7 @@ export function rebuildPersistedSessionHistory(
   }).sort(
     (left, right) => Number(left.SeqId || 0) - Number(right.SeqId || 0),
   );
-  const startsAtSessionBeginning = Number(orderedRecords[0]?.SeqId || 0) <= 1;
+  const startsAtSessionBeginning = Number(firstSourceSeqId ?? orderedRecords[0]?.SeqId ?? 0) <= 1;
   const historyFrames = toolHistoryFrames(orderedRecords);
   for (const [index, persisted] of orderedRecords.entries()) {
     const frame = historyFrames[index];
@@ -491,7 +492,9 @@ export function rebuildPersistedSessionHistory(
   for (const message of fallbackMessages) {
     const runId = String(message.invocationId || '');
     if (!runId) continue;
-    fallbackByRun.set(runId, [...(fallbackByRun.get(runId) || []), message]);
+    const list = fallbackByRun.get(runId);
+    if (list) list.push(message);
+    else fallbackByRun.set(runId, [message]);
   }
 
   // A partially persisted canonical run must never make the older Server

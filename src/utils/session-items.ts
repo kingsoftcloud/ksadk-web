@@ -1,0 +1,432 @@
+import { readItemJson, type HistoryContentCheckpoint } from './history-content.js';
+import type { SessionHistoryItem } from '../api/messages.js';
+import type { SessionEventRecord } from '../types/session-events.js';
+import type { Message } from '../components/chat/types.js';
+import type { ApiFacade } from '../core/api/types.js';
+import { mapBackendMessage, mapBackendMessages } from './messages.js';
+import { buildMessagesFromSessionEvents } from './session-events.js';
+import { persistedRuntimeFrame, rebuildPersistedSessionHistory } from './persisted-session-history.js';
+import manifest from '../core/a2ui/assets/manifest.json';
+import { KernelRunEventTranslator } from '../core/stream/kernel-events.js';
+import { coalesceHistoryToolCalls } from './history-tool-facts.js';
+import { orderTranscript } from './transcript-order.js';
+
+type Page = Awaited<ReturnType<ApiFacade['listSessionMessages']>>;
+type PageScope = Pick<Page, 'HistoryEpoch' | 'SnapshotSeqId' | 'CursorSource'>;
+
+export function itemPageRecords(page: Page, sessionId: string, previousCursor?: string | null) {
+  if (page.HistoryView !== 'items-v1' || !Array.isArray(page.Items)
+    || !page.HistoryEpoch || !Number.isSafeInteger(page.SnapshotSeqId)
+    || page.HasMore !== Boolean(page.NextItemCursor)
+    || (page.HasMore && (!page.Items.length || page.NextItemCursor === previousCursor))) {
+    throw new Error('会话条目分页响应无效，请重新打开会话。');
+  }
+  let last = 0;
+  for (const item of page.Items) {
+    if (!item.ItemId || !item.Event || item.Event.SessionId !== sessionId
+      || !Number.isSafeInteger(item.SeqId) || item.SeqId <= last || item.SeqId > page.SnapshotSeqId!
+      || item.SeqId !== item.Event.SeqId || (item.ContentRef && item.ContentRef.SeqId !== item.SeqId)) {
+      throw new Error('会话条目与当前历史快照不一致。');
+    }
+    last = item.SeqId;
+  }
+  return page.Items;
+}
+
+async function readItemBody(api: ApiFacade, sessionId: string, seq: number, scope: PageScope, signal: AbortSignal, checkpoint?: HistoryContentCheckpoint) {
+  const body = await readItemJson(api, sessionId, seq, scope, signal, checkpoint);
+  if (!Array.isArray(body) || body.length !== 2 || !body[0] || typeof body[0] !== 'object') {
+    throw new Error('历史正文格式无效。');
+  }
+  return { Content: body[0], Metadata: body[1] };
+}
+
+// Runtime v1 streams have no item reducer. Fold sequence-keyed deltas and
+// cumulative snapshots before feeding the existing legacy transcript renderer.
+function legacyRows(records: SessionEventRecord[]) {
+  const rows: SessionEventRecord[] = [];
+  const drafts = new Map<string, { event: SessionEventRecord; parts: string[] }>();
+  for (const event of records) {
+    if (persistedRuntimeFrame(event)) continue;
+    const content = event.Content as (SessionEventRecord['Content'] & { text?: string }) | undefined;
+    const text = content?.parts?.map(part => part.text || '').join('') || content?.text || content?.payload?.text || '';
+    const key = event.InvocationId || event.EventId;
+    const kind = event.EventType;
+    if (kind === 'run.started' && event.Metadata?.ksadk_runtime_event && content?.payload?.source === 'ag-ui') {
+      const prompt = inputText(content.payload.input);
+      if (prompt) rows.push({ ...event, EventId: 'input:' + event.EventId, EventType: 'user_message',
+        Content: { role: 'user', parts: [{ text: prompt }] } });
+    }
+    if (key && (kind === 'assistant_stream_delta' || kind === 'text.delta' || kind === 'message.delta'
+      || kind === 'assistant_stream_snapshot')) {
+      const draft = drafts.get(key);
+      if (draft && kind !== 'assistant_stream_snapshot') {
+        draft.event = event;
+        draft.parts.push(text);
+      } else drafts.set(key, { event, parts: [text] });
+    } else if (kind === 'text.completed' || kind === 'message.completed' || kind === 'assistant_message') {
+      if (key) drafts.delete(key);
+      rows.push({ ...event, EventType: 'assistant_message',
+        Content: content?.parts?.length ? content : { ...content, parts: [{ text }] } });
+    } else {
+      rows.push(content?.text && !content.parts?.length
+        ? { ...event, Content: { ...content, parts: [{ text: content.text }] } } : event);
+    }
+  }
+  for (const { event, parts } of drafts.values()) rows.push({ ...event, EventType: 'assistant_stream_snapshot',
+    Metadata: { ...event.Metadata, stream_snapshot: true }, Content: { parts: [{ text: parts.join('') }] } });
+  return rows;
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function legacyApprovalRows(events: SessionEventRecord[]): Message[] {
+  const decisions = new Map<string, string>();
+  for (const event of events) {
+    if (event.EventType !== 'approval_response') continue;
+    const answer = object(event.Metadata?.resume_input);
+    const id = answer.approval_request_id || answer.interrupt_id || answer.id;
+    if (!id) continue;
+    const values = object(answer.value).decisions;
+    const action = Array.isArray(values) && object(values[0]).type;
+    const status = ['cancelled', 'expired', 'submitted'].includes(String(answer.decision))
+      ? String(answer.decision) : answer.approve || answer.approved || action === 'approve' || action === 'edit'
+        ? 'approved' : 'denied';
+    decisions.set(String(id), status === 'submitted' ? 'completed' : status);
+  }
+  return events.filter(event => event.EventType === 'approval_request').map(event => {
+    const info = object(event.Metadata?.interrupt_info);
+    const action = Array.isArray(info.action_requests) ? object(info.action_requests[0]) : {};
+    const id = String(info.approval_request_id || info.id || '');
+    return mapBackendMessage({ MessageId: event.EventId, Role: 'assistant', SeqId: event.SeqId,
+      InvocationId: event.InvocationId, Timestamp: event.Timestamp, ToolEvents: [{
+        Type: 'approval', Name: info.tool_name || action.name || 'approval', ApprovalRequestId: id,
+        Protocol: event.Metadata?.protocol, Status: decisions.get(id) || 'paused',
+        Args: info.arguments ?? info.tool_args ?? info.args ?? action.args ?? action.arguments,
+        ApprovalMessage: info.approval_message || info.message || action.description,
+      }] }) as Message;
+  });
+}
+
+function componentList(raw: unknown): Record<string, unknown>[] {
+  const entries: Record<string, unknown>[] = [];
+  function append(rawComponent: unknown): string {
+    const node = object(rawComponent);
+    const id = String(node.id || node.component_id || '');
+    const component = String(node.component || node.type || '');
+    if (!id || !component) return '';
+    const props = object(node.props);
+    const children = Array.isArray(node.children) ? node.children.map(append).filter(Boolean) : [];
+    entries.push({ id, component, ...props, ...(children.length && !props.children && !props.child ? { children } : {}) });
+    return id;
+  }
+  if (Array.isArray(raw)) raw.forEach(append);
+  return entries;
+}
+
+function legacyActivityRows(events: SessionEventRecord[]): Message[] {
+  const messages = events.flatMap(event => {
+    if (!event.EventType?.startsWith('a2ui.surface.')) return [];
+    const content = object(event.Content);
+    const payload = Object.keys(object(content.payload)).length ? object(content.payload) : content;
+    const surfaceId = String(payload.surfaceId || payload.surface_id || '');
+    if (!surfaceId) return [];
+    const explicit = payload.operations || payload.a2ui_operations;
+    const surface = payload.surface ? object(payload.surface) : payload;
+    const components = componentList(surface.components);
+    const data = surface.data_model ?? surface.dataModel;
+    const ops = Array.isArray(explicit) ? explicit : event.EventType === 'a2ui.surface.end'
+      ? [{ version: 'v0.9', deleteSurface: { surfaceId } }]
+      : [
+          ...(event.EventType === 'a2ui.surface.begin' ? [{ version: 'v0.9', createSurface: { surfaceId,
+            catalogId: surface.catalog_id || surface.catalogId || manifest.catalog_id } }] : []),
+          ...(components.length ? [{ version: 'v0.9', updateComponents: { surfaceId, components } }] : []),
+          ...(data === undefined ? [] : [{ version: 'v0.9', updateDataModel: { surfaceId, path: '/', value: data } }]),
+        ];
+    if (!ops.length) return [];
+    return [{ MessageId: event.EventId, Role: 'assistant', SeqId: event.SeqId, Timestamp: event.Timestamp,
+      InvocationId: event.InvocationId, Activities: [{ SurfaceId: surfaceId,
+        Content: { a2ui_operations: ops, interactionId: payload.interactionId } }] }];
+  });
+  return (mapBackendMessages(messages) as Message[]).filter(row => row.role === 'a2ui');
+}
+
+function inputText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(inputText).join('');
+  const data = object(value);
+  const nested = data.text ?? data.content ?? data.parts;
+  return nested === undefined ? '' : inputText(nested);
+}
+
+const CHAT_EVENT_TYPES = new Set([
+  'user_message', 'assistant_message', 'assistant_stream_snapshot', 'reasoning',
+  'tool_call', 'tool_result', 'stage_tool_call', 'stage_tool_result', 'tool.call.begin', 'tool.call.end',
+  'approval_request', 'approval_response', 'reasoning.delta', 'reasoning.completed', 'context_checkpoint',
+  'a2ui.surface.begin', 'a2ui.surface.update', 'a2ui.surface.end',
+  'run_status', 'run.started', 'run.progress', 'run.completed', 'run.interrupted', 'run.failed', 'run.canceled',
+]);
+
+function deferredItemMessage(
+  item: SessionHistoryItem, api: ApiFacade, sessionId: string, scope: PageScope,
+  profile: 'flat-v1' | 'agent-block-v1', messages: Message[],
+): Message {
+  const loadEvent = async (signal: AbortSignal, checkpoint?: HistoryContentCheckpoint) => {
+    const body = await readItemBody(api, sessionId, item.SeqId, scope, signal, checkpoint);
+    const envelope = object(body.Content?.session_event);
+    const imported = envelope.family === 'workflow' && object(object(envelope.payload).legacy_history_event);
+    return imported && imported.EventType
+      ? { ...imported, SessionId: sessionId, SeqId: item.SeqId } as SessionEventRecord
+      : { ...item.Event, ...body };
+  };
+  const bodyKey = JSON.stringify([sessionId, scope.HistoryEpoch, scope.SnapshotSeqId, scope.CursorSource, item.ItemId, item.SeqId]);
+  const base = { id: 'history-body:' + bodyKey, timestamp: Number(item.Event.Timestamp) || 0,
+    historyOrder: { seq: item.SeqId }, invocationId: item.InvocationId || item.Event.InvocationId };
+  const ref = item.ToolRef;
+  if (ref?.CallId && (ref.Kind === 'call' || ref.Kind === 'result')) {
+    const isResult = ref.Kind === 'result';
+    const read = async (signal: AbortSignal, checkpoint?: HistoryContentCheckpoint) => {
+      const event = await loadEvent(signal, checkpoint);
+      const frame = persistedRuntimeFrame(event);
+      const translated = frame && new KernelRunEventTranslator(sessionId).translate(frame);
+      const rows = buildMessagesFromSessionEvents(translated ? [{ ...translated, Timestamp: event.Timestamp,
+        SeqId: event.SeqId } as SessionEventRecord] : legacyRows([event]),
+        { preserveDistinctEvents: true }) as Message[];
+      const tool = rows.flatMap(row => Object.values(row.tools || {})).find(row => row.callId === ref.CallId);
+      const payload = isResult ? tool?.output : tool?.args;
+      if (payload === undefined) throw new Error('历史工具正文与调用标识不一致。');
+      return payload;
+    };
+    let scopeId = ref.ScopeId;
+    if (isResult && ref.ParentScopeId) {
+      const owners = messages.filter(row => (row.runId || row.invocationId) === base.invocationId
+        && Object.values(row.tools || {}).some(tool => tool.callId === ref.CallId));
+      if (!owners.some(row => row.scopeId === ref.ScopeId)
+        && owners.filter(row => row.scopeId === ref.ParentScopeId).length === 1) scopeId = ref.ParentScopeId;
+    }
+    return { ...base, role: 'model', content: '', scopeId,
+      eventType: isResult ? 'tool_result' : 'tool_call',
+      tools: { [ref.CallId]: { callId: ref.CallId, name: ref.Name || 'tool', args: '', status: ref.Status,
+        ...(isResult ? { deferredOutput: { key: bodyKey, read } } : { deferredArgs: { key: bodyKey, read } }) } } };
+  }
+  return { ...base, role: 'system', content: item.EventType,
+    readHistoryContent: async (signal, checkpoint) => {
+      const event = await loadEvent(signal, checkpoint);
+      const projected = rebuildPersistedSessionHistory(
+        buildMessagesFromSessionEvents(legacyRows([event])) as Message[], [event], sessionId, profile);
+      return projected.messages.flatMap(row => [
+        row.content, row.reasoning, ...Object.values(row.tools || {}).map(tool => JSON.stringify(tool, null, 2)),
+      ]).filter(Boolean).join('\n') || '此事件没有可展示的正文。';
+    } };
+}
+
+function projectSemanticItems(
+  items: SessionHistoryItem[], api: ApiFacade, sessionId: string, scope: PageScope,
+  profile: 'flat-v1' | 'agent-block-v1', firstSourceSeqId?: number,
+) {
+  const records = items.filter(item => !item.ContentRef).map(item => item.Event);
+  // Accepted inbox text can precede (or replace) a native user item. A verified
+  // command id is stable across pages, even for two prompts with identical text.
+  const nativeInputs = new Set(items.filter(item => {
+    if (!item.InputCommandId || item.InboxInput) return false;
+    const frame = persistedRuntimeFrame(item.Event);
+    const source = object(object(frame?.source).metadata);
+    const parts = object(frame?.snapshot).parts;
+    return item.EventType === 'user_message' || (frame?.event_type === 'item.completed'
+      && (source.native_item_kind === 'userMessage'
+        || Array.isArray(parts) && parts.some(part => object(object(part).data).type === 'userMessage')));
+  }).map(item => item.InputCommandId).filter(Boolean));
+  const missingInputs = items.filter(item => item.InboxInput && !nativeInputs.has(item.InboxInput.CommandId));
+  const inputs = missingInputs.flatMap(item => item.InboxInput?.Text !== undefined
+    ? [{ ...item.Event, EventId: 'inbox:' + item.InboxInput.CommandId, EventType: 'user_message',
+      Content: { parts: [{ text: item.InboxInput.Text }] } }] : []);
+  const legacy = legacyRows([...records, ...inputs].sort((a, b) => Number(a.SeqId) - Number(b.SeqId)));
+  const fallback = [...buildMessagesFromSessionEvents(legacy, { preserveDistinctEvents: true }), ...legacyApprovalRows(legacy), ...legacyActivityRows(legacy)] as Message[];
+  const result = rebuildPersistedSessionHistory(fallback, records, sessionId, profile, firstSourceSeqId);
+  const deferred = items.filter(item => item.ContentRef)
+    .map(item => deferredItemMessage(item, api, sessionId, scope, profile, result.messages));
+  for (const item of missingInputs) {
+    const input = item.InboxInput!;
+    if (!input.ContentRef) continue;
+    deferred.push({ id: 'inbox:' + input.CommandId, role: 'user', content: '用户输入',
+      timestamp: Number(item.Event.Timestamp) || 0, historyOrder: { seq: item.SeqId },
+      historyContentKey: JSON.stringify([sessionId, scope.HistoryEpoch, scope.SnapshotSeqId, scope.CursorSource, item.SeqId, 'inbox']),
+      invocationId: item.InvocationId, readHistoryContent: async (signal, checkpoint) =>
+        inputText(await readItemJson(api, sessionId, item.SeqId, scope, signal, checkpoint, 'inbox')) });
+  }
+  // Historical adapters can carry extension event types. Keep their positions
+  // inspectable while keeping internal provider and state payloads out of the UI.
+  const extensions = new Map<string, SessionEventRecord[]>();
+  for (const event of legacy) {
+    if (!event.EventType || CHAT_EVENT_TYPES.has(event.EventType) || event.Content?.session_event) continue;
+    const run = event.InvocationId || '';
+    const group = extensions.get(run);
+    if (group) group.push(event);
+    else extensions.set(run, [event]);
+  }
+  for (const [run, events] of extensions) {
+    deferred.push({ id: 'history-details:' + run, role: 'system', content: `历史事件（${events.length}）`,
+      timestamp: Number(events[0].Timestamp) || 0, historyOrder: { seq: events[0].SeqId! }, invocationId: run,
+      readHistoryContent: async () => events.map(event => {
+        const detail = event.EventType === 'progress' ? inputText(event.Content?.parts) : '';
+        return [event.SeqId, event.EventType, detail].filter(Boolean).join('  ');
+      }).join('\n') });
+  }
+  return { ...result, messages: deferred.length ? coalesceHistoryToolCalls(orderTranscript([...result.messages, ...deferred])) : result.messages };
+}
+
+type ProgressChunk = { events: SessionEventRecord[]; count: number; newer?: ProgressChunk };
+
+type ItemProjection = {
+  firstSeq?: number;
+  semanticItems: SessionHistoryItem[];
+  hasOnlyPlainChatItems: boolean;
+  progress: Map<string, ProgressChunk>;
+  semantic: ReturnType<typeof projectSemanticItems>;
+  messages: Message[];
+  canonicalRunIds: string[];
+};
+
+function legacyDeltaText(item: SessionHistoryItem) {
+  if (!item.InvocationId || item.InvocationId !== item.Event.InvocationId || item.ContentRef || item.InboxInput || item.InputCommandId
+    || !['assistant_stream_delta', 'text.delta', 'message.delta'].includes(item.Event.EventType || '')
+    || persistedRuntimeFrame(item.Event) || item.Event.Content?.session_event) return;
+  const content = item.Event.Content as (SessionEventRecord['Content'] & { text?: string }) | undefined;
+  return content?.parts?.map(part => part.text || '').join('') || content?.text || content?.payload?.text || '';
+}
+
+const plainChatTypes = new Set(['user_message', 'assistant_message', 'tool_call', 'tool_result']);
+
+function isPlainChatItem(item: SessionHistoryItem): boolean {
+  const event = item.Event;
+  return plainChatTypes.has(item.EventType) && item.EventType === event.EventType
+    && Boolean(event.EventId?.trim() && item.InvocationId && item.InvocationId === event.InvocationId?.trim())
+    && Number.isSafeInteger(item.SeqId) && item.SeqId > 0 && item.SeqId === event.SeqId
+    && !item.ContentRef && !item.InboxInput && !item.InputCommandId
+    && !event.Metadata?.RuntimeItem && !event.Metadata?.responses_mirror
+    && Object.keys(event.Content || {}).every(key => ['role', 'parts', 'text'].includes(key));
+}
+
+// Plain transcript rows reconcile tools within an invocation and deduplicate
+// by event ID. Retain a newer suffix only if neither identity crosses the cut.
+function reusableChatSuffix(items: SessionHistoryItem[], olderCount: number): number {
+  if (!olderCount || olderCount >= items.length || items[olderCount - 1].SeqId >= items[olderCount].SeqId) return items.length;
+  const runs = new Set(items.slice(0, olderCount).map(item => item.InvocationId));
+  let split = olderCount;
+  while (split < items.length && runs.has(items[split].InvocationId)) split++;
+  const ids = new Set(items.slice(0, split).map(item => item.Event.EventId!.trim()));
+  for (let i = split; i < items.length; i++) {
+    if (runs.has(items[i].InvocationId) || ids.has(items[i].Event.EventId!.trim())) return items.length;
+  }
+  return split;
+}
+
+/** New pages precede the cached window. Plain v1 progress has no effect on
+ * chat reducers, so retain its complete rows in per-invocation page chunks.
+ * Consecutive v1 text deltas within a run are associative concatenations;
+ * canonical frames, snapshot replacements and tool boundaries remain intact. */
+export function prependItemHistory(
+  incoming: SessionHistoryItem[], api: ApiFacade, sessionId: string, scope: PageScope,
+  profile: 'flat-v1' | 'agent-block-v1', previous?: ItemProjection,
+): ItemProjection {
+  const progress = new Map(previous?.progress);
+  const newProgress = new Map<string, SessionEventRecord[]>();
+  const semanticPage: SessionHistoryItem[] = [];
+  const addSemantic = (item: SessionHistoryItem) => {
+    const prior = semanticPage.at(-1);
+    const text = legacyDeltaText(item);
+    const priorText = prior && text !== undefined && prior.InvocationId === item.InvocationId
+      ? legacyDeltaText(prior) : undefined;
+    if (priorText !== undefined) {
+      semanticPage[semanticPage.length - 1] = { ...item, Event: { ...item.Event,
+        Content: { parts: [{ text: priorText + text }] } } };
+    } else semanticPage.push(item);
+  };
+  for (const item of incoming) {
+    if (item.Event.EventType === 'progress' && !item.ContentRef && !item.InboxInput && !item.InputCommandId
+      && !item.Event.Content?.session_event && !persistedRuntimeFrame(item.Event)) {
+      const run = item.InvocationId || '';
+      const group = newProgress.get(run) || [];
+      group.push(item.Event);
+      newProgress.set(run, group);
+    } else addSemantic(item);
+  }
+  for (const [run, events] of newProgress) {
+    const newer = progress.get(run);
+    progress.set(run, { events, count: events.length + (newer?.count || 0), newer });
+  }
+
+  const hasOnlyPlainChatItems = (previous?.hasOnlyPlainChatItems ?? true) && semanticPage.every((item, i) =>
+    isPlainChatItem(item) && (!i || semanticPage[i - 1].SeqId < item.SeqId));
+  const olderCount = semanticPage.length;
+  const newer = previous?.semanticItems || [];
+  let semanticItems = newer;
+  let semantic = previous?.semantic;
+  const firstSeq = incoming[0]?.SeqId ?? previous?.firstSeq;
+  if (semanticPage.length || !semantic || (firstSeq === 1 && previous?.firstSeq !== 1)) {
+    if (newer.length) addSemantic(newer[0]);
+    semanticItems = semanticPage.concat(newer.slice(1));
+    const split = hasOnlyPlainChatItems && previous ? reusableChatSuffix(semanticItems, olderCount) : semanticItems.length;
+    if (previous && split < semanticItems.length) {
+      const head = projectSemanticItems(semanticItems.slice(0, split), api, sessionId, scope, profile, firstSeq);
+      const firstRetainedSeq = semanticItems[split].SeqId;
+      const tail = previous.semantic.messages.filter(row => row.historyOrder!.seq >= firstRetainedSeq);
+      semantic = { ...head, messages: head.messages.concat(tail) };
+    } else {
+      semantic = projectSemanticItems(semanticItems, api, sessionId, scope, profile, firstSeq);
+    }
+  }
+  const details: Message[] = [];
+  for (const [run, chunk] of progress) {
+    const first = chunk.events[0];
+    details.push({ id: 'history-progress:' + run, role: 'system', content: `历史事件（${chunk.count}）`,
+      timestamp: Number(first.Timestamp) || 0, historyOrder: { seq: first.SeqId! }, invocationId: run,
+      readHistoryContent: async () => {
+        const lines: string[] = [];
+        for (let page: ProgressChunk | undefined = chunk; page; page = page.newer) {
+          for (const event of page.events) {
+            const detail = inputText(event.Content?.parts) || inputText(event.Content) || inputText(event.Content?.payload);
+            lines.push([event.SeqId, event.EventType, detail].filter(Boolean).join('  '));
+          }
+        }
+        return lines.join('\n');
+      } });
+  }
+  return { firstSeq, semantic, progress, semanticItems, hasOnlyPlainChatItems,
+    canonicalRunIds: semantic.canonicalRunIds,
+    messages: details.length ? orderTranscript([...semantic.messages, ...details]) : semantic.messages };
+}
+
+/** A disconnect may span several pages or an entire run. Pin the catch-up snapshot
+ * on its first response; live subscription resumes after the last applied row. */
+export async function catchUpSessionItems(
+  api: ApiFacade, sessionId: string, afterSeqId: number, historyEpoch: string,
+  signal: AbortSignal, apply: (event: SessionHistoryItem['Event']) => void,
+) {
+  let cursor: string | undefined;
+  let latest = afterSeqId;
+  let snapshot: number | undefined;
+  do {
+    signal.throwIfAborted();
+    const page = await api.listSessionMessages(sessionId, {
+      historyView: 'items-v1', ...(cursor ? { itemCursor: cursor } : { afterSeqId }),
+      historyEpoch, snapshotSeqId: snapshot, signal, limit: 100,
+    });
+    if (page.HistoryEpoch !== historyEpoch || (snapshot !== undefined && page.SnapshotSeqId !== snapshot)) {
+      throw new Error('接续历史来源已变化。');
+    }
+    snapshot = page.SnapshotSeqId;
+    for (const item of itemPageRecords(page, sessionId, cursor)) {
+      if (item.SeqId <= latest) throw new Error('接续历史条目未前进。');
+      const event = item.ContentRef
+        ? { ...item.Event, ...await readItemBody(api, sessionId, item.SeqId, page, signal) } : item.Event;
+      signal.throwIfAborted();
+      apply(event);
+      latest = item.SeqId;
+    }
+    cursor = page.NextItemCursor || undefined;
+  } while (cursor);
+  return latest;
+}

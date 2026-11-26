@@ -1,3 +1,4 @@
+import { DeferredHistoryContent } from './DeferredHistoryContent.js';
 import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import {
@@ -921,10 +922,12 @@ function ChatMessage({
                     ) : null}
                   </div>
                 ) : null}
-                {tool.args ? (
+                {tool.deferredArgs && <DeferredHistoryContent label="完整入参" key={tool.deferredArgs.key} read={tool.deferredArgs.read} />}
+                {tool.deferredOutput && <DeferredHistoryContent label="完整出参" key={tool.deferredOutput.key} read={tool.deferredOutput.read} />}
+                {tool.args && !tool.deferredArgs ? (
                   <ToolPayloadBlock label="入参 (Args)" tone="input" value={tool.args} />
                 ) : null}
-                {tool.output ? (
+                {tool.output && !tool.deferredOutput ? (
                   <ToolPayloadBlock
                     label="输出 (Output)"
                     tone={tool.status === 'error' ? 'error' : 'output'}
@@ -1181,7 +1184,7 @@ export function ChatMessageList({
                 top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >
-                {entry.item.role === 'system' ? (
+                {entry.item.readHistoryContent ? <DeferredHistoryContent key={entry.item.historyContentKey || entry.item.id} label={entry.item.content} read={entry.item.readHistoryContent} /> : entry.item.role === 'system' ? (
                   <SystemMessage message={entry.item} />
                 ) : (
                   <ChatMessage

@@ -1,4 +1,4 @@
-import { mergeHistoryWithLive } from '../utils/transcript-order.js';
+import { mergeHistoryWithLive, orderTranscript, preserveRecoveredUserInput } from '../utils/transcript-order.js';
 import { isHistoryPreparing, readPreparedHistory } from '../utils/history-preparation.js';
 import { bootstrapPresentationProfile } from '../core/conversation/agent.js';
 import { agentBlockRendererCatalog } from '../core/conversation/renderer-registry.js';
@@ -27,6 +27,7 @@ import { shouldRenderFeedbackControls, normalizeFeedback } from '../utils/feedba
 import {
   mergePendingSessions,
   readPersistedSessionId,
+  writePersistedSessionId,
   resolveSessionToRestore,
 } from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
@@ -34,6 +35,7 @@ import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
+import { catchUpSessionItems, itemPageRecords, prependItemHistory } from '../utils/session-items.js';
 import type { ListSessionMessagesResponse } from '../api/messages.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
@@ -58,6 +60,9 @@ const SESSION_METADATA_CACHE_SIZE = 128;
 const EMPTY_STATUS_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 
 type SessionEventHistoryCache = {
+  itemProjection?: ReturnType<typeof prependItemHistory>;
+  legacySuffix?: { messages: Message[]; canonicalRunIds: string[]; boundary: number };
+  hasMore?: boolean;
   events: SessionEventRecord[];
   loadedCount: number;
   total: number;
@@ -109,12 +114,16 @@ function reloadRequiredError(): ApiError {
 
 function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>) {
   return {
+    historyView: page.HistoryView,
+    nextItemCursor: page.NextItemCursor,
+    retryOlderPage: false,
     dataSource: page.DataSource,
     degraded: page.Degraded,
     cursorSource: page.CursorSource,
     cursorCompatibleWithRuntime: page.CursorCompatibleWithRuntime,
     sessionContractVersion: page.SessionContractVersion,
     historyEpoch: page.HistoryEpoch,
+    historyEpochSource: page.HistoryEpochSource,
     persistenceDegraded: page.PersistenceDegraded,
     snapshotSeqId: page.SnapshotSeqId,
     error: undefined,
@@ -221,9 +230,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const uiCapabilitiesRef = useRef(uiCapabilities);
   uiCapabilitiesRef.current = uiCapabilities;
   const runSubscriptionAbortRef = useRef<AbortController | null>(null);
-  // agent-kernel/v1 unified cursor: only the Session seq dedupes/orders and
-  // drives reconnects; Responses/AG-UI/A2A internal event ids are ignored.
-  const sessionEventCursorRef = useRef(createSessionEventCursor());
   const loadSessionGenerationRef = useRef(0);
   // The readable fallback can paint before RuntimeEvent hydration finishes.
   // Search must wait for stable canonical message identities, independently
@@ -233,6 +239,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
   const persistedTranscriptBySessionRef = useRef(new Map<string, Message[]>());
+  const recoveredInputBySessionRef = useRef(new Map<string, Message>());
   const sessionTranscriptCacheRef = useRef(new Map<string, Message[]>());
   const historyProfileBySessionRef = useRef(new Map<string, 'flat-v1' | 'agent-block-v1'>());
   const fallbackHistoryBySessionRef = useRef(new Map<string, Message[]>());
@@ -241,6 +248,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   // Keep those optimistic rows until the server returns them so a settled-run
   // refresh cannot evict the active transcript in that short window.
   const pendingCreatedSessionAgentsRef = useRef(new Map<string, string>());
+  const initialDirectoryRef = useRef<{ ready: Promise<void>; cancelled: boolean } | null>(null);
   const sessionCreationPromiseRef = useRef<Promise<string | null> | null>(null);
   const localDraftAgentRef = useRef<string | null>(null);
   const loadSessionRef = useRef<((sessionId: string, historyReload?: boolean, signal?: AbortSignal) => Promise<void>) | null>(null);
@@ -332,6 +340,40 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         && currentSessionIdRef.current === options.sessionId
       );
 
+      // Envelope identity belongs to this subscription, including its session and epoch.
+      const sessionCursor = createSessionEventCursor();
+      let reconnecting = false;
+      const applyEvent = (event: SessionEventRecord) => {
+        if (event.InvocationId && event.InvocationId !== options.invocationId) return;
+        const envelopeSeq = (event as { seq?: unknown }).seq;
+        if (typeof envelopeSeq === 'number') sessionCursor.accept(event);
+        const seq = typeof envelopeSeq === 'number' ? envelopeSeq : Number(event.SeqId || 0);
+        if (seq > 0 && seq <= afterSeqId) return;
+
+        useStreamingStore.getState().updateActivity({
+          sessionId: options.sessionId, status: 'running', phase: '正在处理', countEvent: false,
+        });
+        const frame = (event.Content as { runtime_event?: Record<string, unknown> } | undefined)?.runtime_event;
+        if (nativeRecovery && frame?.schema_version === 2 && frame.run_id === options.invocationId
+          && canonical.apply(frame)) {
+          const state = canonical.snapshot();
+          dispatchRunEventToStores({
+            type: 'conversation_snapshot', sessionId: options.sessionId,
+            result: { state, presentation: projectConversationItems(state, { profile }),
+              runId: options.invocationId, cursor: seq || afterSeqId },
+          });
+        }
+        dispatchRunEventToStores({ type: 'stream_event', sessionId: options.sessionId, event });
+        if (eventHasTerminalRunStatus(event)) {
+          terminalStatusSeen = true;
+          shouldReloadSession = true;
+          const terminalActivity = terminalActivityForRunEvent(event);
+          if (terminalActivity) useStreamingStore.getState().updateActivity({
+            sessionId: options.sessionId, status: terminalActivity.status, phase: terminalActivity.phase, detail: options.invocationId, countEvent: false,
+          });
+        }
+        if (seq > 0) afterSeqId = seq;
+      };
       try {
         useStreamingStore.getState().setCurrentRunId(options.invocationId);
         useStreamingStore.getState().setActiveInvocationId(options.invocationId);
@@ -348,6 +390,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
         while (!terminalStatusSeen && isCurrentSubscription()) {
           try {
+            const scope = useSessionStore.getState().messageHistory[options.sessionId];
+            if (reconnecting && scope?.historyView === 'items-v1' && scope.historyEpoch) {
+              afterSeqId = await catchUpSessionItems(api, options.sessionId, afterSeqId,
+                scope.historyEpoch, controller.signal, event => {
+                  if (isCurrentSubscription()) applyEvent(event);
+                });
+              if (terminalStatusSeen || !isCurrentSubscription()) break;
+            }
+            reconnecting = true;
             const stream = await api.subscribeRunEvents(
               {
                 sessionId: options.sessionId,
@@ -393,76 +444,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
                   if (!transportEvent.data || typeof transportEvent.data !== 'object') continue;
                   const event = transportEvent.data as SessionEventRecord;
                   if (!isCurrentSubscription()) break;
-                  if (event.InvocationId && event.InvocationId !== options.invocationId) continue;
-
-                  useStreamingStore.getState().updateActivity({
-                    sessionId: options.sessionId,
-                    status: 'running',
-                    phase: '正在处理',
-                    countEvent: false,
-                  });
-
-                  const kernelSeq = (event as { seq?: unknown }).seq;
-                  if (typeof kernelSeq === 'number') {
-                    // agent-kernel/v1 envelope: fold into the unified cursor.
-                    try {
-                      sessionEventCursorRef.current.accept(event);
-                    } catch (cursorError) {
-                      console.error('[SessionLifecycle] session event cursor conflict:', cursorError);
-                    }
-                    afterSeqId = Math.max(afterSeqId, sessionEventCursorRef.current.reconnectAfterSeq());
-                    dispatchRunEventToStores({
-                      type: 'stream_event',
-                      sessionId: options.sessionId,
-                      event,
-                    });
-                    terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
-                    shouldReloadSession = shouldReloadSession || terminalStatusSeen;
-                    const kernelTerminal = terminalActivityForRunEvent(event);
-                    if (kernelTerminal) {
-                      useStreamingStore.getState().updateActivity({
-                        sessionId: options.sessionId,
-                        status: kernelTerminal.status,
-                        phase: kernelTerminal.phase,
-                        detail: options.invocationId,
-                        countEvent: false,
-                      });
-                    }
-                    continue;
-                  }
-
-                  const seqId = Number(event.SeqId || 0);
-                  if (Number.isFinite(seqId)) {
-                    afterSeqId = Math.max(afterSeqId, seqId);
-                  }
-                  const frame = (event.Content as { runtime_event?: Record<string, unknown> } | undefined)?.runtime_event;
-                  if (nativeRecovery && frame?.schema_version === 2 && frame.run_id === options.invocationId) {
-                    if (canonical.apply(frame)) {
-                      const state = canonical.snapshot();
-                      dispatchRunEventToStores({
-                        type: 'conversation_snapshot', sessionId: options.sessionId,
-                        result: { state, presentation: projectConversationItems(state, { profile }),
-                          runId: options.invocationId, cursor: afterSeqId },
-                      });
-                    }
-                  }
-                  dispatchRunEventToStores({
-                    type: 'stream_event',
-                    sessionId: options.sessionId,
-                    event,
-                  });
-                  terminalStatusSeen = terminalStatusSeen || eventHasTerminalRunStatus(event);
-                  shouldReloadSession = shouldReloadSession || terminalStatusSeen;
-                  const terminalActivity = terminalActivityForRunEvent(event);
-                  if (terminalActivity) {
-                    useStreamingStore.getState().updateActivity({
-                      sessionId: options.sessionId,
-                      status: terminalActivity.status,
-                      phase: terminalActivity.phase,
-                      detail: options.invocationId,
-                      countEvent: false,
-                    });
-                  }
+                  applyEvent(event);
                   if (terminalStatusSeen) break;
                 }
                 if (terminalStatusSeen) break;
@@ -506,7 +488,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               && error.code !== 429;
             if (isPermanentClientError) {
               terminalStatusSeen = true;
-              shouldReloadSession = false;
+              shouldReloadSession = isHistoryReloadRequired(error);
               dispatchRunEventToStores({
                 type: 'error',
                 sessionId: options.sessionId,
@@ -593,7 +575,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [agentId, subscribeRunEvents]);
 
   const loadSession = useCallback(
-    async (sessionId: string, historyReload = false, signal?: AbortSignal) => {
+    async (sessionId: string, historyReload = false, signal?: AbortSignal, recoveredInvocationId?: string) => {
       if (signal?.aborted) return;
       localDraftAgentRef.current = null;
       // Bootstrap can invoke the initial list callback before React replaces
@@ -617,6 +599,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         );
       };
       const cachedHistory = sessionTranscriptCacheRef.current.get(sessionId);
+      const recoveredInput = recoveredInputBySessionRef.current.get(sessionId);
       // 只切换可见 transcript；每个 session 的 RunEngine 独立运行。
       // 切回时用历史快照和 afterSeqId 订阅追平遗漏内容。
       if (previousSessionId && previousSessionId !== sessionId) {
@@ -651,6 +634,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
       try {
         const messageOptions = {
+          historyView: 'items-v1' as const,
           limit: SESSION_MESSAGES_PAGE_SIZE,
           includeReasoning: true,
           includeToolEvents: true,
@@ -671,6 +655,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (!isStillCurrentSession()) {
           return;
         }
+        const items = messagesData.HistoryView === 'items-v1'
+          ? itemPageRecords(messagesData, sessionId) : undefined;
+        const itemTranscript = items && prependItemHistory(items, api, sessionId, messagesData, profile);
         const fallbackHistory = mapBackendMessages(messagesData.Messages) as Message[];
         rememberSessionCache(
           fallbackHistoryBySessionRef.current,
@@ -678,9 +665,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           fallbackHistory,
           currentSessionIdRef.current,
         );
-        let history = fallbackHistory;
+        let history = preserveRecoveredUserInput(itemTranscript?.messages ?? fallbackHistory, recoveredInput);
         let latestEventSeqId = 0;
-        let canonicalRunIds: string[] = [];
+        let canonicalRunIds: string[] = itemTranscript?.canonicalRunIds ?? [];
 
         // Durable message rows are small and sufficient for the readable
         // transcript. Paint them immediately on a cold switch instead of
@@ -690,9 +677,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // background refresh is complete.
         if (!cachedHistory) {
           const painted = mergeHistoryWithLive(
-            fallbackHistory, visibleBaseline, useMessageStore.getState().messages);
+            history, visibleBaseline, useMessageStore.getState().messages);
           useMessageStore.getState().setMessages(painted);
-          visibleBaseline = fallbackHistory;
+          visibleBaseline = history;
           cacheTranscript(sessionId, painted);
         }
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
@@ -705,7 +692,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // RuntimeEvent/v2 is the transcript source of truth. Persisted
         // ListSessionMessages rows are cumulative snapshots and therefore only
         // a compatibility fallback for runs without canonical item identity.
-        try {
+        if (items) {
+          const records = items.filter(item => !item.ContentRef).map(item => item.Event);
+          rememberSessionCache(eventHistoryBySessionRef.current, sessionId, {
+            itemProjection: itemTranscript, events: records, hasMore: messagesData.HasMore, loadedCount: items.length, total: items.length,
+            cursorSource: messagesData.CursorSource, historyEpoch: messagesData.HistoryEpoch,
+            snapshotSeqId: messagesData.SnapshotSeqId,
+          }, currentSessionIdRef.current);
+          for (const event of records) ingestSessionEventRecord(event, sessionId);
+        } else try {
           const eventPage = await api.listSessionEvents(sessionId, {
             offset: 0,
             limit: SESSION_EVENTS_PAGE_SIZE,
@@ -756,7 +751,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               profile,
             );
             canonicalRunIds = rebuilt.canonicalRunIds;
-            history = rebuilt.messages;
+            history = preserveRecoveredUserInput(rebuilt.messages, recoveredInput);
           }
           if (compatible) {
             const interactionHistory = await hydrateVisibleInteractionHistory(
@@ -854,7 +849,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               ACTIVE_RUN_STATUSES.has(status)
               || (status === '' && isRecentlyUpdatedSession(session))
             );
-            if (isActive) {
+            if (isActive && session.ActiveInvocationId !== recoveredInvocationId) {
               const activity = useStreamingStore.getState().getSessionActivity(sessionId);
               const nativeOwner = (capabilities.KernelSessionEventsByCommand === true || dshReplay)
                 && useStreamingStore.getState().isSessionStreaming(sessionId)
@@ -903,8 +898,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       } catch (error) {
         if (isHistoryReloadRequired(error) && !historyReload && isStillCurrentSession()) {
           useSessionStore.getState().setSessionMessageHistory(sessionId, {
-            nextCursor: null, hasMore: false, cursorSource: undefined,
-            historyEpoch: undefined, snapshotSeqId: undefined,
+            nextItemCursor: null, historyView: undefined, nextCursor: null, hasMore: false, cursorSource: undefined,
+            historyEpoch: undefined, historyEpochSource: undefined, snapshotSeqId: undefined,
             dataSource: undefined, degraded: undefined,
             cursorCompatibleWithRuntime: undefined,
             sessionContractVersion: undefined,
@@ -925,9 +920,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               ...previous,
               nextCursor: previous?.nextCursor ?? null, hasMore: previous?.hasMore ?? false,
               ...(historyReload ? { nextCursor: null, hasMore: false,
-                cursorSource: undefined, historyEpoch: undefined, snapshotSeqId: undefined } : {}),
+                cursorSource: undefined, historyEpoch: undefined, historyEpochSource: undefined, snapshotSeqId: undefined } : {}),
               preparing: false,
-              error: message,
+              error: message, retryOlderPage: false,
             });
           if (historyReload) useUIStore.getState().pushToast(message, 'error');
         }
@@ -948,6 +943,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       uiCapabilities,
     ],
   );
+
+  const recoverSessionRun = useCallback((sessionId: string, invocationId: string) => {
+    if (currentSessionIdRef.current !== sessionId) return;
+    const input = useMessageStore.getState().messages.find(message => message.role === 'user'
+      && (message.runId || message.invocationId) === invocationId);
+    if (input) rememberSessionCache(recoveredInputBySessionRef.current, sessionId, input, sessionId);
+    void loadSession(sessionId, false, undefined, invocationId);
+  }, [loadSession]);
 
   const fetchSessions = useCallback(
     async (
@@ -1017,6 +1020,31 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     },
     [api, loadSession, restoreSession],
   );
+
+  const fetchInitialSessions = useCallback((targetAgentId: string, preferredSessionId: string | null) => {
+    // The selection belongs to this authorized Agent scope. Page one of the
+    // directory may omit it, and neither that page nor transcript hydration
+    // should choose the destination of a send made immediately after refresh.
+    if (restoreSession && preferredSessionId && !currentSessionIdRef.current
+      && !sessionCreationPromiseRef.current && localDraftAgentRef.current !== targetAgentId) {
+      agentIdRef.current = targetAgentId;
+      void loadSession(preferredSessionId);
+    }
+    const ready = fetchSessions(targetAgentId, preferredSessionId);
+    if (restoreSession && !currentSessionIdRef.current && localDraftAgentRef.current !== targetAgentId) {
+      const initial = { ready, cancelled: false };
+      initialDirectoryRef.current = initial;
+      void ready.finally(() => {
+        if (initialDirectoryRef.current === initial) initialDirectoryRef.current = null;
+      });
+    }
+    return ready;
+  }, [fetchSessions, loadSession, restoreSession]);
+
+  const selectSession = useCallback((...args: Parameters<typeof loadSession>) => {
+    if (initialDirectoryRef.current) initialDirectoryRef.current.cancelled = true;
+    return loadSession(...args);
+  }, [loadSession]);
 
   const loadMoreSessions = useCallback(async () => {
     const store = useSessionStore.getState();
@@ -1100,6 +1128,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   }, [isMobile]);
 
   const startNewConversation = useCallback(() => {
+    if (initialDirectoryRef.current) initialDirectoryRef.current.cancelled = true;
+    writePersistedSessionId(agentIdRef.current, null);
     localDraftAgentRef.current = agentIdRef.current;
     loadSessionGenerationRef.current += 1;
     runSubscriptionAbortRef.current?.abort();
@@ -1119,6 +1149,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       await sessionCreationPromiseRef.current;
       return;
     }
+    if (initialDirectoryRef.current) initialDirectoryRef.current.cancelled = true;
+    writePersistedSessionId(agentId, null);
     // Invalidate an older session hydrate immediately. A fast user can type
     // and send while CreateSession is in flight; submitDraft waits on this
     // exact promise instead of starting a second session or using the prior one.
@@ -1157,7 +1189,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
   const waitForPendingSessionCreation = useCallback(async () => {
     const pending = sessionCreationPromiseRef.current;
-    return pending ? await pending : currentSessionIdRef.current;
+    if (pending) return await pending;
+    const initial = initialDirectoryRef.current;
+    if (!currentSessionIdRef.current && initial && !initial.cancelled) {
+      await initial.ready;
+      if (initial.cancelled) throw new CancelledError();
+    }
+    return currentSessionIdRef.current;
   }, []);
 
   const deleteSession = useCallback(
@@ -1181,8 +1219,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         eventHistoryBySessionRef.current.delete(sessionId);
         canonicalRunIdsBySessionRef.current.delete(sessionId);
         persistedTranscriptBySessionRef.current.delete(sessionId);
+        recoveredInputBySessionRef.current.delete(sessionId);
         pendingCreatedSessionAgentsRef.current.delete(sessionId);
         if (currentSessionIdRef.current === sessionId) {
+          writePersistedSessionId(agentId, null);
           loadSessionGenerationRef.current += 1;
           runSubscriptionAbortRef.current?.abort();
           disconnectRun?.();
@@ -1209,7 +1249,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     signal?.throwIfAborted();
     const historyState = useSessionStore.getState().messageHistory[sessionId];
     const cachedEvents = eventHistoryBySessionRef.current.get(sessionId);
-    const canLoadOlderMessages = Boolean(historyState?.hasMore && historyState.nextCursor !== null);
+    const canLoadOlderMessages = Boolean(historyState?.hasMore && (historyState.nextCursor !== null || historyState.nextItemCursor));
     const canLoadOlderEvents = Boolean(
       cachedEvents && cachedEvents.loadedCount < cachedEvents.total,
     );
@@ -1236,6 +1276,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         canLoadOlderMessages
           ? readPreparedHistory(() => api.listSessionMessages(sessionId, {
               signal,
+              historyView: historyState.historyView ?? (historyState.cursorSource === 'runtime'
+                && historyState.historyEpoch && historyState.snapshotSeqId !== undefined ? 'items-v1' : undefined),
+              itemCursor: historyState.nextItemCursor ?? undefined,
               beforeSeqId: historyState.nextCursor ?? undefined,
               cursorSource: historyState.cursorSource,
               historyEpoch: historyState.historyEpoch,
@@ -1290,6 +1333,49 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
       if (detailWarning) historyReadFailureRef.current = { generation, message: detailWarning };
       else if (eventPage) historyReadFailureRef.current = null;
+      if (historyState.historyView === 'items-v1' && messagePage?.HistoryView !== 'items-v1') {
+        throw reloadRequiredError();
+      }
+      let itemTranscript: { messages: Message[]; canonicalRunIds: string[] } | undefined;
+      let nextItemCache: SessionEventHistoryCache | undefined;
+      if (messagePage?.HistoryView === 'items-v1') {
+        const incoming = itemPageRecords(messagePage, sessionId, historyState.nextItemCursor);
+        const previous = cachedEvents?.itemProjection;
+        const boundary = previous?.firstSeq ?? historyState.nextCursor;
+        if (!previous && (historyState.historyView === 'items-v1' || historyState.cursorSource !== 'runtime'
+          || !historyState.historyEpoch || historyState.snapshotSeqId !== messagePage.SnapshotSeqId
+          || boundary == null)) throw reloadRequiredError();
+        if (incoming.length && boundary != null && incoming.at(-1)!.SeqId >= boundary) throw reloadRequiredError();
+        // The old Messages projection covered whole newer invocations. Keep
+        // that suffix when a pinned numeric continuation meets a giant run.
+        const legacySuffix = previous ? cachedEvents?.legacySuffix : {
+          messages: visibleBaseline, boundary: boundary!,
+          canonicalRunIds: [...(canonicalRunIdsBySessionRef.current.get(sessionId) || [])],
+        };
+        const projection = prependItemHistory(incoming, api, sessionId, messagePage,
+          historyProfileBySessionRef.current.get(sessionId) || 'flat-v1', previous);
+        itemTranscript = projection;
+        if (legacySuffix) {
+          const suffix = legacySuffix.messages.filter(row => {
+            const seq = row.historyOrder?.seq;
+            return seq == null || seq >= legacySuffix.boundary
+              || (messagePage.HasMore && projection.firstSeq != null && seq < projection.firstSeq);
+          });
+          const suffixIds = new Set(suffix.map(message => message.id));
+          itemTranscript = { messages: orderTranscript([...projection.messages.filter(row => !suffixIds.has(row.id)), ...suffix]),
+            canonicalRunIds: [...new Set([...projection.canonicalRunIds, ...legacySuffix.canonicalRunIds])] };
+        }
+        const records = incoming.filter(item => !item.ContentRef).map(item => item.Event);
+        const count = (previous ? cachedEvents!.loadedCount : 0) + incoming.length;
+        nextItemCache = { itemProjection: projection, legacySuffix, hasMore: messagePage.HasMore,
+          events: [...records.filter(event => event.EventType === 'run_status' || eventHasTerminalRunStatus(event)),
+            ...(cachedEvents?.events || [])],
+          loadedCount: count, total: count, historyEpoch: messagePage.HistoryEpoch,
+          snapshotSeqId: messagePage.SnapshotSeqId, cursorSource: messagePage.CursorSource };
+        for (const event of records) ingestSessionEventRecord(event, sessionId);
+        historyReadFailureRef.current = null;
+        detailWarning = undefined;
+      }
       const olderMessages = messagePage
         ? mapBackendMessages(messagePage.Messages) as Message[]
         : [];
@@ -1309,7 +1395,9 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       let mergedEvents = cachedEvents?.events || [];
       let loadedEventCount = cachedEvents?.loadedCount || 0;
       let totalEventCount = cachedEvents?.total || 0;
-      if (eventPage) {
+      if (nextItemCache) {
+        loadedEventCount = totalEventCount = nextItemCache.loadedCount;
+      } else if (eventPage) {
         const olderEvents = (eventPage.Events || []) as SessionEventRecord[];
         mergedEvents = mergeSessionEventRecords(olderEvents, mergedEvents) as SessionEventRecord[];
         totalEventCount = Math.max(totalEventCount, Number(eventPage.Total ?? 0) || 0);
@@ -1346,12 +1434,14 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
       }
 
-      const rebuilt = rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
+      const rebuilt = itemTranscript ?? rebuildPersistedSessionHistory(fallbackHistory, mergedEvents, sessionId,
         historyProfileBySessionRef.current.get(sessionId) || 'flat-v1');
-      ingestLegacyApprovalHistory(rebuilt.messages, sessionId);
-      rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuilt.messages, currentSessionIdRef.current);
+      const rebuiltMessages = preserveRecoveredUserInput(rebuilt.messages, recoveredInputBySessionRef.current.get(sessionId));
+      if (nextItemCache) rememberSessionCache(eventHistoryBySessionRef.current, sessionId, nextItemCache, currentSessionIdRef.current);
+      ingestLegacyApprovalHistory(rebuiltMessages, sessionId);
+      rememberSessionCache(persistedTranscriptBySessionRef.current, sessionId, rebuiltMessages, currentSessionIdRef.current);
       const mergedHistory = mergeHistoryWithLive(
-        rebuilt.messages, visibleBaseline, useMessageStore.getState().messages);
+        rebuiltMessages, visibleBaseline, useMessageStore.getState().messages, Boolean(itemTranscript));
       rememberSessionCache(
         canonicalRunIdsBySessionRef.current,
         sessionId,
@@ -1384,7 +1474,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           snapshotSeqId: messagePage.SnapshotSeqId ?? historyState.snapshotSeqId,
         } : {}),
         preparing: false,
-        error: detailWarning,
+        error: detailWarning, retryOlderPage: Boolean(detailWarning),
       });
       void loadFeedbackForMessages(agentIdRef.current, sessionId, olderMessages);
     } catch (error) {
@@ -1397,9 +1487,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         // fresh first-page read. loadSession does not recursively reload 409s.
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
           nextCursor: null,
+          nextItemCursor: null,
+          historyView: undefined,
           hasMore: false,
           cursorSource: undefined,
           historyEpoch: undefined,
+          historyEpochSource: undefined,
           snapshotSeqId: undefined,
           dataSource: undefined,
           degraded: undefined,
@@ -1413,7 +1506,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       }
       if (isCurrent() && !(error instanceof CancelledError)) {
         useSessionStore.getState().setSessionMessageHistory(sessionId, {
-          ...historyState, preparing: false,
+          ...historyState, preparing: false, retryOlderPage: true,
           error: error instanceof Error ? error.message : '历史加载失败，请重试',
         });
       }
@@ -1447,7 +1540,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       hasMore: Boolean(history?.hasMore),
       loading: Boolean(historyHydrationGenerationRef.current === loadSessionGenerationRef.current
         || useSessionStore.getState().isLoadingSessions || history?.isLoadingInitial || history?.isLoadingOlder),
-      checkpoint: `${history?.nextCursor}:${events?.loadedCount}`,
+      checkpoint: `${history?.nextItemCursor ?? history?.nextCursor}:${events?.loadedCount}`,
       error: historyReadFailureRef.current?.generation === loadSessionGenerationRef.current
         ? historyReadFailureRef.current.message : undefined,
     };
@@ -1457,8 +1550,10 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     historySearchSnapshot,
     followAcceptedInteraction,
     fetchSessions,
+    fetchInitialSessions,
     loadMoreSessions,
-    loadSession,
+    loadSession: selectSession,
+    recoverSessionRun,
     loadOlderSessionMessages,
     createNewSession,
     startNewConversation,

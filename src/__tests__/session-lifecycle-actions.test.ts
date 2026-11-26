@@ -12,10 +12,10 @@ import type { Session } from '../components/chat/types.js';
 import { CancelledError } from '../api/client.js';
 import { sharedInteractionStore } from '../core/interaction/index.js';
 
-function lifecycle(api: Partial<ApiFacade>, restoreSession = false) {
+function lifecycle(api: Partial<ApiFacade>, restoreSession = false, currentSessionId: string | null = 'current') {
   let actions!: ReturnType<typeof useSessionLifecycle>;
   function Probe() {
-    actions = useSessionLifecycle({ agentId: 'agent-a', currentSessionId: 'current',
+    actions = useSessionLifecycle({ agentId: 'agent-a', currentSessionId,
       isMobile: false, uiCapabilities: { RunLifecycle: { Enabled: false } } as UiCapabilities, api: api as ApiFacade,
       resetCompaction: () => {}, restoreSession });
     return null;
@@ -109,6 +109,49 @@ describe('shared session lifecycle actions', () => {
     await pending;
     expect(useSessionStore.getState().sessions).toEqual([]);
     expect(useSessionStore.getState().currentSessionId).toBeNull();
+  });
+
+  it.each(['continue', 'switch', 'new'] as const)(
+    'honors %s immediately while the saved session history and directory are unresolved', async intent => {
+      useSessionStore.getState().setCurrentSessionId(null);
+      let finishList!: (value: Awaited<ReturnType<ApiFacade['listSessions']>>) => void;
+      let finishHistory!: (value: Awaited<ReturnType<ApiFacade['listSessionMessages']>>) => void;
+      const listSessionMessages: ApiFacade['listSessionMessages'] = vi.fn(sessionId => sessionId === 'saved'
+        ? new Promise(resolve => { finishHistory = resolve; })
+        : Promise.resolve({ Messages: [] }));
+      const actions = lifecycle({
+        listSessions: () => new Promise(resolve => { finishList = resolve; }),
+        listSessionMessages,
+        listSessionEvents: vi.fn().mockResolvedValue({ Events: [], Total: 0 }),
+        getResponseFeedback: vi.fn().mockResolvedValue(null),
+        getSession: vi.fn().mockResolvedValue({}),
+        createSession: vi.fn().mockResolvedValue({ SessionId: 'new' }),
+      }, true, null);
+      const directory = actions.fetchInitialSessions('agent-a', 'saved');
+      expect(await actions.waitForPendingSessionCreation()).toBe('saved');
+      if (intent === 'switch') await actions.loadSession('other');
+      if (intent === 'new') await actions.createNewSession();
+      const expected = intent === 'continue' ? 'saved' : intent === 'switch' ? 'other' : 'new';
+      expect(await actions.waitForPendingSessionCreation()).toBe(expected);
+      finishList({ Sessions: [{ SessionId: 'other' } as Session], Total: 500 });
+      finishHistory({ Messages: [] });
+      await directory;
+      expect(useSessionStore.getState().currentSessionId).toBe(expected);
+    },
+  );
+
+  it('retains the saved send target when both the directory and transcript fail', async () => {
+    useSessionStore.getState().setCurrentSessionId(null);
+    const createSession = vi.fn();
+    const actions = lifecycle({
+      listSessions: vi.fn().mockRejectedValue(new Error('directory unavailable')),
+      listSessionMessages: vi.fn().mockRejectedValue(new Error('history unavailable')),
+      createSession,
+    }, true, null);
+    await actions.fetchInitialSessions('agent-a', 'saved');
+    expect(await actions.waitForPendingSessionCreation()).toBe('saved');
+    expect(useSessionStore.getState().currentSessionId).toBe('saved');
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it('keeps a local draft when the initial list and later refresh return older sessions', async () => {

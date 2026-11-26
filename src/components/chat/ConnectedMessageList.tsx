@@ -212,6 +212,7 @@ export function ConnectedMessageList({
           requestToken,
           activeRequestToken: olderLoadTokenRef.current,
         })) return;
+        if (useSessionStore.getState().messageHistory[requestedSessionId]?.retryOlderPage) return;
         requestAnimationFrame(() => {
           if (!ownsOlderMessageScrollRequest({
             requestedSessionId,
@@ -412,6 +413,15 @@ export function ConnectedMessageList({
 
   return (
     <>
+      {currentMessageHistory?.dataSource === 'control_fallback' && currentMessageHistory.degraded && (
+        <div role="status" data-testid="history-fallback-warning" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-amber-700 dark:text-amber-300">
+          完整历史暂时不可用，当前仅显示已恢复的消息。你可以继续对话。
+          {onRetryHistory && currentSessionId && !currentMessageHistory.error && (
+            <button type="button" className="ml-3 underline" disabled={isLoadingInitialHistory || isStreaming}
+              onClick={() => void onRetryHistory(currentSessionId)}>重试完整历史</button>
+          )}
+        </div>
+      )}
       {currentMessageHistory?.persistenceDegraded && (
         <div role="status" data-testid="history-persistence-warning" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-amber-700 dark:text-amber-300">
           {persistenceWarning}
@@ -420,7 +430,10 @@ export function ConnectedMessageList({
       {currentMessageHistory?.error && (
         <div role="alert" data-testid="history-reload-error" className="mx-auto w-full max-w-3xl px-6 py-2 text-sm text-red-700 dark:text-red-300">
           {currentMessageHistory.error}
-          {onRetryHistory && currentSessionId && (
+          {currentMessageHistory.retryOlderPage && onLoadOlderSessionMessages ? (
+            <button type="button" className="ml-3 underline" disabled={currentMessageHistory.isLoadingOlder}
+              onClick={() => loadOlderHistory(true)}>重试</button>
+          ) : onRetryHistory && currentSessionId && (
             <button type="button" className="ml-3 underline" onClick={() => void onRetryHistory(currentSessionId)}>重试</button>
           )}
         </div>

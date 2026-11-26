@@ -54,7 +54,25 @@ export type BackendMessage = {
   ResponseId?: string;
 };
 
+export type SessionHistoryItem = {
+  ItemId: string;
+  SeqId: number;
+  InvocationId?: string;
+  EventType: string;
+  ContentRef?: { SeqId: number };
+  ToolRef?: { CallId: string; Kind: 'call' | 'result'; Name?: string; ScopeId?: string; ParentScopeId?: string;
+    Status: 'running' | 'completed' | 'error' };
+  InputCommandId?: string;
+  InboxInput?: { CommandId: string; Text?: string; ContentRef?: { SeqId: number } };
+  Event: import('../types/session-events.js').SessionEventRecord;
+};
+
 export type ListSessionMessagesOptions = {
+  historyView?: 'items-v1';
+  itemCursor?: string;
+  contentSeqId?: number;
+  contentOffset?: number;
+  contentPart?: 'inbox';
   agentId?: string;
   afterSeqId?: number;
   beforeSeqId?: number;
@@ -69,6 +87,12 @@ export type ListSessionMessagesOptions = {
 };
 
 export type ListSessionMessagesResponse = {
+  HistoryView?: 'items-v1';
+  Items?: SessionHistoryItem[];
+  NextItemCursor?: string | null;
+  ContentSeqId?: number;
+  ContentChunk?: string;
+  NextContentOffset?: number | null;
   Messages: BackendMessage[];
   LatestSeqId: number;
   HasMore: boolean;
@@ -79,6 +103,7 @@ export type ListSessionMessagesResponse = {
   CursorCompatibleWithRuntime?: boolean;
   SessionContractVersion?: number;
   HistoryEpoch?: string;
+  HistoryEpochSource?: string;
   PersistenceDegraded?: boolean;
   SnapshotSeqId?: number;
 };
@@ -88,6 +113,12 @@ export function normalizeSessionMessagesResponse(data: ListSessionMessagesRespon
   const optionalSeq = (value: unknown) => value !== null && value !== undefined
     && Number.isInteger(Number(value)) && Number(value) >= 0 ? Number(value) : undefined;
   return {
+    HistoryView: data.HistoryView,
+    Items: data.Items,
+    ContentSeqId: data.ContentSeqId,
+    ContentChunk: data.ContentChunk,
+    NextContentOffset: data.NextContentOffset,
+    NextItemCursor: data.NextItemCursor,
     Messages: data.Messages ?? [],
     LatestSeqId: Number.isFinite(Number(data.LatestSeqId)) ? Number(data.LatestSeqId) : 0,
     HasMore: Boolean(data.HasMore),
@@ -99,6 +130,7 @@ export function normalizeSessionMessagesResponse(data: ListSessionMessagesRespon
     CursorCompatibleWithRuntime: data.CursorCompatibleWithRuntime,
     SessionContractVersion: data.SessionContractVersion,
     HistoryEpoch: data.HistoryEpoch,
+    HistoryEpochSource: data.HistoryEpochSource,
     PersistenceDegraded: data.PersistenceDegraded,
     SnapshotSeqId: optionalSeq(data.SnapshotSeqId),
   };
@@ -113,6 +145,11 @@ export async function listSessionMessages(
     {
       AgentId: opts?.agentId,
       SessionId: sessionId,
+      HistoryView: opts?.historyView,
+      ItemCursor: opts?.itemCursor,
+      ContentSeqId: opts?.contentSeqId,
+      ContentOffset: opts?.contentOffset,
+      ContentPart: opts?.contentPart,
       AfterSeqId: opts?.afterSeqId,
       BeforeSeqId: opts?.beforeSeqId,
       CursorSource: opts?.cursorSource,
