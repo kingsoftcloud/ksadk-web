@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.19 - 2026-11-26
+
+- Page through long conversations while preserving the order of messages and the pairing of tool calls with their results.
+- Load large tool inputs and outputs on demand, and resume an interrupted read from the last confirmed chunk.
+- Restore the selected conversation and recover replies after a refresh or connection loss.
+
 ## 0.3.18 - 2026-11-11
 
 - Keep reasoning, tool calls and text in stream order, including when late reasoning snapshots arrive. Show one active thinking indicator.
