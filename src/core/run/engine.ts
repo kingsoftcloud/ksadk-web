@@ -299,7 +299,7 @@ export class RunEngineImpl implements RunEngine {
   }
 
   private getAguiClient(sessionId: string): AguiRunClient | null {
-    const transport = this.config.hostedChatTransport;
+    const transport = this.config.aguiResumeTransport || this.config.hostedChatTransport;
     if (transport?.Protocol !== 'ag-ui' || !transport.Endpoint) return null;
     if (!this.aguiClient || this.aguiThreadSessionId !== sessionId) {
       const client: AguiRunClient = new AguiRunClient({

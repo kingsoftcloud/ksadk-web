@@ -119,6 +119,8 @@ export type RunEngineConfig = {
   permissionMode?: PermissionMode;
   runtimeCapabilityMatrix?: RuntimeCapabilityMatrix;
   hostedChatTransport?: HostedChatTransport;
+  /** Retained independently of new-chat preference for pending AG-UI forms. */
+  aguiResumeTransport?: HostedChatTransport;
   checkpointResumePreviewEnabled?: boolean;
   /** RunAgent receipt + canonical SubscribeSessionEvents supported by this endpoint. */
   kernelSessionEventsEnabled?: boolean;
