@@ -10,9 +10,9 @@ the KSADK embedded static UI.
   and keeps private deployment shell files such as Docker, nginx, Helm, image
   tags, and runtime environment injection outside this repository.
 
-## Upgrade to 0.3.18
+## Upgrade to 0.3.19
 
-Install the release with `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.18`. Existing imports and React peer dependencies remain compatible. This release preserves the order of reasoning, tool calls and replies during streaming and replay. The [changelog](CHANGELOG.md) lists the conversation and interaction fixes.
+Install the release with `npm install --save-exact @kingsoftcloud/ksadk-web@0.3.19`. This release loads long conversation histories incrementally and resumes interrupted reads from the last confirmed page or content chunk. See the [changelog](CHANGELOG.md) for details.
 
 ## Public Demo
 
