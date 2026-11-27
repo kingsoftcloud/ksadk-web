@@ -271,6 +271,34 @@ test('keeps the reader anchored when older detail inserts rows after the first l
   expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });
 
+test('remeasuring a clipped row keeps the visible content below it in place', async ({ page }) => {
+  const marker = 'Visible text below the clipped message';
+  const clipped = Array.from({ length: 85 }, (_, i) => `Earlier plain text line ${i}`).join('\n');
+  const tail = Array.from({ length: 85 }, (_, i) => `Visible model reply line ${i}`).join('\n');
+  await intercept(page, () => ({ body: ok({ ...first(), HasMore: false, NextCursor: null,
+    Messages: [{ ...message('clipped', clipped, 4), Role: 'user' }, message('reading', marker + '\n' + tail, 9)] }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const target = page.locator('[data-message-id="reading"]');
+  const list = page.locator('[data-slot="message-list"]');
+  await expect(target).toBeVisible();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  await list.evaluate(el => {
+    const row = el.querySelector('[data-message-id="reading"]')!;
+    el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - 100;
+  });
+  await expect(target).toBeInViewport();
+  const offset = () => target.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  const beforeScroll = await list.evaluate(el => el.scrollTop);
+  await list.locator('[data-message-id="clipped"]').evaluate(row => {
+    const height = row.getBoundingClientRect().height;
+    (row as HTMLElement).style.height = `${height + 183}px`;
+  });
+  await expect.poll(() => list.evaluate((el, before) => el.scrollTop - before, beforeScroll)).toBe(183);
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+});
+
 test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });

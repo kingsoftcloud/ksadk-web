@@ -1,5 +1,5 @@
 const ROW = '[data-message-id]';
-const BLOCK = 'p, li, pre, h1, h2, h3, h4, h5, h6, td, th';
+const BLOCK = 'p, li, pre, h1, h2, h3, h4, h5, h6, td, th, button, summary';
 
 type TextAnchor = {
   text: string;
@@ -62,18 +62,23 @@ function visibleText(row: HTMLElement, viewportTop: number, readingTop: number, 
 
 export function captureReadingAnchors(scroller: HTMLDivElement, paragraphs: boolean): ReadingAnchor[] {
   const viewport = scroller.getBoundingClientRect();
-  const readingTop = viewport.top + 1;
+  const readingTop = viewport.top + Math.min(12, viewport.height / 4);
   const anchors: ReadingAnchor[] = [];
+  const clipped: ReadingAnchor[] = [];
   for (const row of scroller.querySelectorAll<HTMLElement>(ROW)) {
     const id = row.dataset.messageId;
     const rect = row.getBoundingClientRect();
     if (!id || rect.height <= 0 || rect.bottom <= readingTop || rect.top >= viewport.bottom) continue;
-    const text = paragraphs && row.dataset.historyRole === 'model'
+    const text = (paragraphs || rect.top < readingTop) && row.dataset.historyRole === 'model'
       ? visibleText(row, viewport.top, readingTop, viewport.bottom) : undefined;
-    anchors.push({ id, run: row.dataset.historyRun, top: rect.top - viewport.top, text });
+    const anchor = { id, run: row.dataset.historyRun, top: rect.top - viewport.top, text };
+    // The top of a clipped message or tool row can be far above what the
+    // reader sees. Prefer a real visible text line or the next visible row.
+    if (text || rect.top >= viewport.top) anchors.push(anchor);
+    else if (clipped.length < 3) clipped.push(anchor);
     if (anchors.length === 3) break;
   }
-  return anchors;
+  return anchors.concat(clipped).slice(0, 3);
 }
 
 function matchingText(row: HTMLElement, anchor: TextAnchor): DOMRect | undefined {
