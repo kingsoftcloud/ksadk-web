@@ -202,11 +202,16 @@ export function ConnectedMessageList({
     stickToBottomRef.current = false;
     userDetachedFromBottomRef.current = true;
     void onLoadOlderSessionMessages(currentSessionId).finally(() => {
-      if (!ownsOlderMessageScrollRequest({ requestedSessionId: currentSessionId,
-        activeSessionId: useSessionStore.getState().currentSessionId,
-        requestToken, activeRequestToken: olderLoadTokenRef.current })) return;
-      olderLoadTokenRef.current = null;
-      loadingOlderRef.current = false;
+      // A layout adjustment can dispatch a native scroll event after the
+      // history store has committed. Do not treat it as another gesture.
+      requestAnimationFrame(() => {
+        if (!ownsOlderMessageScrollRequest({ requestedSessionId: currentSessionId,
+          activeSessionId: useSessionStore.getState().currentSessionId,
+          requestToken, activeRequestToken: olderLoadTokenRef.current })) return;
+        previousScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
+        olderLoadTokenRef.current = null;
+        loadingOlderRef.current = false;
+      });
     });
   }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
 
@@ -228,7 +233,7 @@ export function ConnectedMessageList({
     const scroller = scrollRef.current;
     if (!scroller) return undefined;
 
-    const updateStickiness = () => {
+    const updateStickiness = (event?: Event) => {
       const distanceFromBottom =
         scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       const scrolledUp = scroller.scrollTop < previousScrollTopRef.current - 2;
@@ -236,6 +241,7 @@ export function ConnectedMessageList({
 
       const historyLoadDistance = canPrefetchHistory ? Math.max(200, scroller.clientHeight) : 200;
       if (
+        event &&
         !needsInitialScrollRef.current &&
         scrolledUp &&
         scroller.scrollTop < historyLoadDistance &&
