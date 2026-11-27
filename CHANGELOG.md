@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.20 - 2026-11-27
+
+- Resume AG-UI forms through their original transport when regular chat prefers Responses.
+
 ## 0.3.19 - 2026-11-26
 
 - Page through long conversations while preserving the order of messages and the pairing of tool calls with their results.
