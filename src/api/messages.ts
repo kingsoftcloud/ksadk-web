@@ -86,6 +86,45 @@ export type ListSessionMessagesOptions = {
   signal?: AbortSignal;
 };
 
+const SMALL_HISTORY_PAGE_LIMIT = 50;
+const SLOW_HISTORY_PAGE_MS = 2500;
+
+/** Race one smaller read against a stalled, immutable continuation page. */
+export async function readSessionMessagePage<T>(
+  options: ListSessionMessagesOptions | undefined,
+  read: (limit: number | undefined, signal: AbortSignal | undefined) => Promise<T>,
+): Promise<T> {
+  const { itemCursor, contentSeqId, limit, signal } = options ?? {};
+  if (!itemCursor || contentSeqId !== undefined || !limit || limit <= SMALL_HISTORY_PAGE_LIMIT) {
+    return read(limit, signal);
+  }
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal?.reason);
+  signal?.addEventListener('abort', cancel, { once: true });
+  const slow = Symbol('slow-history-page');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const primary = read(limit, controller.signal);
+    const first = await Promise.race([
+      primary,
+      new Promise<typeof slow>(resolve => { timer = setTimeout(() => resolve(slow), SLOW_HISTORY_PAGE_MS); }),
+    ]);
+    if (first !== slow) return first;
+    controller.signal.throwIfAborted();
+    try {
+      return await Promise.any([primary, read(SMALL_HISTORY_PAGE_LIMIT, controller.signal)]);
+    } catch (error) {
+      if (error instanceof AggregateError) throw error.errors[0];
+      throw error;
+    }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
 export type ListSessionMessagesResponse = {
   HistoryView?: 'items-v1';
   Items?: SessionHistoryItem[];
@@ -140,7 +179,7 @@ export async function listSessionMessages(
   sessionId: string,
   opts?: ListSessionMessagesOptions,
 ): Promise<ListSessionMessagesResponse> {
-  const data = await postJsonAction<ListSessionMessagesResponse>(
+  const data = await readSessionMessagePage(opts, (limit, signal) => postJsonAction<ListSessionMessagesResponse>(
     'ListSessionMessages',
     {
       AgentId: opts?.agentId,
@@ -155,12 +194,12 @@ export async function listSessionMessages(
       CursorSource: opts?.cursorSource,
       HistoryEpoch: opts?.historyEpoch,
       SnapshotSeqId: opts?.snapshotSeqId,
-      Limit: opts?.limit,
+      Limit: limit,
       IncludeReasoning: opts?.includeReasoning,
       IncludeToolEvents: opts?.includeToolEvents,
       IncludeAttachments: opts?.includeAttachments,
     },
-    opts,
-  );
+    { signal },
+  ));
   return normalizeSessionMessagesResponse(data);
 }
