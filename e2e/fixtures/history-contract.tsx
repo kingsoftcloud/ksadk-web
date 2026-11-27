@@ -38,7 +38,8 @@ function Harness() {
     </div>
     <ConnectedMessageList agentName="Fixture" isMobile={false}
       onDeleteFeedback={() => {}} onSubmitFeedback={() => {}}
-      onRespondToApproval={() => {}} onLoadOlderSessionMessages={actions.loadOlderSessionMessages} />
+      onRespondToApproval={() => {}} onLoadOlderSessionMessages={actions.loadOlderSessionMessages}
+      onPrefetchOlderSessionMessages={actions.prefetchOlderSessionMessages} />
   </main>;
 }
 

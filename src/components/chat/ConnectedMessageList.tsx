@@ -34,6 +34,7 @@ export type ConnectedMessageListProps = {
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
+  onPrefetchOlderSessionMessages?: (sessionId: string) => void;
   onRetryHistory?: (sessionId: string) => Promise<void>;
   interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
   className?: string;
@@ -55,6 +56,7 @@ export function ConnectedMessageList({
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
+  onPrefetchOlderSessionMessages,
   onRetryHistory,
   interactionRecords,
   className,
@@ -94,7 +96,6 @@ export function ConnectedMessageList({
   const isStreamingRef = useRef(isStreaming);
   const loadingOlderRef = useRef(false);
   const olderLoadTokenRef = useRef<symbol | null>(null);
-  const revealOlderPageRef = useRef(false);
   const needsInitialScrollRef = useRef(true);
   const previousLastMessageIdRef = useRef('');
   const revealRef = useRef(revealMessage);
@@ -165,7 +166,6 @@ export function ConnectedMessageList({
     previousScrollTopRef.current = 0;
     loadingOlderRef.current = false;
     olderLoadTokenRef.current = null;
-    revealOlderPageRef.current = false;
     previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
 
@@ -192,37 +192,37 @@ export function ConnectedMessageList({
     }
   }, [messages, scrollToBottom]);
 
-  const loadOlderHistory = useCallback((revealOlder = false) => {
-    const scroller = scrollRef.current;
-    if (!scroller || !currentSessionId || !currentMessageHistory?.hasMore
+  const loadOlderHistory = useCallback(() => {
+    if (!scrollRef.current || !currentSessionId || !currentMessageHistory?.hasMore
       || currentMessageHistory.isLoadingOlder || loadingOlderRef.current
       || !onLoadOlderSessionMessages) return;
-    const requestedSessionId = currentSessionId;
-    const requestToken = Symbol(requestedSessionId);
+    const requestToken = Symbol(currentSessionId);
     loadingOlderRef.current = true;
     olderLoadTokenRef.current = requestToken;
-    if (revealOlder) {
-      revealOlderPageRef.current = true;
-      stickToBottomRef.current = false;
-      userDetachedFromBottomRef.current = true;
-    }
-    void onLoadOlderSessionMessages(requestedSessionId).finally(() => {
-      // The transcript's layout effect consumes the reveal request on commit.
-      // Clear it after that commit if the page failed or had no new rows.
-      requestAnimationFrame(() => {
-        if (olderLoadTokenRef.current !== requestToken) return;
-        const sameSession = ownsOlderMessageScrollRequest({
-          requestedSessionId,
-          activeSessionId: useSessionStore.getState().currentSessionId,
-          requestToken,
-          activeRequestToken: olderLoadTokenRef.current,
-        });
-        if (sameSession) revealOlderPageRef.current = false;
-        olderLoadTokenRef.current = null;
-        loadingOlderRef.current = false;
-      });
+    stickToBottomRef.current = false;
+    userDetachedFromBottomRef.current = true;
+    void onLoadOlderSessionMessages(currentSessionId).finally(() => {
+      if (!ownsOlderMessageScrollRequest({ requestedSessionId: currentSessionId,
+        activeSessionId: useSessionStore.getState().currentSessionId,
+        requestToken, activeRequestToken: olderLoadTokenRef.current })) return;
+      olderLoadTokenRef.current = null;
+      loadingOlderRef.current = false;
     });
   }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
+
+  const prefetchCursor = currentMessageHistory?.historyView === 'items-v1'
+    && currentMessageHistory.hasMore && !currentMessageHistory.retryOlderPage
+    ? currentMessageHistory.nextItemCursor : null;
+  const canPrefetchHistory = Boolean(prefetchCursor && onPrefetchOlderSessionMessages);
+
+  useEffect(() => {
+    if (!currentSessionId || !canPrefetchHistory || isLoadingInitialHistory || isStreaming
+      || currentMessageHistory?.isLoadingOlder || revealMessage) return;
+    // Let the first paint settle, then keep one batch ahead of the reader.
+    const timer = window.setTimeout(() => onPrefetchOlderSessionMessages?.(currentSessionId), 120);
+    return () => window.clearTimeout(timer);
+  }, [currentSessionId, canPrefetchHistory, prefetchCursor, currentMessageHistory?.isLoadingOlder,
+    isLoadingInitialHistory, isStreaming, onPrefetchOlderSessionMessages, revealMessage]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -234,13 +234,15 @@ export function ConnectedMessageList({
       const scrolledUp = scroller.scrollTop < previousScrollTopRef.current - 2;
       previousScrollTopRef.current = scroller.scrollTop;
 
+      const historyLoadDistance = canPrefetchHistory ? Math.max(200, scroller.clientHeight) : 200;
       if (
         !needsInitialScrollRef.current &&
         scrolledUp &&
-        scroller.scrollTop < 200 &&
+        scroller.scrollTop < historyLoadDistance &&
         currentSessionId &&
         currentMessageHistory?.hasMore &&
         !currentMessageHistory.isLoadingOlder &&
+        !currentMessageHistory.retryOlderPage &&
         !loadingOlderRef.current &&
         onLoadOlderSessionMessages
       ) {
@@ -263,10 +265,32 @@ export function ConnectedMessageList({
       stickToBottomRef.current = distanceFromBottom < 96;
     };
 
+    const loadAtTop = () => {
+      if (canPrefetchHistory && scroller.scrollTop <= 1) loadOlderHistory();
+    };
+    const onWheel = (event: WheelEvent) => {
+      // A scroller already at its upper edge emits no further scroll events.
+      if (event.deltaY < 0) loadAtTop();
+    };
+    let touchY: number | undefined;
+    const onTouchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY; };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY;
+      if (y != null && touchY != null && y > touchY) loadAtTop();
+      touchY = y;
+    };
     updateStickiness();
     scroller.addEventListener('scroll', updateStickiness, { passive: true });
-    return () => scroller.removeEventListener('scroll', updateStickiness);
-  }, [currentMessageHistory, currentSessionId, loadOlderHistory, onLoadOlderSessionMessages]);
+    scroller.addEventListener('wheel', onWheel, { passive: true });
+    scroller.addEventListener('touchstart', onTouchStart, { passive: true });
+    scroller.addEventListener('touchmove', onTouchMove, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', updateStickiness);
+      scroller.removeEventListener('wheel', onWheel);
+      scroller.removeEventListener('touchstart', onTouchStart);
+      scroller.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [canPrefetchHistory, currentMessageHistory, currentSessionId, loadOlderHistory, onLoadOlderSessionMessages]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -416,7 +440,7 @@ export function ConnectedMessageList({
           {currentMessageHistory.error}
           {currentMessageHistory.retryOlderPage && onLoadOlderSessionMessages ? (
             <button type="button" className="ml-3 underline" disabled={currentMessageHistory.isLoadingOlder}
-              onClick={() => loadOlderHistory(true)}>重试</button>
+              onClick={loadOlderHistory}>重试</button>
           ) : onRetryHistory && currentSessionId && (
             <button type="button" className="ml-3 underline" onClick={() => void onRetryHistory(currentSessionId)}>重试</button>
           )}
@@ -430,14 +454,13 @@ export function ConnectedMessageList({
           <button type="button" data-testid="history-load-older"
             className="text-sm text-text-secondary underline disabled:opacity-50"
             disabled={currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing}
-            onClick={() => loadOlderHistory(true)}>
+            onClick={loadOlderHistory}>
             {currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing ? '正在加载…' : '加载更早的消息'}
           </button>
         </div>
       )}
       <ChatMessageList
         revealMessage={revealMessage}
-        revealOlderPageRef={revealOlderPageRef}
         emptyState={currentMessageHistory?.error || currentMessageHistory?.preparing ? null : emptyState}
         agentName={agentName}
         isMobile={isMobile}

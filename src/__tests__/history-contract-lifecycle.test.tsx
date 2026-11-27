@@ -66,6 +66,37 @@ describe('history continuation and recovery', () => {
     expect(listSessionEvents).not.toHaveBeenCalled();
   });
 
+  it('prefetches through fragments with one pinned cursor chain and commits it once on demand', async () => {
+    const item = (seq: number, type: string, text: string) => ({
+      ItemId: 'item-' + seq, SeqId: seq, EventType: type, InvocationId: 'run',
+      Event: { SeqId: seq, EventId: 'event-' + seq, SessionId: 's', InvocationId: 'run',
+        EventType: type, Content: { text, parts: [{ text }] } },
+    });
+    const result = (items: ReturnType<typeof item>[], cursor: string | null) => ({
+      HistoryView: 'items-v1', HistoryEpoch: 'epoch', SnapshotSeqId: 3, CursorSource: 'runtime',
+      LatestSeqId: 3, NextCursor: null, Messages: [], Items: items, HasMore: Boolean(cursor),
+      NextItemCursor: cursor,
+    });
+    const read = vi.fn()
+      .mockResolvedValueOnce(result([item(3, 'assistant_stream_delta', 'world')], 'before-3'))
+      .mockResolvedValueOnce(result([item(2, 'assistant_stream_delta', 'hello ')], 'before-2'))
+      .mockResolvedValueOnce(result([item(1, 'user_message', 'question')], null));
+    const actions = mount({ listSessionMessages: read });
+    await actions.loadSession('s');
+    actions.prefetchOlderSessionMessages('s');
+    actions.prefetchOlderSessionMessages('s');
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+    expect(useSessionStore.getState().messageHistory.s).toMatchObject({
+      nextItemCursor: 'before-3', isLoadingOlder: false,
+    });
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['world']);
+    await actions.loadOlderSessionMessages('s');
+    expect(read.mock.calls.slice(1).map(([, options]) => [options.itemCursor, options.historyEpoch, options.snapshotSeqId]))
+      .toEqual([['before-3', 'epoch', 3], ['before-2', 'epoch', 3]]);
+    expect(useMessageStore.getState().messages.map(row => row.content)).toEqual(['question', 'hello world']);
+    expect(useSessionStore.getState().messageHistory.s.hasMore).toBe(false);
+  });
+
   it('bridges an older giant invocation into a pinned Messages chain without replacing the rendered suffix', async () => {
     const pin = { CursorSource: 'runtime', HistoryEpoch: 'epoch', SnapshotSeqId: 100 };
     const legacy = { ...first, ...pin, DataSource: 'runtime', NextCursor: 9 };

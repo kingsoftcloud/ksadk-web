@@ -145,6 +145,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     recoverSessionRun,
     followAcceptedInteraction,
     loadOlderSessionMessages,
+    prefetchOlderSessionMessages,
     createNewSession,
     adoptCreatedSession,
     waitForPendingSessionCreation,
@@ -517,6 +518,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
               }
               onResumeCheckpoint={resumeCheckpoint}
               onLoadOlderSessionMessages={loadOlderSessionMessages}
+              onPrefetchOlderSessionMessages={prefetchOlderSessionMessages}
               onRetryHistory={loadSession}
               interactionRecords={interactionRecords}
             />

@@ -12,7 +12,7 @@ describe('chat message list contracts', () => {
 
     expect(source).toContain('stickToBottomRef');
     expect(source).toContain('userDetachedFromBottomRef');
-    expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('scroller.scrollTop < historyLoadDistance');
     expect(source).toContain('!needsInitialScrollRef.current');
     expect(source).toContain('scrolledUp &&');
     expect(source).toContain('const keepAttachedToBottom');
@@ -98,7 +98,7 @@ describe('chat message list contracts', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
 
     // Preload trigger near the top of the transcript.
-    expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('scroller.scrollTop < historyLoadDistance');
     expect(source).toContain('loadingOlderRef');
     const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
     expect(listSource).toContain('findVirtualMessageIndex(previous.offsets, top)');
@@ -223,7 +223,7 @@ describe('chat message list contracts', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
-    expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
+    expect(lifecycleSource).toContain('beforeSeqId: history.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
     // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The latest
     // event page hydrates after the readable message projection, and older

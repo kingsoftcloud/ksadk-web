@@ -96,7 +96,6 @@ export type ChatMessageListProps = {
   className?: string;
   /** Explicit navigation to a row that may be outside the virtual window. */
   revealMessage?: { id: string; request: number } | null;
-  revealOlderPageRef?: RefObject<boolean>;
 };
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
@@ -1024,7 +1023,6 @@ export function ChatMessageList({
   scrollRef,
   className,
   revealMessage,
-  revealOlderPageRef,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
   void checkpoints;
@@ -1088,31 +1086,30 @@ export function ChatMessageList({
     const scroller = scrollRef.current;
     if (!scroller || previous === layout || !previous.items.length) return;
 
-    const firstKey = previous.items[0].id || '0';
-    const prepended = (layout.keyIndex.get(firstKey) ?? 0) > 0;
-    const previousFirstSeq = previous.items[0].historyOrder?.seq;
-    const firstSeq = layout.items[0]?.historyOrder?.seq;
-    const extendedFirstRow = firstSeq != null && previousFirstSeq != null
-      && firstSeq < previousFirstSeq && layout.keyIndex.get(firstKey) === 0;
-    if ((prepended || extendedFirstRow) && revealOlderPageRef?.current) {
-      revealOlderPageRef.current = false;
-      scroller.scrollTop = 0;
-      syncViewport();
-      return;
+    if (previous.items !== layout.items) {
+      const firstKey = previous.items[0].id || '0';
+      const previousFirstSeq = previous.items[0].historyOrder?.seq;
+      const firstSeq = layout.items[0]?.historyOrder?.seq;
+      const prepended = (layout.keyIndex.get(firstKey) ?? 0) > 0
+        || (firstSeq != null && previousFirstSeq != null && firstSeq < previousFirstSeq);
+      if (!prepended) return;
     }
-
-    if (!prepended && previous.items !== layout.items) return;
     const top = Math.max(0, scroller.scrollTop - (rowsRef.current?.offsetTop ?? 0));
-    const index = findVirtualMessageIndex(previous.offsets, top);
-    const row = previous.items[index];
-    const nextIndex = row && layout.keyIndex.get(row.id || String(index));
-    if (nextIndex == null) return;
-    const delta = layout.offsets[nextIndex] - previous.offsets[index];
-    if (delta) {
-      scroller.scrollTop += delta;
-      syncViewport();
+    const start = findVirtualMessageIndex(previous.offsets, top);
+    // A partial row can be replaced when its earlier events arrive. Use the
+    // next retained row as the anchor if the first visible row disappeared.
+    for (let index = start; index < previous.items.length; index++) {
+      const row = previous.items[index];
+      const nextIndex = layout.keyIndex.get(row.id || String(index));
+      if (nextIndex == null) continue;
+      const delta = layout.offsets[nextIndex] - previous.offsets[index];
+      if (delta) {
+        scroller.scrollTop += delta;
+        syncViewport();
+      }
+      break;
     }
-  }, [layout, revealOlderPageRef, scrollRef, syncViewport]);
+  }, [layout, scrollRef, syncViewport]);
 
   const flushMeasurements = useCallback(() => {
     cancelAnimationFrame(measurementsFrameRef.current);

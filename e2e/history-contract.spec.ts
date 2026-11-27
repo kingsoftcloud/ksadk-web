@@ -61,7 +61,7 @@ test('short-page history has an explicit bounded loader without scrolling', asyn
   await expect(page.getByTestId('history-load-older')).toHaveCount(0);
 });
 
-test('explicit older pages appear at once in an overflowing transcript', async ({ page }) => {
+test('explicit older pages keep the reading position in an overflowing transcript', async ({ page }) => {
   const recent = Array.from({ length: 28 }, (_, index) =>
     message(`recent-${index}`, `Recent reply ${index}\n\n` + '- detail line\n'.repeat(index % 6 + 2), index + 28));
   const older = Array.from({ length: 20 }, (_, index) =>
@@ -76,13 +76,16 @@ test('explicit older pages appear at once in an overflowing transcript', async (
   await page.getByRole('button', { name: 'Open S' }).click();
   const latest = page.getByText('Recent reply 27', { exact: true });
   await expect(latest).toBeInViewport();
+  const offset = () => latest.evaluate(element =>
+    element.getBoundingClientRect().top - element.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
   await page.getByTestId('history-load-older').click();
   await expect(page.getByTestId('history-load-older')).toBeDisabled();
   await expect(latest).toBeInViewport();
   release();
-  await expect(page.getByText('Earlier reply 0', { exact: true })).toBeInViewport();
-  await expect(page.getByText('Earlier reply 1', { exact: true })).toBeInViewport();
   await expect(page.getByTestId('history-load-older')).toBeEnabled();
+  await expect(latest).toBeInViewport();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
   expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });
 
@@ -101,6 +104,7 @@ test('scroll-triggered older pages keep the visible message at the same offset',
   await page.getByRole('button', { name: 'Open S' }).click();
   await expect(page.getByText('Recent model text 24', { exact: true })).toBeInViewport();
   const scroller = page.locator('[data-slot="message-list"]');
+  await expect.poll(() => scroller.evaluate(element => (element as HTMLElement).style.scrollBehavior)).toBe('');
   await scroller.evaluate(element => { element.scrollTop = 100; });
   await expect(page.getByTestId('history-load-older')).toBeDisabled();
   const anchor = page.getByText('Recent model text 1', { exact: true });
@@ -114,6 +118,36 @@ test('scroll-triggered older pages keep the visible message at the same offset',
   await expect(page.getByTestId('history-load-older')).toHaveCount(0);
   await expect(anchor).toBeInViewport();
   await expect.poll(async () => Math.abs(await relativeOffset() - before)).toBeLessThanOrEqual(2);
+});
+
+test('one prefetched cursor is consumed by an upward gesture at the top of a short viewport', async ({ page }) => {
+  const itemPage = (seq: number, text: string, cursor: string | null) => ({
+    HistoryView: 'items-v1', CursorSource: 'runtime', HistoryEpoch: 'pinned', SnapshotSeqId: 2,
+    HasMore: Boolean(cursor), NextItemCursor: cursor, NextCursor: null, LatestSeqId: 2, Messages: [],
+    Items: [{ ItemId: `item-${seq}`, SeqId: seq, EventType: 'user_message',
+      Event: { SessionId: 's', EventId: `event-${seq}`, SeqId: seq, EventType: 'user_message',
+        Content: { parts: [{ text }] } } }],
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(itemPage(2, 'Recent short turn', 'before-2')) };
+    await held;
+    return { body: ok(itemPage(1, 'Older short turn', null)) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const recent = page.getByText('Recent short turn');
+  const older = page.getByTestId('history-load-older');
+  await expect(recent).toBeInViewport();
+  await expect.poll(() => calls.filter(call => call.action === 'ListSessionMessages').length).toBe(2);
+  await expect(older).toBeEnabled();
+  await page.locator('[data-slot="message-list"]').hover();
+  await page.mouse.wheel(0, -120);
+  await expect(older).toBeDisabled();
+  release();
+  await expect(page.getByText('Older short turn')).toBeInViewport();
+  await expect(older).toHaveCount(0);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });
 
 test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {

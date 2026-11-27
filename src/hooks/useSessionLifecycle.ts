@@ -7,7 +7,7 @@ import { projectConversationItems } from '../core/conversation/presentation.js';
 import { hydrateKernelRunHistory } from '../utils/kernel-run-history.js';
 import { hydrateVisibleInteractionHistory } from '../utils/interaction-history.js';
 import { useCallback, useEffect, useRef } from 'react';
-import { useSessionStore } from '../stores/session.js';
+import { useSessionStore, type SessionMessageHistory } from '../stores/session.js';
 import { useMessageStore } from '../stores/message.js';
 import { useUIStore } from '../stores/ui.js';
 import { useCheckpointStore } from '../stores/checkpoint.js';
@@ -36,7 +36,7 @@ import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { catchUpSessionItems, itemPageRecords, prependItemHistory } from '../utils/session-items.js';
-import type { ListSessionMessagesResponse } from '../api/messages.js';
+import type { ListSessionMessagesOptions, ListSessionMessagesResponse } from '../api/messages.js';
 import { dispatchRunEventToStores } from '../core/run/dispatcher.js';
 import { parseSseChunk, splitSseBuffer } from '../core/transport/sse-parser.js';
 import {
@@ -53,6 +53,7 @@ const SESSION_MESSAGES_PAGE_SIZE = 50;
 // bounded, then read a wider window once the Runtime has negotiated item cursors.
 const SESSION_INITIAL_HISTORY_ITEMS_PAGE_SIZE = 100;
 const SESSION_OLDER_HISTORY_ITEMS_PAGE_SIZE = 200;
+const MAX_HISTORY_FRAGMENT_PAGES = 3;
 // Tool-heavy runs can make 200 canonical events exceed half a MiB. The
 // durable Messages projection paints the readable transcript first; hydrate
 // a smaller newest-event window and page older runtime detail on upward scroll.
@@ -115,6 +116,71 @@ function reloadRequiredError(): ApiError {
     Code: 409, ReasonCode: 'HISTORY_RELOAD_REQUIRED', Data: null,
   });
 }
+
+function olderMessageOptions(history: SessionMessageHistory, signal?: AbortSignal): ListSessionMessagesOptions {
+  return {
+    signal,
+    historyView: history.historyView ?? (history.cursorSource === 'runtime'
+      && history.historyEpoch && history.snapshotSeqId !== undefined ? 'items-v1' : undefined),
+    itemCursor: history.nextItemCursor ?? undefined,
+    beforeSeqId: history.nextCursor ?? undefined,
+    cursorSource: history.cursorSource,
+    historyEpoch: history.historyEpoch,
+    snapshotSeqId: history.snapshotSeqId,
+    limit: history.historyView === 'items-v1' ? SESSION_OLDER_HISTORY_ITEMS_PAGE_SIZE : SESSION_MESSAGES_PAGE_SIZE,
+    includeReasoning: true,
+    includeToolEvents: true,
+    includeAttachments: true,
+  };
+}
+
+type ItemProjection = ReturnType<typeof prependItemHistory>;
+type MessageHistoryPage = Awaited<ReturnType<ApiFacade['listSessionMessages']>>;
+
+async function readOlderItemBatch(
+  api: ApiFacade, sessionId: string, options: ListSessionMessagesOptions,
+  previous: ItemProjection, profile: 'flat-v1' | 'agent-block-v1',
+  read: (options: ListSessionMessagesOptions) => Promise<MessageHistoryPage>,
+  first: MessageHistoryPage,
+) {
+  const visibleIds = new Set(previous.messages.map(row => row.id));
+  let cursor = options.itemCursor;
+  let page = first;
+  let boundary = previous.firstSeq;
+  let projection = previous;
+  let items: NonNullable<ListSessionMessagesResponse['Items']> = [];
+  const requested = new Set([cursor]);
+  for (let count = 1; ; count++) {
+    if (!compatibleHistorySource({
+      CursorSource: options.cursorSource, HistoryEpoch: options.historyEpoch, SnapshotSeqId: options.snapshotSeqId,
+    }, page) || page.HistoryView !== 'items-v1') throw reloadRequiredError();
+    const records = itemPageRecords(page, sessionId, cursor);
+    if (records.length && boundary != null && records.at(-1)!.SeqId >= boundary) throw reloadRequiredError();
+    boundary = records[0]?.SeqId ?? boundary;
+    items = records.concat(items);
+    projection = prependItemHistory(records, api, sessionId, page, profile, projection);
+    if (!page.HasMore || count >= MAX_HISTORY_FRAGMENT_PAGES
+      || projection.messages.some(row => row.role !== 'system' && !visibleIds.has(row.id))) {
+      return { page, items, projection };
+    }
+    // The first window may only complete an existing row. Read through to the
+    // next user-visible row before updating the transcript and cursor together.
+    cursor = page.NextItemCursor!;
+    if (requested.has(cursor)) throw reloadRequiredError();
+    requested.add(cursor);
+    page = await read({ ...options, itemCursor: cursor, beforeSeqId: undefined });
+  }
+}
+
+type OlderItemBatch = Awaited<ReturnType<typeof readOlderItemBatch>>;
+type OlderHistoryPrefetch = {
+  sessionId: string;
+  generation: number;
+  cursor: string;
+  projection: ItemProjection;
+  controller: AbortController;
+  result: Promise<OlderItemBatch | null>;
+};
 
 function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>) {
   return {
@@ -241,6 +307,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const historyHydrationGenerationRef = useRef<number | null>(null);
   const historyReadFailureRef = useRef<{ generation: number; message: string } | null>(null);
   const olderMessageRequestRef = useRef(new Map<string, symbol>());
+  const olderPrefetchRef = useRef<OlderHistoryPrefetch | null>(null);
+  useEffect(() => () => {
+    if (olderPrefetchRef.current?.sessionId !== ctx.currentSessionId) return;
+    olderPrefetchRef.current?.controller.abort();
+    olderPrefetchRef.current = null;
+  }, [ctx.currentSessionId, api]);
   const canonicalRunIdsBySessionRef = useRef(new Map<string, Set<string>>());
   const persistedTranscriptBySessionRef = useRef(new Map<string, Message[]>());
   const recoveredInputBySessionRef = useRef(new Map<string, Message>());
@@ -590,6 +662,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const profile = bootstrapPresentationProfile(capabilities.ConversationSurface, agentBlockRendererCatalog);
       historyProfileBySessionRef.current.set(sessionId, profile);
       const previousSessionId = currentSessionIdRef.current;
+      olderPrefetchRef.current?.controller.abort();
+      olderPrefetchRef.current = null;
       const generation = ++loadSessionGenerationRef.current;
       historyHydrationGenerationRef.current = generation;
       historyReadFailureRef.current = null;
@@ -1249,6 +1323,31 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     [agentId, api, disconnectRun, fetchSessions],
   );
 
+  const prefetchOlderSessionMessages = useCallback((sessionId: string) => {
+    const history = useSessionStore.getState().messageHistory[sessionId];
+    const projection = eventHistoryBySessionRef.current.get(sessionId)?.itemProjection;
+    if (currentSessionIdRef.current !== sessionId || history?.historyView !== 'items-v1'
+      || !history.nextItemCursor || !history.hasMore || !projection || history.isLoadingInitial
+      || history.isLoadingOlder || history.retryOlderPage) return;
+    const generation = loadSessionGenerationRef.current;
+    const cursor = history.nextItemCursor;
+    const outstanding = olderPrefetchRef.current;
+    if (outstanding?.sessionId === sessionId && outstanding.generation === generation
+      && outstanding.cursor === cursor && outstanding.projection === projection) return;
+    outstanding?.controller.abort();
+    const controller = new AbortController();
+    const options = olderMessageOptions(history, controller.signal);
+    const profile = historyProfileBySessionRef.current.get(sessionId) || 'flat-v1';
+    const read = (pageOptions: ListSessionMessagesOptions) => {
+      controller.signal.throwIfAborted();
+      return api.listSessionMessages(sessionId, pageOptions);
+    };
+    const result = read(options).then(page =>
+      readOlderItemBatch(api, sessionId, options, projection, profile, read, page),
+    ).catch(() => null);
+    olderPrefetchRef.current = { sessionId, generation, cursor, projection, controller, result };
+  }, [api]);
+
   const loadOlderSessionMessages = useCallback(async (sessionId: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
     const historyState = useSessionStore.getState().messageHistory[sessionId];
@@ -1276,24 +1375,21 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     } };
     try {
       useSessionStore.getState().setSessionMessageHistoryLoading(sessionId, true);
+      const options = olderMessageOptions(historyState, signal);
+      const read = (pageOptions: ListSessionMessagesOptions) =>
+        readPreparedHistory(() => api.listSessionMessages(sessionId, pageOptions), preparation);
+      const readMessages = async () => {
+        const pending = olderPrefetchRef.current;
+        if (!signal && pending?.sessionId === sessionId && pending.generation === generation
+          && pending.cursor === options.itemCursor && pending.projection === cachedEvents?.itemProjection) {
+          const batch = await pending.result;
+          if (olderPrefetchRef.current === pending) olderPrefetchRef.current = null;
+          if (batch) return { page: batch.page, batch };
+        }
+        return { page: await read(options), batch: null };
+      };
       const [messageResult, eventResult] = await Promise.allSettled([
-        canLoadOlderMessages
-          ? readPreparedHistory(() => api.listSessionMessages(sessionId, {
-              signal,
-              historyView: historyState.historyView ?? (historyState.cursorSource === 'runtime'
-                && historyState.historyEpoch && historyState.snapshotSeqId !== undefined ? 'items-v1' : undefined),
-              itemCursor: historyState.nextItemCursor ?? undefined,
-              beforeSeqId: historyState.nextCursor ?? undefined,
-              cursorSource: historyState.cursorSource,
-              historyEpoch: historyState.historyEpoch,
-              snapshotSeqId: historyState.snapshotSeqId,
-              limit: historyState.historyView === 'items-v1'
-                ? SESSION_OLDER_HISTORY_ITEMS_PAGE_SIZE : SESSION_MESSAGES_PAGE_SIZE,
-              includeReasoning: true,
-              includeToolEvents: true,
-              includeAttachments: true,
-            }), preparation)
-          : Promise.resolve(null),
+        canLoadOlderMessages ? readMessages() : Promise.resolve(null),
         canLoadOlderEvents && cachedEvents
           ? readPreparedHistory(() => api.listSessionEvents(sessionId, {
               signal,
@@ -1322,7 +1418,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         && [429, 502, 503, 504].includes(eventResult.reason.code);
       if (eventResult.status === 'rejected' && !detailUnavailable) throw eventResult.reason;
       if (messageResult.status === 'rejected') throw messageResult.reason;
-      const messagePage = messageResult.value;
+      let messagePage = messageResult.value?.page ?? null;
       const eventPage = eventResult.status === 'fulfilled' ? eventResult.value : null;
       let detailWarning = detailUnavailable
         ? '消息正文已加载，部分事件详情暂时读取失败，请重试加载更早记录。'
@@ -1344,11 +1440,17 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       let itemTranscript: { messages: Message[]; canonicalRunIds: string[] } | undefined;
       let nextItemCache: SessionEventHistoryCache | undefined;
       if (messagePage?.HistoryView === 'items-v1') {
-        const incoming = itemPageRecords(messagePage, sessionId, historyState.nextItemCursor);
         const previous = cachedEvents?.itemProjection;
+        const profile = historyProfileBySessionRef.current.get(sessionId) || 'flat-v1';
+        const batch = messageResult.value?.batch ?? (!signal && previous && options.itemCursor
+          ? await readOlderItemBatch(api, sessionId, options, previous, profile, read, messagePage) : null);
+        if (!isCurrent()) return;
+        const itemPage = batch?.page ?? messagePage;
+        messagePage = itemPage;
+        const incoming = batch?.items ?? itemPageRecords(itemPage, sessionId, historyState.nextItemCursor);
         const boundary = previous?.firstSeq ?? historyState.nextCursor;
         if (!previous && (historyState.historyView === 'items-v1' || historyState.cursorSource !== 'runtime'
-          || !historyState.historyEpoch || historyState.snapshotSeqId !== messagePage.SnapshotSeqId
+          || !historyState.historyEpoch || historyState.snapshotSeqId !== itemPage.SnapshotSeqId
           || boundary == null)) throw reloadRequiredError();
         if (incoming.length && boundary != null && incoming.at(-1)!.SeqId >= boundary) throw reloadRequiredError();
         // The old Messages projection covered whole newer invocations. Keep
@@ -1357,14 +1459,13 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
           messages: visibleBaseline, boundary: boundary!,
           canonicalRunIds: [...(canonicalRunIdsBySessionRef.current.get(sessionId) || [])],
         };
-        const projection = prependItemHistory(incoming, api, sessionId, messagePage,
-          historyProfileBySessionRef.current.get(sessionId) || 'flat-v1', previous);
+        const projection = batch?.projection ?? prependItemHistory(incoming, api, sessionId, itemPage, profile, previous);
         itemTranscript = projection;
         if (legacySuffix) {
           const suffix = legacySuffix.messages.filter(row => {
             const seq = row.historyOrder?.seq;
             return seq == null || seq >= legacySuffix.boundary
-              || (messagePage.HasMore && projection.firstSeq != null && seq < projection.firstSeq);
+              || (itemPage.HasMore && projection.firstSeq != null && seq < projection.firstSeq);
           });
           const suffixIds = new Set(suffix.map(message => message.id));
           itemTranscript = { messages: orderTranscript([...projection.messages.filter(row => !suffixIds.has(row.id)), ...suffix]),
@@ -1372,11 +1473,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         }
         const records = incoming.filter(item => !item.ContentRef).map(item => item.Event);
         const count = (previous ? cachedEvents!.loadedCount : 0) + incoming.length;
-        nextItemCache = { itemProjection: projection, legacySuffix, hasMore: messagePage.HasMore,
+        nextItemCache = { itemProjection: projection, legacySuffix, hasMore: itemPage.HasMore,
           events: [...records.filter(event => event.EventType === 'run_status' || eventHasTerminalRunStatus(event)),
             ...(cachedEvents?.events || [])],
-          loadedCount: count, total: count, historyEpoch: messagePage.HistoryEpoch,
-          snapshotSeqId: messagePage.SnapshotSeqId, cursorSource: messagePage.CursorSource };
+          loadedCount: count, total: count, historyEpoch: itemPage.HistoryEpoch,
+          snapshotSeqId: itemPage.SnapshotSeqId, cursorSource: itemPage.CursorSource };
         for (const event of records) ingestSessionEventRecord(event, sessionId);
         historyReadFailureRef.current = null;
         detailWarning = undefined;
@@ -1560,6 +1661,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     loadSession: selectSession,
     recoverSessionRun,
     loadOlderSessionMessages,
+    prefetchOlderSessionMessages,
     createNewSession,
     startNewConversation,
     adoptCreatedSession,
