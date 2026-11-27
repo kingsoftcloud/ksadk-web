@@ -237,7 +237,11 @@ export function ConnectedMessageList({
       const distanceFromBottom =
         scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       const scrolledUp = scroller.scrollTop < previousScrollTopRef.current - 2;
+      const scrolledDown = scroller.scrollTop > previousScrollTopRef.current + 2;
       previousScrollTopRef.current = scroller.scrollTop;
+      // A short viewport may be at both edges while older messages load.
+      // Its resize/scroll events cannot reattach it to the live edge.
+      if (loadingOlderRef.current) return;
 
       const historyLoadDistance = canPrefetchHistory ? Math.max(200, scroller.clientHeight) : 200;
       if (
@@ -259,7 +263,7 @@ export function ConnectedMessageList({
       }
 
       if (userDetachedFromBottomRef.current) {
-        const returnedToBottom = distanceFromBottom <= 12;
+        const returnedToBottom = Boolean(event && scrolledDown && distanceFromBottom <= 12);
         userDetachedFromBottomRef.current = !returnedToBottom;
         stickToBottomRef.current = returnedToBottom;
         return;
@@ -304,7 +308,7 @@ export function ConnectedMessageList({
     // only while the reader is attached to the bottom; a manual upward scroll
     // flips stickToBottomRef and leaves the viewport alone.
     const keepAttachedToBottom = () => {
-      if (!needsInitialScrollRef.current && !stickToBottomRef.current) return;
+      if (loadingOlderRef.current || (!needsInitialScrollRef.current && !stickToBottomRef.current)) return;
       scroller.scrollTop = scroller.scrollHeight;
       previousScrollTopRef.current = scroller.scrollTop;
       scroller.dispatchEvent(new Event('scroll'));
@@ -319,7 +323,7 @@ export function ConnectedMessageList({
 
   useEffect(() => {
     const scroller = scrollRef.current;
-    if (!scroller) return;
+    if (!scroller || loadingOlderRef.current) return;
 
     // Initial session load: bypass the stickiness gate. The gate is unreliable
     // here because effect A (updateStickiness) runs first and, seeing scrollTop=0

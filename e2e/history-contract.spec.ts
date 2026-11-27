@@ -305,6 +305,28 @@ test('remeasuring a clipped row keeps the visible content below it in place', as
   await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
 });
 
+test('a short viewport stays detached from the live edge while prepending', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 850 });
+  const current = 'Current view stays in the same place';
+  const recent = 'Latest model reply\n'.repeat(16);
+  const older = 'Older tall model reply\n'.repeat(35);
+  await intercept(page, (_body, index) => ({ body: ok(index === 1 ? { ...first(),
+    Messages: [{ ...message('current', current, 9), Role: 'user' }, message('latest', recent, 10)],
+  } : { ...first(), Messages: [message('earlier', older, 4)], HasMore: false, NextCursor: null }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const list = page.locator('[data-slot="message-list"]');
+  const target = list.getByText(current, { exact: true });
+  await expect(target).toBeInViewport();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  const offset = () => target.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByTestId('history-load-older')).toHaveCount(0);
+  await expect(target).toBeInViewport();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+});
+
 test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
