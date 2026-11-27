@@ -101,8 +101,10 @@ describe('chat message list contracts', () => {
     expect(source).toContain('scroller.scrollTop < historyLoadDistance');
     expect(source).toContain('loadingOlderRef');
     const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
-    expect(listSource).toContain('findVirtualMessageIndex(previous.offsets, scrollTop)');
-    expect(listSource).toContain('layout.offsets[nextIndex] - offset');
+    const anchorSource = readFileSync(resolve(repoRoot, 'src/components/chat/HistoryAnchoredRows.tsx'), 'utf8');
+    expect(listSource).toContain('scroller.scrollTop + delta');
+    expect(anchorSource).toContain('getSnapshotBeforeUpdate');
+    expect(anchorSource).toContain('readingAnchorDelta(scroller, snapshot.anchors)');
   });
 
   it('preloads additional session pages before the sidebar reaches the bottom', () => {
@@ -177,8 +179,10 @@ describe('chat message list contracts', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 
     expect(source).toContain('calculateVirtualMessageWindow');
-    expect(source).toContain('visibleItems.map((entry)');
-    expect(source).toContain('style={{ height: virtualWindow.totalHeight }}');
+    expect(source).toContain('window={virtualWindow}');
+    const rows = readFileSync(resolve(repoRoot, 'src/components/chat/HistoryAnchoredRows.tsx'), 'utf8');
+    expect(rows).toContain('window.visibleItems');
+    expect(rows).toContain('style={{ height: window.totalHeight }}');
     expect(source).not.toContain('messages.map((message, index) =>');
   });
 

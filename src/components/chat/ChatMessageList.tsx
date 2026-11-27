@@ -35,13 +35,14 @@ import { MessageMarkdown } from '../MessageMarkdown';
 import { AgentBlockView } from './AgentBlockView';
 import { ProcessingBlocksView, type ProcessingBlocksViewProps } from './ProcessingBlocksView';
 import { StatusBanner } from './StatusBanner';
+import { HistoryAnchoredRows } from './HistoryAnchoredRows.js';
 import { RunProgressIndicator } from './RunProgressIndicator';
 import { runProgressLabel } from '../../utils/run-progress.js';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
-import { calculateVirtualMessageWindow, createVirtualMessageLayout, findVirtualMessageIndex } from '../../utils/message-virtualization.js';
+import { calculateVirtualMessageWindow, createVirtualMessageLayout } from '../../utils/message-virtualization.js';
 import { distanceFromBottom, shouldShowScrollToBottom } from '../../utils/chat-scroll.js';
 import { continuesAssistantTurn } from '../../utils/chat-message-grouping.js';
 
@@ -118,12 +119,16 @@ function approvalLevelTone(level?: string) {
 
 function MeasuredMessageRow({
   messageId,
+  role,
+  run,
   top,
   onMeasure,
   children,
   highlighted,
 }: {
   messageId: string;
+  role: Message['role'];
+  run?: string;
   top: number;
   onMeasure: (messageId: string, height: number) => void;
   children: ReactNode;
@@ -146,6 +151,8 @@ function MeasuredMessageRow({
     <div
       ref={rowRef}
       data-message-id={messageId}
+      data-history-role={role}
+      data-history-run={run}
       data-search-target={highlighted || undefined}
       tabIndex={-1}
       style={{ position: 'absolute', top, left: 0, right: 0 }}
@@ -1045,7 +1052,6 @@ export function ChatMessageList({
   const pendingHeightsRef = useRef(new Map<string, number>());
   const measurementsFrameRef = useRef(0);
   const viewportFrameRef = useRef(0);
-  const historyAnchorRef = useRef<{ key: string; offset: number; scrollTop: number } | null>(null);
   const historyReserveRef = useRef<HTMLDivElement>(null);
 
   const positionHistoryAnchor = useCallback((scroller: HTMLDivElement, target: number) => {
@@ -1100,55 +1106,18 @@ export function ChatMessageList({
   }), [layout, scrollTop, clientHeight]);
 
   useLayoutEffect(() => {
-    const previous = committedLayoutRef.current;
     committedLayoutRef.current = layout;
-    const scroller = scrollRef.current;
-    if (!scroller || previous === layout || !previous.items.length) return;
+  }, [layout]);
 
-    const transcriptChanged = previous.items !== layout.items;
-    if (transcriptChanged) {
-      historyAnchorRef.current = null;
-      const firstKey = previous.items[0].id || '0';
-      const previousFirstSeq = previous.items[0].historyOrder?.seq;
-      const firstSeq = layout.items[0]?.historyOrder?.seq;
-      const prepended = (layout.keyIndex.get(firstKey) ?? 0) > 0
-        || (firstSeq != null && previousFirstSeq != null && firstSeq < previousFirstSeq);
-      if (!prepended) {
-        if (historyReserveRef.current) historyReserveRef.current.style.height = '0px';
-        return;
-      }
-    }
+  const applyReadingAnchor = useCallback((scroller: HTMLDivElement, delta: number, historyChanged: boolean) => {
+    if (historyChanged) positionHistoryAnchor(scroller, scroller.scrollTop + delta);
+    else scroller.scrollTop += delta;
+    syncViewport();
+  }, [positionHistoryAnchor, syncViewport]);
 
-    const scrollTop = scroller.scrollTop;
-    const retainedAnchor = historyAnchorRef.current;
-    if (retainedAnchor && Math.abs(retainedAnchor.scrollTop - scrollTop) < 1) {
-      const index = layout.keyIndex.get(retainedAnchor.key);
-      if (index != null) {
-        positionHistoryAnchor(scroller, layout.offsets[index] - retainedAnchor.offset);
-        retainedAnchor.scrollTop = scroller.scrollTop;
-        syncViewport();
-        return;
-      }
-    }
-    historyAnchorRef.current = null;
-    const start = findVirtualMessageIndex(previous.offsets, scrollTop);
-    // Keep the same anchor when the next layout replaces estimates above it.
-    // A partial boundary row can disappear, so find the next retained row.
-    for (let index = start; index < previous.items.length; index++) {
-      const key = previous.items[index].id || String(index);
-      const nextIndex = layout.keyIndex.get(key);
-      if (nextIndex == null) continue;
-      const offset = previous.offsets[index] - scrollTop;
-      const target = layout.offsets[nextIndex] - offset;
-      if (target !== scrollTop) {
-        if (transcriptChanged) positionHistoryAnchor(scroller, target);
-        else scroller.scrollTop = target;
-        if (transcriptChanged) historyAnchorRef.current = { key, offset, scrollTop: scroller.scrollTop };
-        syncViewport();
-      }
-      break;
-    }
-  }, [layout, positionHistoryAnchor, scrollRef, syncViewport]);
+  const resetHistoryReserve = useCallback(() => {
+    if (historyReserveRef.current) historyReserveRef.current.style.height = '0px';
+  }, []);
 
   const flushMeasurements = useCallback(() => {
     cancelAnimationFrame(measurementsFrameRef.current);
@@ -1189,7 +1158,6 @@ export function ChatMessageList({
     });
   }, [scrollRef, syncViewport]);
 
-  const visibleItems = virtualWindow.visibleItems;
   const unprojectedInputHistory = useMemo(
     () => missingSubmittedInputHistory(messages, interactionRecords, catalogRegistry),
     [messages, interactionRecords, catalogRegistry],
@@ -1257,11 +1225,18 @@ export function ChatMessageList({
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <>
-            {messages.length > 0 && <div style={{ height: virtualWindow.totalHeight }} className="relative">
-              {visibleItems.map((entry) => (
+            {messages.length > 0 && <HistoryAnchoredRows
+              layout={layout}
+              window={virtualWindow}
+              scrollRef={scrollRef}
+              onAnchor={applyReadingAnchor}
+              onReset={resetHistoryReserve}
+              renderRow={(entry) => (
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}
                 messageId={entry.item.id || String(entry.index)}
+                role={entry.item.role}
+                run={entry.item.runId || entry.item.invocationId}
                 highlighted={entry.item.id === revealMessage?.id}
                 top={entry.top}
                 onMeasure={updateMeasuredHeight}
@@ -1297,8 +1272,8 @@ export function ChatMessageList({
                   </div>
                 ))}
               </MeasuredMessageRow>
-              ))}
-            </div>}
+              )}
+            />}
           </>
         )}
         {progressLabel && <div data-testid={showWaitingIndicator ? 'waiting-first-token' : undefined}>
@@ -1313,7 +1288,7 @@ export function ChatMessageList({
           aria-label="回到底部"
           data-distance-from-bottom={Math.round(remainingDistance)}
           onClick={() => {
-            if (historyReserveRef.current) historyReserveRef.current.style.height = '0px';
+            resetHistoryReserve();
             if (onScrollToBottom) {
               onScrollToBottom();
               return;

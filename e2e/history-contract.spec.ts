@@ -150,6 +150,48 @@ test('one prefetched cursor is consumed by an upward gesture at the top of a sho
   expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });
 
+test('keeps the visible line when a long reply gains earlier text within its paragraph', async ({ page }) => {
+  const marker = 'The exact reading line stays in place';
+  const lines = (label: string, count: number) =>
+    Array.from({ length: count }, (_, index) => `${label} line ${index} has distinct diagnostic text.`).join('\n');
+  const visible = lines('Retained intro', 70) + '\n**' + marker + '**\n' + lines('Retained tail', 55);
+  const prefix = lines('Earlier paragraph', 15) + '\n\n' + lines('Earlier within the same paragraph', 40) + '\n';
+  const itemPage = (seq: number, text: string, cursor: string | null) => ({
+    HistoryView: 'items-v1', CursorSource: 'runtime', HistoryEpoch: 'partial-reply', SnapshotSeqId: 2,
+    HasMore: Boolean(cursor), NextItemCursor: cursor, NextCursor: null, LatestSeqId: 2, Messages: [],
+    Items: [{ ItemId: `item-${seq}`, SeqId: seq, EventType: 'assistant_stream_delta', InvocationId: 'same-run',
+      Event: { SessionId: 's', EventId: `event-${seq}`, SeqId: seq,
+        EventType: 'assistant_stream_delta', InvocationId: 'same-run', Content: { parts: [{ text }] } } }],
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(itemPage(2, visible, 'before-2')) };
+    await held;
+    return { body: ok(itemPage(1, prefix, null)) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const list = page.locator('[data-slot="message-list"]');
+  const line = list.getByText(marker, { exact: true });
+  await expect(line).toBeVisible();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  await line.evaluate(el => {
+    const scroll = el.closest<HTMLElement>('[data-slot="message-list"]')!;
+    scroll.scrollTop += el.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+  });
+  const offset = () => line.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  const older = page.getByTestId('history-load-older');
+  await older.click();
+  await expect(older).toBeDisabled();
+  release();
+  await expect(older).toHaveCount(0);
+  await expect(list.getByText('Earlier paragraph line 0 has distinct diagnostic text.', { exact: false })).toBeVisible();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
 test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
