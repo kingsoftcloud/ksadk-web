@@ -55,8 +55,13 @@ function visibleText(row: HTMLElement, viewportTop: number, readingTop: number, 
       before.setEnd(node, caret?.offset ?? legacy!.startOffset);
       offset = Math.min(text.length - 1, before.toString().length);
     }
+    const line = rectAt(block, offset);
+    // A tall block (or a tool summary inside it) can overlap the viewport
+    // while the caret resolves to text above the reader's visible area.
+    if (!line || line.bottom <= readingTop || line.top >= bottom
+      || line.top + line.height / 2 < viewportTop) continue;
     const occurrenceFromEnd = candidates.slice(index + 1).filter(next => next.textContent === text).length;
-    return { text, offset, occurrenceFromEnd, top: (rectAt(block, offset)?.top ?? rect.top) - viewportTop };
+    return { text, offset, occurrenceFromEnd, top: line.top - viewportTop };
   }
 }
 

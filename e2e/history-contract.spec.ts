@@ -273,10 +273,10 @@ test('keeps the reader anchored when older detail inserts rows after the first l
 
 test('remeasuring a clipped row keeps the visible content below it in place', async ({ page }) => {
   const marker = 'Visible text below the clipped message';
-  const clipped = Array.from({ length: 85 }, (_, i) => `Earlier plain text line ${i}`).join('\n');
+  const clipped = Array.from({ length: 85 }, (_, i) => `Earlier model text line ${i}`).join('\n');
   const tail = Array.from({ length: 85 }, (_, i) => `Visible model reply line ${i}`).join('\n');
   await intercept(page, () => ({ body: ok({ ...first(), HasMore: false, NextCursor: null,
-    Messages: [{ ...message('clipped', clipped, 4), Role: 'user' }, message('reading', marker + '\n' + tail, 9)] }) }));
+    Messages: [message('clipped', clipped, 4), message('reading', marker + '\n' + tail, 9)] }) }));
   await page.getByRole('button', { name: 'Open S' }).click();
   const target = page.locator('[data-message-id="reading"]');
   const list = page.locator('[data-slot="message-list"]');
@@ -293,6 +293,12 @@ test('remeasuring a clipped row keeps the visible content below it in place', as
   const beforeScroll = await list.evaluate(el => el.scrollTop);
   await list.locator('[data-message-id="clipped"]').evaluate(row => {
     const height = row.getBoundingClientRect().height;
+    const firstText = row.querySelector('p')?.firstChild;
+    if (!firstText) throw new Error('Clipped text node not found');
+    // Reproduce the browser choosing a caret above the visible reading line.
+    Object.defineProperty(document, 'caretPositionFromPoint', {
+      configurable: true, value: () => ({ offsetNode: firstText, offset: 0 }),
+    });
     (row as HTMLElement).style.height = `${height + 183}px`;
   });
   await expect.poll(() => list.evaluate((el, before) => el.scrollTop - before, beforeScroll)).toBe(183);
