@@ -182,7 +182,8 @@ describe('chat message list contracts', () => {
     expect(source).toContain('window={virtualWindow}');
     const rows = readFileSync(resolve(repoRoot, 'src/components/chat/HistoryAnchoredRows.tsx'), 'utf8');
     expect(rows).toContain('window.visibleItems');
-    expect(rows).toContain('style={{ height: window.totalHeight }}');
+    expect(rows).toContain('const gap = layout.offsets[row.index] - layout.offsets[end]');
+    expect(rows).toContain('const tail = window.totalHeight - layout.offsets[end]');
     expect(source).not.toContain('messages.map((message, index) =>');
   });
 

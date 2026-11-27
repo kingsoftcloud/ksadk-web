@@ -95,6 +95,7 @@ export function ConnectedMessageList({
   const previousScrollTopRef = useRef(0);
   const isStreamingRef = useRef(isStreaming);
   const loadingOlderRef = useRef(false);
+  const revealOlderRef = useRef(false);
   const olderLoadTokenRef = useRef<symbol | null>(null);
   const needsInitialScrollRef = useRef(true);
   const previousLastMessageIdRef = useRef('');
@@ -165,6 +166,7 @@ export function ConnectedMessageList({
     userDetachedFromBottomRef.current = false;
     previousScrollTopRef.current = 0;
     loadingOlderRef.current = false;
+    revealOlderRef.current = false;
     olderLoadTokenRef.current = null;
     previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
@@ -192,12 +194,13 @@ export function ConnectedMessageList({
     }
   }, [messages, scrollToBottom]);
 
-  const loadOlderHistory = useCallback(() => {
+  const loadOlderHistory = useCallback((fromScroll = false) => {
     if (!scrollRef.current || !currentSessionId || !currentMessageHistory?.hasMore
       || currentMessageHistory.isLoadingOlder || loadingOlderRef.current
       || !onLoadOlderSessionMessages) return;
     const requestToken = Symbol(currentSessionId);
     loadingOlderRef.current = true;
+    revealOlderRef.current = fromScroll;
     olderLoadTokenRef.current = requestToken;
     stickToBottomRef.current = false;
     userDetachedFromBottomRef.current = true;
@@ -211,6 +214,7 @@ export function ConnectedMessageList({
         previousScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
         olderLoadTokenRef.current = null;
         loadingOlderRef.current = false;
+        revealOlderRef.current = false;
       });
     });
   }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
@@ -253,7 +257,7 @@ export function ConnectedMessageList({
         !currentMessageHistory?.isLoadingOlder &&
         !loadingOlderRef.current
       ) {
-        loadOlderHistory();
+        loadOlderHistory(true);
       }
 
       if (isStreamingRef.current && scrolledUp) {
@@ -273,7 +277,7 @@ export function ConnectedMessageList({
     };
 
     const loadAtTop = () => {
-      if (canAutoLoadHistory && scroller.scrollTop <= 1) loadOlderHistory();
+      if (canAutoLoadHistory && scroller.scrollTop <= 1) loadOlderHistory(true);
     };
     const onWheel = (event: WheelEvent) => {
       // A scroller already at its upper edge emits no further scroll events.
@@ -447,7 +451,7 @@ export function ConnectedMessageList({
           {currentMessageHistory.error}
           {currentMessageHistory.retryOlderPage && onLoadOlderSessionMessages ? (
             <button type="button" className="ml-3 underline" disabled={currentMessageHistory.isLoadingOlder}
-              onClick={loadOlderHistory}>重试</button>
+              onClick={() => loadOlderHistory()}>重试</button>
           ) : onRetryHistory && currentSessionId && (
             <button type="button" className="ml-3 underline" onClick={() => void onRetryHistory(currentSessionId)}>重试</button>
           )}
@@ -461,7 +465,7 @@ export function ConnectedMessageList({
           <button type="button" data-testid="history-load-older"
             className="text-sm text-text-secondary underline disabled:opacity-50"
             disabled={currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing}
-            onClick={loadOlderHistory}>
+            onClick={() => loadOlderHistory()}>
             {currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing ? '正在加载…' : '加载更早的消息'}
           </button>
         </div>
@@ -491,7 +495,9 @@ export function ConnectedMessageList({
         checkpoints={checkpointResumeEnabled ? checkpoints : []}
         onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}
+        followLatest={stickToBottomRef}
         historyScrollPending={loadingOlderRef}
+        historyRevealPending={revealOlderRef}
         sessionId={currentSessionId}
         className={className}
       />

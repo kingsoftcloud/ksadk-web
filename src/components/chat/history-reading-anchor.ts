@@ -65,7 +65,7 @@ function visibleText(row: HTMLElement, viewportTop: number, readingTop: number, 
   }
 }
 
-export function captureReadingAnchors(scroller: HTMLDivElement, paragraphs: boolean): ReadingAnchor[] {
+export function captureReadingAnchors(scroller: HTMLDivElement, paragraphs: boolean, resizing = false): ReadingAnchor[] {
   const viewport = scroller.getBoundingClientRect();
   const readingTop = viewport.top + Math.min(12, viewport.height / 4);
   const anchors: ReadingAnchor[] = [];
@@ -79,7 +79,8 @@ export function captureReadingAnchors(scroller: HTMLDivElement, paragraphs: bool
     const anchor = { id, run: row.dataset.historyRun, top: rect.top - viewport.top, text };
     // The top of a clipped message or tool row can be far above what the
     // reader sees. Prefer a real visible text line or the next visible row.
-    if (text || rect.top >= viewport.top) anchors.push(anchor);
+    const clippedNearTop = resizing && rect.top < viewport.top && rect.bottom < viewport.top + viewport.height / 3;
+    if ((text && !clippedNearTop) || rect.top >= viewport.top) anchors.push(anchor);
     else if (clipped.length < 3) clipped.push(anchor);
     if (anchors.length === 3) break;
   }

@@ -94,7 +94,9 @@ export type ChatMessageListProps = {
   /** Interaction records for the current session, used for read-only status and anchors. */
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  followLatest?: RefObject<boolean>;
   historyScrollPending?: RefObject<boolean>;
+  historyRevealPending?: RefObject<boolean>;
   sessionId?: string | null;
   className?: string;
   /** Explicit navigation to a row that may be outside the virtual window. */
@@ -123,7 +125,6 @@ function MeasuredMessageRow({
   messageId,
   role,
   run,
-  top,
   onMeasure,
   children,
   highlighted,
@@ -131,7 +132,6 @@ function MeasuredMessageRow({
   messageId: string;
   role: Message['role'];
   run?: string;
-  top: number;
   onMeasure: (messageId: string, height: number) => void;
   children: ReactNode;
   highlighted?: boolean;
@@ -157,7 +157,7 @@ function MeasuredMessageRow({
       data-history-run={run}
       data-search-target={highlighted || undefined}
       tabIndex={-1}
-      style={{ position: 'absolute', top, left: 0, right: 0 }}
+      className="relative flow-root"
     >
       {children}
     </div>
@@ -1030,7 +1030,9 @@ export function ChatMessageList({
   onResumeCheckpoint,
   interactionRecords,
   scrollRef,
+  followLatest,
   historyScrollPending,
+  historyRevealPending,
   sessionId,
   className,
   revealMessage,
@@ -1233,7 +1235,9 @@ export function ChatMessageList({
               layout={layout}
               window={virtualWindow}
               scrollRef={scrollRef}
+              followLatest={followLatest}
               historyScrollPending={historyScrollPending}
+              historyRevealPending={historyRevealPending}
               sessionId={sessionId}
               onAnchor={applyReadingAnchor}
               onReset={resetHistoryReserve}
@@ -1244,7 +1248,6 @@ export function ChatMessageList({
                 role={entry.item.role}
                 run={entry.item.runId || entry.item.invocationId}
                 highlighted={entry.item.id === revealMessage?.id}
-                top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >
                 {entry.item.readHistoryContent ? <DeferredHistoryContent key={entry.item.historyContentKey || entry.item.id} label={entry.item.content} read={entry.item.readHistoryContent} /> : entry.item.role === 'system' ? (

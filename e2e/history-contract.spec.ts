@@ -120,6 +120,40 @@ test('scroll-triggered older pages keep the visible message at the same offset',
   await expect.poll(async () => Math.abs(await relativeOffset() - before)).toBeLessThanOrEqual(2);
 });
 
+test('an upward gesture at the edge reveals a small part of the newly prepended history', async ({ page }) => {
+  const recent = [
+    { ...message('reading', 'I am reading this turn', 9), Role: 'user' },
+    message('last', 'Recent reply\n'.repeat(60), 10),
+  ];
+  const earlier = message('earlier', 'Earlier reply\n'.repeat(15) + '\n\nEnd of the earlier reply', 4);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok({ ...first(), Messages: recent }) };
+    await held;
+    return { body: ok({ ...first(), Messages: [earlier], HasMore: false, NextCursor: null }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const list = page.locator('[data-slot="message-list"]');
+  await expect.poll(() => list.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+  await expect.poll(() => list.evaluate(el => el.style.scrollBehavior)).toBe('');
+  await list.evaluate(el => { el.scrollTop = 0; });
+  const loader = page.getByTestId('history-load-older');
+  await expect(loader).toBeDisabled();
+  const anchor = list.locator('[data-message-id="reading"]');
+  const position = () => anchor.evaluate(el => {
+    const viewport = el.closest('[data-slot="message-list"]')!;
+    return { offset: el.getBoundingClientRect().top - viewport.getBoundingClientRect().top,
+      reveal: Math.min(48, viewport.clientHeight * 0.08) };
+  });
+  const before = await position();
+  release();
+  await expect(loader).toHaveCount(0);
+  await expect.poll(async () => Math.abs((await position()).offset - before.offset - before.reveal))
+    .toBeLessThanOrEqual(2);
+  await expect(list.getByText('End of the earlier reply', { exact: true })).toBeInViewport();
+});
+
 test('one prefetched cursor is consumed by an upward gesture at the top of a short viewport', async ({ page }) => {
   const itemPage = (seq: number, text: string, cursor: string | null) => ({
     HistoryView: 'items-v1', CursorSource: 'runtime', HistoryEpoch: 'pinned', SnapshotSeqId: 2,
