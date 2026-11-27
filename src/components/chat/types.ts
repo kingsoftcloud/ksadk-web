@@ -38,6 +38,7 @@ export type Message = {
   historyOrder?: { seq: number; index?: number; group?: number };
   responseId?: string;
   invocationId?: string;
+  commandId?: string;
   eventId?: string;
   traceId?: string;
   rootSpanId?: string;

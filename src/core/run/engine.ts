@@ -354,6 +354,7 @@ export class RunEngineImpl implements RunEngine {
     sessionId?: string | null;
     onSessionCreated?: (sessionId: string) => void;
     onInvocationCreated?: (invocationId: string) => void;
+    onCommandAdmitted?: (commandId: string) => void;
     onSessionUpsert?: (sessionId: string) => void;
     /** Legacy Responses HTTP admission, before the output stream finishes. */
     onDispatchResult?: (accepted: boolean) => void;
@@ -484,6 +485,7 @@ export class RunEngineImpl implements RunEngine {
             draft.text,
             invocationId,
             this.abortController?.signal,
+            draft.onCommandAdmitted,
           );
           if (aguiResult.status === 'interrupted') {
             settlement = 'cancelled';

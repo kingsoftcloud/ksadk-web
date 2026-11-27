@@ -747,6 +747,8 @@ function buildUnorderedMessageFromSessionEvent(event) {
     timestamp: event.Timestamp || Date.now(),
     eventType,
     eventId: event.EventId || undefined,
+    ...(eventType === 'user_message' && typeof event.Metadata?.runtime_metadata?.command_id === 'string'
+      ? { commandId: event.Metadata.runtime_metadata.command_id } : {}),
     responseId: responseId || undefined,
     traceId: traceId || undefined,
     rootSpanId: rootSpanId || undefined,

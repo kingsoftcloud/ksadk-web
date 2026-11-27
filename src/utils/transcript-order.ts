@@ -68,10 +68,11 @@ function contentChanged(message: Message, previous?: Message): boolean {
 export function mergeHistoryWithLive(
   history: Message[], baseline: Message[], currentMessages: Message[], preserveOlderItems = false,
 ): Message[] {
-  const durableInputs = new Set(history.filter(message => message.role === 'user' && !isPendingInput(message))
-    .map(runOf).filter(Boolean));
-  const current = durableInputs.size ? currentMessages.filter(message =>
-    !isPendingInput(message) || !durableInputs.has(runOf(message))) : currentMessages;
+  const durableInputs = history.filter(message => message.role === 'user' && !isPendingInput(message));
+  const durableRuns = new Set(durableInputs.map(runOf).filter(Boolean));
+  const durableCommands = new Set(durableInputs.map(message => message.commandId).filter(Boolean));
+  const current = currentMessages.filter(message => !isPendingInput(message)
+    || (!durableRuns.has(runOf(message)) && !durableCommands.has(message.commandId)));
   // A session switch restores the local echo before the history request. It
   // can be unchanged for the entire request and still be absent upstream.
   const pending = current.filter(message => isPendingInput(message) && !history.some(row => row.id === message.id));

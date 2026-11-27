@@ -1067,12 +1067,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     void loadSession(sessionId, false, undefined, invocationId);
   }, [loadSession]);
 
-  const bindCachedUserInput = useCallback((sessionId: string, messageId: string, invocationId: string) => {
+  const bindCachedUserInput = useCallback((sessionId: string, messageId: string, binding: Pick<Message, 'commandId' | 'invocationId'>) => {
     const cache = sessionTranscriptCacheRef.current;
     const transcript = cache.get(sessionId);
     if (transcript?.some(message => message.id === messageId)) {
       cache.set(sessionId, transcript.map(message => message.id === messageId
-        ? { ...message, invocationId } : message));
+        ? { ...message, ...binding } : message));
     }
   }, []);
 
