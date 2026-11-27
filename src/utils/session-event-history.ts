@@ -7,6 +7,7 @@ export async function readDshRunStatus(
   api: ApiFacade, sessionId: string,
   source: { CursorSource?: string; HistoryEpoch?: string; HistoryEpochSource?: string; SnapshotSeqId?: number },
   cached?: { events: SessionEventRecord[]; loadedCount: number; total: number; hasMore?: boolean }, signal?: AbortSignal,
+  fresh = false,
 ): Promise<SessionEventRecord | undefined> {
   if (source.CursorSource !== 'runtime') return;
   const latest = cached?.events.filter(event => event.EventType === 'run_status')
@@ -18,7 +19,7 @@ export async function readDshRunStatus(
   const page = await api.listSessionEvents(sessionId, {
     eventTypes: ['run_status'], limit: 1, cursorSource: source.CursorSource,
     ...(serverAnchor ? { beforeSeqId: (source.SnapshotSeqId ?? 0) + 1 }
-      : { historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId }), signal,
+      : fresh ? {} : { historyEpoch: source.HistoryEpoch, snapshotSeqId: source.SnapshotSeqId }), signal,
   });
   if (serverAnchor) {
     // Only the facade understands this epoch. Confirm a candidate from the
@@ -33,7 +34,11 @@ export async function readDshRunStatus(
       && row.SeqId === seq && row.EventType === 'run_status' ? row : undefined;
   }
   if (page.CursorSource === source.CursorSource && page.HistoryEpoch === source.HistoryEpoch
-    && page.SnapshotSeqId === source.SnapshotSeqId) return page.Events[0] as SessionEventRecord | undefined;
+    && (fresh ? typeof page.SnapshotSeqId === 'number' && page.SnapshotSeqId >= (source.SnapshotSeqId ?? 0)
+      : page.SnapshotSeqId === source.SnapshotSeqId)) {
+    const row = page.Events[0] as SessionEventRecord | undefined;
+    if (row?.EventType === 'run_status' && (row.SessionId === sessionId || (!fresh && !row.SessionId))) return row;
+  }
 }
 
 export type ListSessionEventsPage = {

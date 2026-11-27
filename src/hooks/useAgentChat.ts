@@ -110,6 +110,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     loadMoreSessions,
     loadSession,
     recoverSessionRun,
+    bindCachedUserInput,
     followAcceptedInteraction,
     loadOlderSessionMessages,
     historySearchSnapshot,
@@ -167,6 +168,7 @@ export function useAgentChat(options: AgentChatOptions = {}) {
     queuedDraftRef,
     onRunSettled: refreshSessionsAfterRun,
     onRunRecovered: recoverSessionRun,
+    onUserInputBound: bindCachedUserInput,
     conversationIdRef: controller ? activeConversationIdRef : undefined,
     conversationId,
     onSessionCreated: (sessionId, submittedConversationId, submittedAgentId = agentId) => {

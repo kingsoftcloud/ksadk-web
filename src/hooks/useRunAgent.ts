@@ -43,6 +43,7 @@ type RunAgentContext = {
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
   onRunSettled?: (sessionId: string | null, agentId?: string, outcome?: import('../core/run/types.js').RunSettlement) => void;
+  onUserInputBound?: (sessionId: string, messageId: string, invocationId: string) => void;
   onRunRecovered?: (sessionId: string, invocationId: string) => void;
   onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
   /** Stable owner before native creation. Omit for the legacy Hosted shell. */
@@ -112,6 +113,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     conversationIdRef,
     queuedDraftRef,
     onRunSettled,
+    onUserInputBound,
     onRunRecovered,
     onSessionCreated,
     waitForPendingSessionCreation,
@@ -302,6 +304,9 @@ export function useRunAgent(ctx: RunAgentContext) {
         sessionId: owner.sessionId,
         onInvocationCreated: invocationId => {
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, { invocationId });
+          if (owner.sessionId && draft.optimisticMessageId && ctx.agentIdRef.current === owner.agentId) {
+            onUserInputBound?.(owner.sessionId, draft.optimisticMessageId, invocationId);
+          }
           // Bind the submitted input by identity, never by text or by the last
           // user row (which can belong to a queued turn or another session).
           if (owner.isVisible()) {
@@ -357,7 +362,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       return dispatch;
     }
     return started;
-  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunRecovered, onRunSettled, onSessionCreated, outbox, publishQueue, waitForPendingSessionCreation]);
+  }, [appendOptimisticAssistant, appendOptimisticMessage, config, ctx.agentIdRef, currentSessionIdRef, drainQueue, getOwner, onRunRecovered, onRunSettled, onSessionCreated, onUserInputBound, outbox, publishQueue, waitForPendingSessionCreation]);
 
   const stopGeneration = useCallback(() => {
     const engine = getEngine(currentSessionIdRef.current);

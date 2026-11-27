@@ -77,6 +77,17 @@ describe('transcript order independent of wall clocks', () => {
 });
 
 describe('history/live merge', () => {
+  it('keeps cached inputs across a stale session reload and replaces each with its own durable echo', () => {
+    const [first, firstAnswer, second, secondAnswer] = rounds();
+    const local = { ...second, id: 'local-2', eventType: 'optimistic_user_message', historyOrder: undefined };
+    const queued = { ...local, id: 'local-3', invocationId: undefined };
+    const cached = [first, firstAnswer, local, queued];
+    expect(ids(mergeHistoryWithLive([first, firstAnswer], cached, cached))).toEqual(['q1', 'a1', 'local-2', 'local-3']);
+    expect(ids(mergeHistoryWithLive([first, firstAnswer, secondAnswer], cached, cached)))
+      .toEqual(['q1', 'a1', 'local-2', 'a2', 'local-3']);
+    expect(ids(mergeHistoryWithLive(rounds(), cached, cached))).toEqual(['q1', 'a1', 'q2', 'a2', 'local-3']);
+  });
+
   it('preserves the recovered run input until its durable row arrives without merging identical text from other turns', () => {
     const [previousInput, previousAnswer, durableInput, answer] = rounds();
     const optimisticInput = { ...durableInput, id: 'optimistic', content: previousInput.content };

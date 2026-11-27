@@ -48,9 +48,10 @@ describe('session lifecycle reconnect errors', () => {
       }] } } as UiCapabilities;
     useBootstrapStore.getState().setCapabilities(dsh);
     const source = { CursorSource: 'runtime', HistoryEpoch: 'native', SnapshotSeqId: 250 };
-    const listSessionEvents = vi.fn()
-      .mockResolvedValueOnce({ ...source, Events: [{ SeqId: 248, InvocationId: 'original', EventType: 'assistant_message' }], Total: 100 })
-      .mockResolvedValueOnce({ ...source, Events: [{ SeqId: 180, InvocationId: 'original', EventType: 'run_status', Metadata: { status } }] });
+    const listSessionEvents = vi.fn(async (_sessionId: string, options?: { eventTypes?: string[] }) => options?.eventTypes
+      ? { ...source, SnapshotSeqId: 251, Events: [{ SessionId: 'long-dsh-session', SeqId: 251,
+        InvocationId: 'original', EventType: 'run_status', Metadata: { status } }] }
+      : { ...source, Events: [{ SeqId: 248, InvocationId: 'original', EventType: 'assistant_message' }], Total: 100 });
     const subscribeRunEvents = vi.fn().mockRejectedValue(new CancelledError());
     const getSession = vi.fn();
     const actions = lifecycle({ listSessionMessages: vi.fn().mockResolvedValue({
@@ -58,8 +59,8 @@ describe('session lifecycle reconnect errors', () => {
     }), listSessionEvents, subscribeRunEvents, getSession });
     await actions.loadSession('long-dsh-session');
     expect(getSession).not.toHaveBeenCalled();
-    expect(listSessionEvents).toHaveBeenLastCalledWith('long-dsh-session', expect.objectContaining({
-      limit: 1, eventTypes: ['run_status'], historyEpoch: 'native', snapshotSeqId: 250,
+    expect(listSessionEvents).toHaveBeenCalledWith('long-dsh-session', expect.objectContaining({
+      limit: 1, eventTypes: ['run_status'],
     }));
     if (status === 'in_progress') {
       expect(subscribeRunEvents).toHaveBeenCalledWith(expect.objectContaining({

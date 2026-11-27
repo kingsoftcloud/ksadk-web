@@ -707,6 +707,20 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       resetCompaction();
       let visibleBaseline = useMessageStore.getState().messages;
       runSubscriptionAbortRef.current?.abort();
+      const canResume = capabilities.RunLifecycle.Enabled && capabilities.RunLifecycle.Resume;
+      const dshReplay = isReplayableDshTransport(resolveHostedChatTransport(capabilities));
+      type SessionRunState = Partial<Awaited<ReturnType<ApiFacade['getSession']>>>;
+      const settleCurrentRun = (session: SessionRunState) => {
+        if (!isStillCurrentSession() || !session.ActiveInvocationId) return;
+        const store = useStreamingStore.getState();
+        if (store.getSessionActivity(sessionId)?.runId !== session.ActiveInvocationId) return;
+        const terminal = terminalActivityForRunEvent({
+          EventType: 'run_status', Content: { status: session.ActiveRunStatus },
+        });
+        if (!terminal) return;
+        store.setSessionStreaming(sessionId, false);
+        store.updateActivity({ sessionId, ...terminal, countEvent: false });
+      };
       if (isMobile) {
         useUIStore.getState().setMobileSidebarOpen(false);
       }
@@ -734,6 +748,22 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         if (!isStillCurrentSession()) {
           return;
         }
+        // Display a known terminal as soon as the live state returns. The
+        // history page stays pinned while its optional event details load.
+        const freshDshStatus = dshReplay && messagesData.CursorSource === 'runtime'
+          && !!messagesData.HistoryEpoch && messagesData.HistoryEpochSource !== 'server-event-anchor';
+        const liveRunState = (dshReplay || canResume) ? (async (): Promise<SessionRunState> => {
+          let session: SessionRunState = canResume ? await api.getSession(sessionId) : {};
+          settleCurrentRun(session);
+          if (freshDshStatus && isStillCurrentSession()) {
+            const event = await readDshRunStatus(api, sessionId, messagesData, undefined, signal, true);
+            if (event) {
+              session = { ActiveInvocationId: event.InvocationId, ActiveRunStatus: sessionEventRunStatus(event) };
+              settleCurrentRun(session);
+            }
+          }
+          return session;
+        })().then(session => ({ session }), error => ({ error })) : undefined;
         const items = messagesData.HistoryView === 'items-v1'
           ? itemPageRecords(messagesData, sessionId) : undefined;
         const itemTranscript = items && prependItemHistory(items, api, sessionId, messagesData, profile);
@@ -875,7 +905,6 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
         const lastSeqId = Math.max(messagesData.LatestSeqId || 0, latestEventSeqId);
 
         const runtimeCapabilities = useBootstrapStore.getState().capabilities || uiCapabilities;
-        const dshReplay = isReplayableDshTransport(resolveHostedChatTransport(capabilities));
         if (runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Checkpoints) {
           void api.listSessionCheckpoints({
             agentId: agentIdRef.current,
@@ -909,12 +938,12 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
 
         // 正式判据是后端的 ActiveRunStatus。旧本地 runtime 会漏投该字段，
         // 此时仅对近期更新、仍带 invocation 的会话做一次兼容恢复。
-        const canResume = runtimeCapabilities.RunLifecycle.Enabled && runtimeCapabilities.RunLifecycle.Resume;
-        if (dshReplay || canResume) {
+        if (liveRunState) {
           try {
-            let session: Partial<Awaited<ReturnType<ApiFacade['getSession']>>> = canResume
-              ? await api.getSession(sessionId) : {};
-            if (dshReplay && !session.ActiveInvocationId && isStillCurrentSession()) {
+            const result = await liveRunState;
+            if ('error' in result) throw result.error;
+            let session = result.session;
+            if (dshReplay && !freshDshStatus && !session.ActiveInvocationId && isStillCurrentSession()) {
               const cache = eventHistoryBySessionRef.current.get(sessionId);
               const statusEvent = await readDshRunStatus(api, sessionId, messagesData,
                 cache && compatibleHistorySource(messagesData, eventCacheSource(cache)) ? cache : undefined, signal);
@@ -929,9 +958,16 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               || (status === '' && isRecentlyUpdatedSession(session))
             );
             if (isActive && session.ActiveInvocationId !== recoveredInvocationId) {
-              const activity = useStreamingStore.getState().getSessionActivity(sessionId);
+              const store = useStreamingStore.getState();
+              const activity = store.getSessionActivity(sessionId);
+              const localStreaming = store.isSessionStreaming(sessionId);
+              // A snapshot or repeat subscription must not revive the same
+              // run after its owner observed completion, or replace a new run.
+              if (activity?.runId && (activity.runId === session.ActiveInvocationId
+                ? ['completed', 'failed', 'stopped'].includes(activity.status)
+                : localStreaming && activity.source === 'run')) return;
               const nativeOwner = (capabilities.KernelSessionEventsByCommand === true || dshReplay)
-                && useStreamingStore.getState().isSessionStreaming(sessionId)
+                && localStreaming
                 && activity?.source === 'run' && activity.runId === session.ActiveInvocationId
                 && ['connecting', 'running', 'waiting'].includes(activity.status);
               if (nativeOwner) {
@@ -1030,6 +1066,15 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     if (input) rememberSessionCache(recoveredInputBySessionRef.current, sessionId, input, sessionId);
     void loadSession(sessionId, false, undefined, invocationId);
   }, [loadSession]);
+
+  const bindCachedUserInput = useCallback((sessionId: string, messageId: string, invocationId: string) => {
+    const cache = sessionTranscriptCacheRef.current;
+    const transcript = cache.get(sessionId);
+    if (transcript?.some(message => message.id === messageId)) {
+      cache.set(sessionId, transcript.map(message => message.id === messageId
+        ? { ...message, invocationId } : message));
+    }
+  }, []);
 
   const fetchSessions = useCallback(
     async (
@@ -1664,6 +1709,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
     loadMoreSessions,
     loadSession: selectSession,
     recoverSessionRun,
+    bindCachedUserInput,
     loadOlderSessionMessages,
     prefetchOlderSessionMessages,
     createNewSession,
