@@ -454,6 +454,7 @@ export function mergeConversationRunMessages(
   previous: Message[],
   result: ConversationStreamResult,
   optimisticMessageId?: string,
+  replacesInvocationId?: string,
 ): Message[] {
   const projected = projectConversationStreamForHostedUi(result).messages;
   // Hidden progress is not a transcript replacement.
@@ -462,6 +463,9 @@ export function mergeConversationRunMessages(
   const belongsToRun = (message: Message) => (
     message.runId === result.runId
     || message.invocationId === result.runId
+    || (replacesInvocationId !== undefined && (
+      message.runId === replacesInvocationId || message.invocationId === replacesInvocationId
+    ))
   );
   const runIndex = cleanPrevious.findIndex(belongsToRun);
   // Use the submitted input identity. A later queued input is not part of this
