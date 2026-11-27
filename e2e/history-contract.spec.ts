@@ -305,7 +305,7 @@ test('keeps the reader anchored when older detail inserts rows after the first l
   expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });
 
-test('remeasuring a clipped row keeps the visible content below it in place', async ({ page }) => {
+test('remeasuring a clipped row keeps the visible content below it in place before paint', async ({ page }, testInfo) => {
   const marker = 'Visible text below the clipped message';
   const clipped = Array.from({ length: 85 }, (_, i) => `Earlier model text line ${i}`).join('\n');
   const tail = Array.from({ length: 85 }, (_, i) => `Visible model reply line ${i}`).join('\n');
@@ -325,7 +325,8 @@ test('remeasuring a clipped row keeps the visible content below it in place', as
     - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
   const before = await offset();
   const beforeScroll = await list.evaluate(el => el.scrollTop);
-  await list.locator('[data-message-id="clipped"]').evaluate(row => {
+  const growth = Number(testInfo.project.metadata.growth ?? 183);
+  const firstFrame = await list.locator('[data-message-id="clipped"]').evaluate((row, delta) => {
     const height = row.getBoundingClientRect().height;
     const firstText = row.querySelector('p')?.firstChild;
     if (!firstText) throw new Error('Clipped text node not found');
@@ -333,9 +334,11 @@ test('remeasuring a clipped row keeps the visible content below it in place', as
     Object.defineProperty(document, 'caretPositionFromPoint', {
       configurable: true, value: () => ({ offsetNode: firstText, offset: 0 }),
     });
-    (row as HTMLElement).style.height = `${height + 183}px`;
-  });
-  await expect.poll(() => list.evaluate((el, before) => el.scrollTop - before, beforeScroll)).toBe(183);
+    (row as HTMLElement).style.height = `${height + delta}px`;
+    return new Promise<number>(resolve => requestAnimationFrame(() =>
+      resolve(row.closest('[data-slot="message-list"]')!.scrollTop)));
+  }, growth);
+  expect(Math.abs(firstFrame - beforeScroll - growth)).toBeLessThanOrEqual(2);
   await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
 });
 

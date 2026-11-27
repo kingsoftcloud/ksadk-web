@@ -46,6 +46,7 @@ export class HistoryAnchoredRows extends Component<Props> {
   private retained: { snapshot: Snapshot; scrollTop: number; range: number } | undefined;
   private content = createRef<HTMLDivElement>();
   private resizeObserver: ResizeObserver | undefined;
+  private mutationObserver: MutationObserver | undefined;
   private scrollNode: HTMLDivElement | null = null;
   private resizeBaseline: {
     anchors: Snapshot['anchors'];
@@ -63,11 +64,25 @@ export class HistoryAnchoredRows extends Component<Props> {
       this.scrollNode.addEventListener('scroll', this.onScroll, { passive: true });
       this.resizeObserver = new ResizeObserver(this.restoreResizeBaseline);
       this.resizeObserver.observe(this.content.current);
+      // A descendant can insert content without updating this list. Restore
+      // after that DOM mutation, before a scrolling frame reads the new layout.
+      if (typeof MutationObserver !== 'undefined') {
+        this.mutationObserver = new MutationObserver(() => {
+          const baseline = this.resizeBaseline;
+          if (baseline && this.content.current?.offsetHeight !== baseline.height) {
+            this.restoreResizeBaseline();
+          }
+        });
+        this.mutationObserver.observe(this.content.current, {
+          subtree: true, childList: true, characterData: true, attributes: true,
+        });
+      }
     }
   }
 
   componentWillUnmount() {
     this.resizeObserver?.disconnect();
+    this.mutationObserver?.disconnect();
     this.scrollNode?.removeEventListener('scroll', this.onScroll);
   }
 
