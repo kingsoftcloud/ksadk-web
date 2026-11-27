@@ -100,11 +100,9 @@ describe('chat message list contracts', () => {
     // Preload trigger near the top of the transcript.
     expect(source).toContain('scroller.scrollTop < 200');
     expect(source).toContain('loadingOlderRef');
-    // Keep the viewport anchored when prepending older events: capture the
-    // prior scrollHeight and shift scrollTop by the delta.
-    expect(source).toContain('previousScrollHeight');
-    expect(source).toMatch(/nextScroller\.scrollTop\s*\+=\s*delta/);
-    expect(source).toMatch(/previousScrollTopRef\.current\s*=\s*nextScroller\.scrollTop/);
+    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+    expect(listSource).toContain('findVirtualMessageIndex(previous.offsets, top)');
+    expect(listSource).toContain('layout.offsets[nextIndex] - previous.offsets[index]');
   });
 
   it('preloads additional session pages before the sidebar reaches the bottom', () => {
@@ -172,7 +170,7 @@ describe('chat message list contracts', () => {
     expect(source).toContain('new ResizeObserver(measure)');
     expect(source).toContain('observer.observe(node)');
     expect(source).toContain('observer.disconnect()');
-    expect(source).toContain('scroller.scrollTop += height - previousHeight');
+    expect(source).toContain('pendingHeightsRef');
   });
 
   it('virtualizes long message transcripts instead of mapping the full list directly', () => {

@@ -49,6 +49,10 @@ import type { Interaction } from '../core/interaction/types.js';
 const RESTORE_RECONNECT_DELAY_MS = 500;
 const SESSION_LIST_PAGE_SIZE = 30;
 const SESSION_MESSAGES_PAGE_SIZE = 50;
+// An item can be one model delta or tool argument fragment. Keep cold loads
+// bounded, then read a wider window once the Runtime has negotiated item cursors.
+const SESSION_INITIAL_HISTORY_ITEMS_PAGE_SIZE = 100;
+const SESSION_OLDER_HISTORY_ITEMS_PAGE_SIZE = 200;
 // Tool-heavy runs can make 200 canonical events exceed half a MiB. The
 // durable Messages projection paints the readable transcript first; hydrate
 // a smaller newest-event window and page older runtime detail on upward scroll.
@@ -635,7 +639,7 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       try {
         const messageOptions = {
           historyView: 'items-v1' as const,
-          limit: SESSION_MESSAGES_PAGE_SIZE,
+          limit: SESSION_INITIAL_HISTORY_ITEMS_PAGE_SIZE,
           includeReasoning: true,
           includeToolEvents: true,
           includeAttachments: true,
@@ -1283,7 +1287,8 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
               cursorSource: historyState.cursorSource,
               historyEpoch: historyState.historyEpoch,
               snapshotSeqId: historyState.snapshotSeqId,
-              limit: SESSION_MESSAGES_PAGE_SIZE,
+              limit: historyState.historyView === 'items-v1'
+                ? SESSION_OLDER_HISTORY_ITEMS_PAGE_SIZE : SESSION_MESSAGES_PAGE_SIZE,
               includeReasoning: true,
               includeToolEvents: true,
               includeAttachments: true,

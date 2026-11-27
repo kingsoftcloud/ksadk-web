@@ -61,6 +61,61 @@ test('short-page history has an explicit bounded loader without scrolling', asyn
   await expect(page.getByTestId('history-load-older')).toHaveCount(0);
 });
 
+test('explicit older pages appear at once in an overflowing transcript', async ({ page }) => {
+  const recent = Array.from({ length: 28 }, (_, index) =>
+    message(`recent-${index}`, `Recent reply ${index}\n\n` + '- detail line\n'.repeat(index % 6 + 2), index + 28));
+  const older = Array.from({ length: 20 }, (_, index) =>
+    message(`older-${index}`, `Earlier reply ${index}\n\n` + '- detail line\n'.repeat(index % 5 + 2), index + 1));
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok({ ...first(), Messages: recent, LatestSeqId: 55, NextCursor: 28 }) };
+    await held;
+    return { body: ok({ ...first(), Messages: older, HasMore: true, NextCursor: 1, LatestSeqId: 55 }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const latest = page.getByText('Recent reply 27', { exact: true });
+  await expect(latest).toBeInViewport();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByTestId('history-load-older')).toBeDisabled();
+  await expect(latest).toBeInViewport();
+  release();
+  await expect(page.getByText('Earlier reply 0', { exact: true })).toBeInViewport();
+  await expect(page.getByText('Earlier reply 1', { exact: true })).toBeInViewport();
+  await expect(page.getByTestId('history-load-older')).toBeEnabled();
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
+test('scroll-triggered older pages keep the visible message at the same offset', async ({ page }) => {
+  const recent = Array.from({ length: 25 }, (_, index) =>
+    message(`recent-${index}`, `Recent model text ${index}\n\n` + '- details\n'.repeat(index % 4 + 3), index + 21));
+  const older = Array.from({ length: 20 }, (_, index) =>
+    message(`older-${index}`, `Earlier model text ${index}\n\n` + '- details\n'.repeat(index % 5 + 2), index + 1));
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok({ ...first(), Messages: recent, LatestSeqId: 45, NextCursor: 21 }) };
+    await held;
+    return { body: ok({ ...first(), Messages: older, HasMore: false, NextCursor: null, LatestSeqId: 45 }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await expect(page.getByText('Recent model text 24', { exact: true })).toBeInViewport();
+  const scroller = page.locator('[data-slot="message-list"]');
+  await scroller.evaluate(element => { element.scrollTop = 100; });
+  await expect(page.getByTestId('history-load-older')).toBeDisabled();
+  const anchor = page.getByText('Recent model text 1', { exact: true });
+  await expect(anchor).toBeInViewport();
+  const relativeOffset = () => anchor.evaluate(element => {
+    const viewport = element.closest('[data-slot="message-list"]')!;
+    return element.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+  });
+  const before = await relativeOffset();
+  release();
+  await expect(page.getByTestId('history-load-older')).toHaveCount(0);
+  await expect(anchor).toBeInViewport();
+  await expect.poll(async () => Math.abs(await relativeOffset() - before)).toBeLessThanOrEqual(2);
+});
+
 test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });

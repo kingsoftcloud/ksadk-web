@@ -94,6 +94,7 @@ export function ConnectedMessageList({
   const isStreamingRef = useRef(isStreaming);
   const loadingOlderRef = useRef(false);
   const olderLoadTokenRef = useRef<symbol | null>(null);
+  const revealOlderPageRef = useRef(false);
   const needsInitialScrollRef = useRef(true);
   const previousLastMessageIdRef = useRef('');
   const revealRef = useRef(revealMessage);
@@ -164,6 +165,7 @@ export function ConnectedMessageList({
     previousScrollTopRef.current = 0;
     loadingOlderRef.current = false;
     olderLoadTokenRef.current = null;
+    revealOlderPageRef.current = false;
     previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
 
@@ -195,46 +197,31 @@ export function ConnectedMessageList({
     if (!scroller || !currentSessionId || !currentMessageHistory?.hasMore
       || currentMessageHistory.isLoadingOlder || loadingOlderRef.current
       || !onLoadOlderSessionMessages) return;
-    const previousScrollHeight = scroller.scrollHeight;
     const requestedSessionId = currentSessionId;
     const requestToken = Symbol(requestedSessionId);
     loadingOlderRef.current = true;
     olderLoadTokenRef.current = requestToken;
     if (revealOlder) {
+      revealOlderPageRef.current = true;
       stickToBottomRef.current = false;
       userDetachedFromBottomRef.current = true;
     }
-    void onLoadOlderSessionMessages(requestedSessionId)
-      .then(() => {
-        if (!ownsOlderMessageScrollRequest({
+    void onLoadOlderSessionMessages(requestedSessionId).finally(() => {
+      // The transcript's layout effect consumes the reveal request on commit.
+      // Clear it after that commit if the page failed or had no new rows.
+      requestAnimationFrame(() => {
+        if (olderLoadTokenRef.current !== requestToken) return;
+        const sameSession = ownsOlderMessageScrollRequest({
           requestedSessionId,
           activeSessionId: useSessionStore.getState().currentSessionId,
           requestToken,
           activeRequestToken: olderLoadTokenRef.current,
-        })) return;
-        if (useSessionStore.getState().messageHistory[requestedSessionId]?.retryOlderPage) return;
-        requestAnimationFrame(() => {
-          if (!ownsOlderMessageScrollRequest({
-            requestedSessionId,
-            activeSessionId: useSessionStore.getState().currentSessionId,
-            requestToken,
-            activeRequestToken: olderLoadTokenRef.current,
-          })) return;
-          const nextScroller = scrollRef.current;
-          if (!nextScroller) return;
-          const delta = nextScroller.scrollHeight - previousScrollHeight;
-          if (revealOlder) nextScroller.scrollTop = 0;
-          else nextScroller.scrollTop += delta;
-          previousScrollTopRef.current = nextScroller.scrollTop;
-          nextScroller.dispatchEvent(new Event('scroll'));
         });
-      })
-      .finally(() => {
-        if (olderLoadTokenRef.current === requestToken) {
-          olderLoadTokenRef.current = null;
-          loadingOlderRef.current = false;
-        }
+        if (sameSession) revealOlderPageRef.current = false;
+        olderLoadTokenRef.current = null;
+        loadingOlderRef.current = false;
       });
+    });
   }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
 
   useEffect(() => {
@@ -318,9 +305,6 @@ export function ConnectedMessageList({
       const revealAtStart = revealRef.current;
       const sessionAtStart = useSessionStore.getState().currentSessionId;
       const node = scrollRef.current;
-      // 临时禁用 CSS scroll-smooth:平滑滚动会让 scrollTop=scrollHeight 变成动画,
-      // rAF 读到中间值导致 pin 逻辑误判,最终停在中间位置。
-      // pin 期间用 instant,finish 后恢复(让 CSS class 重新生效)。
       const prevScrollBehavior = node ? node.style.scrollBehavior : '';
       if (node) {
         node.style.scrollBehavior = 'auto';
@@ -453,6 +437,7 @@ export function ConnectedMessageList({
       )}
       <ChatMessageList
         revealMessage={revealMessage}
+        revealOlderPageRef={revealOlderPageRef}
         emptyState={currentMessageHistory?.error || currentMessageHistory?.preparing ? null : emptyState}
         agentName={agentName}
         isMobile={isMobile}

@@ -2,6 +2,7 @@ import { DeferredHistoryContent } from './DeferredHistoryContent.js';
 import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -40,7 +41,7 @@ import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
-import { calculateVirtualMessageWindow } from '../../utils/message-virtualization.js';
+import { calculateVirtualMessageWindow, createVirtualMessageLayout, findVirtualMessageIndex } from '../../utils/message-virtualization.js';
 import { distanceFromBottom, shouldShowScrollToBottom } from '../../utils/chat-scroll.js';
 import { continuesAssistantTurn } from '../../utils/chat-message-grouping.js';
 
@@ -95,6 +96,7 @@ export type ChatMessageListProps = {
   className?: string;
   /** Explicit navigation to a row that may be outside the virtual window. */
   revealMessage?: { id: string; request: number } | null;
+  revealOlderPageRef?: RefObject<boolean>;
 };
 
 const DEFAULT_MESSAGE_ROW_HEIGHT = 140;
@@ -124,7 +126,7 @@ function MeasuredMessageRow({
 }: {
   messageId: string;
   top: number;
-  onMeasure: (messageId: string, height: number, top: number) => void;
+  onMeasure: (messageId: string, height: number) => void;
   children: ReactNode;
   highlighted?: boolean;
 }) {
@@ -133,13 +135,13 @@ function MeasuredMessageRow({
   useLayoutEffect(() => {
     const node = rowRef.current;
     if (!node) return undefined;
-    const measure = () => onMeasure(messageId, node.offsetHeight, top);
+    const measure = () => onMeasure(messageId, node.offsetHeight);
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [messageId, onMeasure, top]);
+  }, [messageId, onMeasure]);
 
   return (
     <div
@@ -681,7 +683,7 @@ export function FeedbackControls({
   );
 }
 
-function ChatMessage({
+const ChatMessage = memo(function ChatMessage({
   agentName,
   isMobile,
   isStreaming,
@@ -992,7 +994,7 @@ function ChatMessage({
       />
     </div>
   );
-}
+});
 
 export function ChatMessageList({
   agentName,
@@ -1022,6 +1024,7 @@ export function ChatMessageList({
   scrollRef,
   className,
   revealMessage,
+  revealOlderPageRef,
 }: ChatMessageListProps) {
   // CheckpointPanel(会话恢复区)已下线,保留 props 不破坏接口,显式 void 消除未用告警。
   void checkpoints;
@@ -1033,50 +1036,116 @@ export function ChatMessageList({
   void onStopGeneration;
   void onCancelRemote;
   const catalogRegistry = useA2uiCatalogRegistry();
-  const progressLabel = runProgressLabel({ isStreaming, activity, messages, interactions: interactionRecords });
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const [scrollHeight, setScrollHeight] = useState(0);
+  const progressLabel = useMemo(
+    () => runProgressLabel({ isStreaming, activity, messages, interactions: interactionRecords }),
+    [activity, interactionRecords, isStreaming, messages],
+  );
+  const [viewport, setViewport] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
+  const { scrollTop, clientHeight } = viewport;
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
   const measuredHeightsRef = useRef(measuredHeights);
+  const pendingHeightsRef = useRef(new Map<string, number>());
+  const measurementsFrameRef = useRef(0);
+  const viewportFrameRef = useRef(0);
+  const rowsRef = useRef<HTMLDivElement>(null);
+
+  const syncViewport = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const { scrollTop, scrollHeight, clientHeight } = scroller;
+    setViewport(previous => previous.scrollTop === scrollTop
+      && previous.scrollHeight === scrollHeight
+      && previous.clientHeight === clientHeight
+      ? previous : { scrollTop, scrollHeight, clientHeight });
+  }, [scrollRef]);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return undefined;
 
-    const syncViewport = () => {
-      setScrollTop(scroller.scrollTop);
-      setViewportHeight(scroller.clientHeight);
-      setScrollHeight(scroller.scrollHeight);
-    };
-
     syncViewport();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncViewport);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild instanceof HTMLElement) observer?.observe(scroller.firstElementChild);
+    return () => {
+      observer?.disconnect();
+      cancelAnimationFrame(viewportFrameRef.current);
+      cancelAnimationFrame(measurementsFrameRef.current);
+    };
+  }, [scrollRef, syncViewport]);
 
-    if (typeof ResizeObserver === 'undefined') {
-      return undefined;
+  const layout = useMemo(() => createVirtualMessageLayout({
+    items: messages, defaultItemHeight: DEFAULT_MESSAGE_ROW_HEIGHT, measuredHeights,
+  }), [measuredHeights, messages]);
+  const committedLayoutRef = useRef(layout);
+  const virtualWindow = useMemo(() => calculateVirtualMessageWindow({
+    layout, scrollTop, viewportHeight: clientHeight, overscan: MESSAGE_VIRTUALIZATION_OVERSCAN,
+  }), [layout, scrollTop, clientHeight]);
+
+  useLayoutEffect(() => {
+    const previous = committedLayoutRef.current;
+    committedLayoutRef.current = layout;
+    const scroller = scrollRef.current;
+    if (!scroller || previous === layout || !previous.items.length) return;
+
+    const firstKey = previous.items[0].id || '0';
+    const prepended = (layout.keyIndex.get(firstKey) ?? 0) > 0;
+    const previousFirstSeq = previous.items[0].historyOrder?.seq;
+    const firstSeq = layout.items[0]?.historyOrder?.seq;
+    const extendedFirstRow = firstSeq != null && previousFirstSeq != null
+      && firstSeq < previousFirstSeq && layout.keyIndex.get(firstKey) === 0;
+    if ((prepended || extendedFirstRow) && revealOlderPageRef?.current) {
+      revealOlderPageRef.current = false;
+      scroller.scrollTop = 0;
+      syncViewport();
+      return;
     }
 
-    const resizeObserver = new ResizeObserver(() => syncViewport());
-    resizeObserver.observe(scroller);
-    if (scroller.firstElementChild instanceof HTMLElement) {
-      resizeObserver.observe(scroller.firstElementChild);
+    if (!prepended && previous.items !== layout.items) return;
+    const top = Math.max(0, scroller.scrollTop - (rowsRef.current?.offsetTop ?? 0));
+    const index = findVirtualMessageIndex(previous.offsets, top);
+    const row = previous.items[index];
+    const nextIndex = row && layout.keyIndex.get(row.id || String(index));
+    if (nextIndex == null) return;
+    const delta = layout.offsets[nextIndex] - previous.offsets[index];
+    if (delta) {
+      scroller.scrollTop += delta;
+      syncViewport();
     }
-    return () => resizeObserver.disconnect();
-  }, [scrollRef]);
+  }, [layout, revealOlderPageRef, scrollRef, syncViewport]);
 
-  const virtualWindow = useMemo(
-    () =>
-      calculateVirtualMessageWindow({
-        items: messages,
-        scrollTop,
-        viewportHeight,
-        overscan: MESSAGE_VIRTUALIZATION_OVERSCAN,
-        defaultItemHeight: DEFAULT_MESSAGE_ROW_HEIGHT,
-        measuredHeights,
-        getItemKey: (message, index) => message?.id || String(index),
-      }),
-    [measuredHeights, messages, scrollTop, viewportHeight],
-  );
+  const flushMeasurements = useCallback(() => {
+    cancelAnimationFrame(measurementsFrameRef.current);
+    measurementsFrameRef.current = 0;
+    const pending = pendingHeightsRef.current;
+    if (!pending.size) return;
+    const next = new Map(measuredHeightsRef.current);
+    for (const [key, height] of pending) next.set(key, height);
+    pending.clear();
+    measuredHeightsRef.current = next;
+    setMeasuredHeights(next);
+  }, []);
+  // New rows report their sizes in child layout effects. Apply the batch
+  // before paint so a page appears with its rows and scroll position together.
+  useLayoutEffect(flushMeasurements);
+
+  const updateMeasuredHeight = useCallback((messageId: string, height: number) => {
+    const pending = pendingHeightsRef.current;
+    if (height === (measuredHeightsRef.current.get(messageId) ?? DEFAULT_MESSAGE_ROW_HEIGHT)) {
+      pending.delete(messageId);
+      return;
+    }
+    pending.set(messageId, height);
+    if (!measurementsFrameRef.current) measurementsFrameRef.current = requestAnimationFrame(flushMeasurements);
+  }, [flushMeasurements]);
+
+  const scheduleViewportSync = useCallback(() => {
+    if (viewportFrameRef.current) return;
+    viewportFrameRef.current = requestAnimationFrame(() => {
+      viewportFrameRef.current = 0;
+      syncViewport();
+    });
+  }, [syncViewport]);
 
   const visibleItems = virtualWindow.visibleItems;
   const unprojectedInputHistory = useMemo(
@@ -1099,11 +1168,11 @@ export function ChatMessageList({
     // before the requested row mounts. Recompute that row's offset until the
     // window settles, rather than assuming one animation frame is sufficient.
     const reveal = () => {
-      const top = messages.slice(0, index).reduce((sum, message) =>
-        sum + (measuredHeightsRef.current.get(message.id) ?? DEFAULT_MESSAGE_ROW_HEIGHT), 0);
+      const current = committedLayoutRef.current;
+      const currentIndex = current.keyIndex.get(revealMessage.id) ?? index;
+      const top = current.offsets[currentIndex] ?? 0;
       scroller.scrollTop = Math.max(0, top - 24);
-      setScrollTop(scroller.scrollTop);
-      setViewportHeight(scroller.clientHeight);
+      syncViewport();
       const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]'))
         .find(element => element.dataset.messageId === revealMessage.id);
       stableFrames = row && Math.abs(previousTop - top) < 1 ? stableFrames + 1 : 0;
@@ -1122,46 +1191,17 @@ export function ChatMessageList({
     return () => { cancelAnimationFrame(frame); scroller.style.scrollBehavior = behavior; };
     // A reveal request is explicit navigation, not an instruction to re-center
     // the reader on every subsequent streaming or history update.
-  }, [revealMessage, scrollRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [revealMessage, scrollRef, syncViewport]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateMeasuredHeight = useCallback((messageId: string, height: number, top: number) => {
-    // Hidden A2UI rows are measured as zero; release their previous placeholder.
-    if (!messageId || !Number.isFinite(height) || height < 0) {
-      return;
-    }
-    const current = measuredHeightsRef.current;
-    const previousHeight = current.get(messageId) ?? DEFAULT_MESSAGE_ROW_HEIGHT;
-    if (previousHeight === height) return;
-    const next = new Map(current);
-    next.set(messageId, height);
-    measuredHeightsRef.current = next;
-    setMeasuredHeights(next);
-
-    const scroller = scrollRef.current;
-    if (scroller && top < scroller.scrollTop) {
-      scroller.scrollTop += height - previousHeight;
-      setScrollTop(scroller.scrollTop);
-      setScrollHeight(scroller.scrollHeight);
-    }
-  }, [scrollRef]);
-
-  const remainingDistance = distanceFromBottom({ scrollHeight, scrollTop, clientHeight: viewportHeight });
-  const showScrollToBottom = shouldShowScrollToBottom({
-    scrollHeight,
-    scrollTop,
-    clientHeight: viewportHeight,
-  });
+  const remainingDistance = distanceFromBottom(viewport);
+  const showScrollToBottom = shouldShowScrollToBottom(viewport);
 
   return (
     <div
       ref={scrollRef}
-      onScroll={(event) => {
-        setScrollTop(event.currentTarget.scrollTop);
-        setViewportHeight(event.currentTarget.clientHeight);
-        setScrollHeight(event.currentTarget.scrollHeight);
-      }}
+      onScroll={scheduleViewportSync}
       className={cn(
-        'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
+        'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
         className,
       )}
@@ -1175,7 +1215,7 @@ export function ChatMessageList({
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <>
-            {messages.length > 0 && <div style={{ height: virtualWindow.totalHeight }} className="relative">
+            {messages.length > 0 && <div ref={rowsRef} style={{ height: virtualWindow.totalHeight }} className="relative">
               {visibleItems.map((entry) => (
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}
