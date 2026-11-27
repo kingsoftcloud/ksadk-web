@@ -517,7 +517,10 @@ export class RunEngineImpl implements RunEngine {
 
         const requestedProfile = this.config.kernelSessionEventsEnabled && this.config.presentationProfile === 'agent-block-v1'
           ? 'agent-block-v1' : 'flat-v1';
-        const stream = await this.api.runAgent(body, { signal: this.abortController?.signal });
+        const stream = await this.api.runAgent(body, {
+          signal: this.abortController?.signal,
+          onCommandAdmitted: draft.onCommandAdmitted,
+        });
         if (this.operationEpoch !== operationEpoch || this.abortController?.signal.aborted) {
           reportDispatch(false);
           await stream.cancel();
@@ -544,6 +547,7 @@ export class RunEngineImpl implements RunEngine {
         }
         let streamResult: StreamConsumeResult;
         if (peeked.receipt) {
+          if (peeked.receipt.commandId) draft.onCommandAdmitted?.(peeked.receipt.commandId);
           streamResult = await this.consumeKernelRunEvents(
             sessionId,
             peeked.receipt,

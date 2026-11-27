@@ -91,6 +91,19 @@ describe('history/live merge', () => {
     expect(ids(mergeHistoryWithLive(history, [local, other], [local, other]))).toEqual(['durable', 'other']);
   });
 
+  it('reconciles a Responses optimistic user with its admitted inbox row', () => {
+    const history = prependItemHistory([{ ItemId: 'accepted-event', SeqId: 1, EventType: 'control.command_accepted',
+      InboxInput: { CommandId: 'accepted-command', Text: 'repeat' },
+      Event: { SessionId: 's', EventId: 'accepted-event', SeqId: 1,
+        Timestamp: 1, EventType: 'control.command_accepted' } }],
+    {} as ApiFacade, 's', { HistoryEpoch: 'epoch', SnapshotSeqId: 1, CursorSource: 'runtime' }, 'flat-v1').messages;
+    const local: Message = { id: 'local', role: 'user', content: 'repeat', timestamp: 1,
+      invocationId: 'wire-run', commandId: 'accepted-command', eventType: 'optimistic_user_message' };
+    const equalPrompt = { ...local, id: 'other', invocationId: 'later-wire', commandId: 'later-command' };
+    expect(ids(mergeHistoryWithLive(history, [local, equalPrompt], [local, equalPrompt]).filter(row => row.role === 'user')))
+      .toEqual(['inbox:accepted-command', 'other']);
+  });
+
   it('keeps cached inputs across a stale session reload and replaces each with its own durable echo', () => {
     const [first, firstAnswer, second, secondAnswer] = rounds();
     const local = { ...second, id: 'local-2', eventType: 'optimistic_user_message', historyOrder: undefined };
