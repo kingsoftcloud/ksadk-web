@@ -2,6 +2,7 @@ import { DeferredHistoryContent } from './DeferredHistoryContent.js';
 import { useA2uiCatalogRegistry } from '../../core/a2ui/provider.js';
 import type { AgentBlockActions } from '../../core/conversation/agent.js';
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -34,13 +35,14 @@ import { MessageMarkdown } from '../MessageMarkdown';
 import { AgentBlockView } from './AgentBlockView';
 import { ProcessingBlocksView, type ProcessingBlocksViewProps } from './ProcessingBlocksView';
 import { StatusBanner } from './StatusBanner';
+import { HistoryAnchoredRows } from './HistoryAnchoredRows.js';
 import { RunProgressIndicator } from './RunProgressIndicator';
 import { runProgressLabel } from '../../utils/run-progress.js';
 import { shouldRenderFeedbackControls } from '../../utils/feedback.js';
 import { formatToolPayload } from '../../utils/tool-display.js';
 import { copyTextToClipboard } from '../../utils/clipboard.js';
 import { formatDate } from '../../utils/session-helpers.js';
-import { calculateVirtualMessageWindow } from '../../utils/message-virtualization.js';
+import { calculateVirtualMessageWindow, createVirtualMessageLayout } from '../../utils/message-virtualization.js';
 import { distanceFromBottom, shouldShowScrollToBottom } from '../../utils/chat-scroll.js';
 import { continuesAssistantTurn } from '../../utils/chat-message-grouping.js';
 
@@ -92,6 +94,10 @@ export type ChatMessageListProps = {
   /** Interaction records for the current session, used for read-only status and anchors. */
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  followLatest?: RefObject<boolean>;
+  historyScrollPending?: RefObject<boolean>;
+  historyRevealPending?: RefObject<boolean>;
+  sessionId?: string | null;
   className?: string;
   /** Explicit navigation to a row that may be outside the virtual window. */
   revealMessage?: { id: string; request: number } | null;
@@ -117,14 +123,16 @@ function approvalLevelTone(level?: string) {
 
 function MeasuredMessageRow({
   messageId,
-  top,
+  role,
+  run,
   onMeasure,
   children,
   highlighted,
 }: {
   messageId: string;
-  top: number;
-  onMeasure: (messageId: string, height: number, top: number) => void;
+  role: Message['role'];
+  run?: string;
+  onMeasure: (messageId: string, height: number) => void;
   children: ReactNode;
   highlighted?: boolean;
 }) {
@@ -133,21 +141,23 @@ function MeasuredMessageRow({
   useLayoutEffect(() => {
     const node = rowRef.current;
     if (!node) return undefined;
-    const measure = () => onMeasure(messageId, node.offsetHeight, top);
+    const measure = () => onMeasure(messageId, node.offsetHeight);
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [messageId, onMeasure, top]);
+  }, [messageId, onMeasure]);
 
   return (
     <div
       ref={rowRef}
       data-message-id={messageId}
+      data-history-role={role}
+      data-history-run={run}
       data-search-target={highlighted || undefined}
       tabIndex={-1}
-      style={{ position: 'absolute', top, left: 0, right: 0 }}
+      className="relative flow-root"
     >
       {children}
     </div>
@@ -681,7 +691,7 @@ export function FeedbackControls({
   );
 }
 
-function ChatMessage({
+const ChatMessage = memo(function ChatMessage({
   agentName,
   isMobile,
   isStreaming,
@@ -992,7 +1002,7 @@ function ChatMessage({
       />
     </div>
   );
-}
+});
 
 export function ChatMessageList({
   agentName,
@@ -1020,6 +1030,10 @@ export function ChatMessageList({
   onResumeCheckpoint,
   interactionRecords,
   scrollRef,
+  followLatest,
+  historyScrollPending,
+  historyRevealPending,
+  sessionId,
   className,
   revealMessage,
 }: ChatMessageListProps) {
@@ -1033,52 +1047,123 @@ export function ChatMessageList({
   void onStopGeneration;
   void onCancelRemote;
   const catalogRegistry = useA2uiCatalogRegistry();
-  const progressLabel = runProgressLabel({ isStreaming, activity, messages, interactions: interactionRecords });
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const [scrollHeight, setScrollHeight] = useState(0);
+  const progressLabel = useMemo(
+    () => runProgressLabel({ isStreaming, activity, messages, interactions: interactionRecords }),
+    [activity, interactionRecords, isStreaming, messages],
+  );
+  const [viewport, setViewport] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
+  const { scrollTop, clientHeight } = viewport;
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number>>(new Map());
   const measuredHeightsRef = useRef(measuredHeights);
+  const pendingHeightsRef = useRef(new Map<string, number>());
+  const measurementsFrameRef = useRef(0);
+  const viewportFrameRef = useRef(0);
+  const historyReserveRef = useRef<HTMLDivElement>(null);
+
+  const positionHistoryAnchor = useCallback((scroller: HTMLDivElement, target: number) => {
+    const reserve = historyReserveRef.current;
+    if (reserve) {
+      let reserved = reserve.offsetHeight;
+      let range = scroller.scrollHeight - scroller.clientHeight;
+      if (target > 0 && range === 0) {
+        // scrollHeight is clamped to the viewport when the transcript fits.
+        // Temporarily measure it with extra space to find the exact shortfall.
+        reserved += scroller.clientHeight + Math.ceil(target);
+        reserve.style.height = `${reserved}px`;
+        range = scroller.scrollHeight - scroller.clientHeight;
+      }
+      const needed = target > 0 ? Math.max(0, Math.ceil(target - range + reserved)) : 0;
+      reserve.style.height = `${needed}px`;
+    }
+    scroller.scrollTop = target;
+  }, []);
+
+  const syncViewport = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const { scrollTop, scrollHeight, clientHeight } = scroller;
+    setViewport(previous => previous.scrollTop === scrollTop
+      && previous.scrollHeight === scrollHeight
+      && previous.clientHeight === clientHeight
+      ? previous : { scrollTop, scrollHeight, clientHeight });
+  }, [scrollRef]);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return undefined;
 
-    const syncViewport = () => {
-      setScrollTop(scroller.scrollTop);
-      setViewportHeight(scroller.clientHeight);
-      setScrollHeight(scroller.scrollHeight);
-    };
-
     syncViewport();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncViewport);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild instanceof HTMLElement) observer?.observe(scroller.firstElementChild);
+    return () => {
+      observer?.disconnect();
+      cancelAnimationFrame(viewportFrameRef.current);
+      cancelAnimationFrame(measurementsFrameRef.current);
+    };
+  }, [scrollRef, syncViewport]);
 
-    if (typeof ResizeObserver === 'undefined') {
-      return undefined;
+  const layout = useMemo(() => createVirtualMessageLayout({
+    items: messages, defaultItemHeight: DEFAULT_MESSAGE_ROW_HEIGHT, measuredHeights,
+  }), [measuredHeights, messages]);
+  const committedLayoutRef = useRef(layout);
+  const virtualWindow = useMemo(() => calculateVirtualMessageWindow({
+    layout, scrollTop, viewportHeight: clientHeight, overscan: MESSAGE_VIRTUALIZATION_OVERSCAN,
+  }), [layout, scrollTop, clientHeight]);
+
+  useLayoutEffect(() => {
+    committedLayoutRef.current = layout;
+  }, [layout]);
+
+  const applyReadingAnchor = useCallback((scroller: HTMLDivElement, delta: number, historyChanged: boolean) => {
+    if (historyChanged) positionHistoryAnchor(scroller, scroller.scrollTop + delta);
+    else scroller.scrollTop += delta;
+    syncViewport();
+  }, [positionHistoryAnchor, syncViewport]);
+
+  const resetHistoryReserve = useCallback(() => {
+    if (historyReserveRef.current) historyReserveRef.current.style.height = '0px';
+  }, []);
+
+  const flushMeasurements = useCallback(() => {
+    cancelAnimationFrame(measurementsFrameRef.current);
+    measurementsFrameRef.current = 0;
+    const pending = pendingHeightsRef.current;
+    if (!pending.size) return;
+    const next = new Map(measuredHeightsRef.current);
+    for (const [key, height] of pending) next.set(key, height);
+    pending.clear();
+    measuredHeightsRef.current = next;
+    setMeasuredHeights(next);
+  }, []);
+  // New rows report their sizes in child layout effects. Apply the batch
+  // before paint so a page appears with its rows and scroll position together.
+  useLayoutEffect(flushMeasurements);
+
+  const updateMeasuredHeight = useCallback((messageId: string, height: number) => {
+    const pending = pendingHeightsRef.current;
+    if (height === (measuredHeightsRef.current.get(messageId) ?? DEFAULT_MESSAGE_ROW_HEIGHT)) {
+      pending.delete(messageId);
+      return;
     }
+    pending.set(messageId, height);
+    if (!measurementsFrameRef.current) measurementsFrameRef.current = requestAnimationFrame(flushMeasurements);
+  }, [flushMeasurements]);
 
-    const resizeObserver = new ResizeObserver(() => syncViewport());
-    resizeObserver.observe(scroller);
-    if (scroller.firstElementChild instanceof HTMLElement) {
-      resizeObserver.observe(scroller.firstElementChild);
-    }
-    return () => resizeObserver.disconnect();
-  }, [scrollRef]);
+  const scheduleViewportSync = useCallback(() => {
+    if (viewportFrameRef.current) return;
+    viewportFrameRef.current = requestAnimationFrame(() => {
+      viewportFrameRef.current = 0;
+      const scroller = scrollRef.current;
+      const reserve = historyReserveRef.current;
+      if (scroller && reserve?.offsetHeight
+        && scroller.scrollTop <= Math.max(0, scroller.scrollHeight - reserve.offsetHeight - scroller.clientHeight)) {
+        reserve.style.height = '0px';
+      }
+      syncViewport();
+    });
+  }, [scrollRef, syncViewport]);
 
-  const virtualWindow = useMemo(
-    () =>
-      calculateVirtualMessageWindow({
-        items: messages,
-        scrollTop,
-        viewportHeight,
-        overscan: MESSAGE_VIRTUALIZATION_OVERSCAN,
-        defaultItemHeight: DEFAULT_MESSAGE_ROW_HEIGHT,
-        measuredHeights,
-        getItemKey: (message, index) => message?.id || String(index),
-      }),
-    [measuredHeights, messages, scrollTop, viewportHeight],
-  );
-
-  const visibleItems = virtualWindow.visibleItems;
   const unprojectedInputHistory = useMemo(
     () => missingSubmittedInputHistory(messages, interactionRecords, catalogRegistry),
     [messages, interactionRecords, catalogRegistry],
@@ -1099,11 +1184,11 @@ export function ChatMessageList({
     // before the requested row mounts. Recompute that row's offset until the
     // window settles, rather than assuming one animation frame is sufficient.
     const reveal = () => {
-      const top = messages.slice(0, index).reduce((sum, message) =>
-        sum + (measuredHeightsRef.current.get(message.id) ?? DEFAULT_MESSAGE_ROW_HEIGHT), 0);
+      const current = committedLayoutRef.current;
+      const currentIndex = current.keyIndex.get(revealMessage.id) ?? index;
+      const top = current.offsets[currentIndex] ?? 0;
       scroller.scrollTop = Math.max(0, top - 24);
-      setScrollTop(scroller.scrollTop);
-      setViewportHeight(scroller.clientHeight);
+      syncViewport();
       const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]'))
         .find(element => element.dataset.messageId === revealMessage.id);
       stableFrames = row && Math.abs(previousTop - top) < 1 ? stableFrames + 1 : 0;
@@ -1122,46 +1207,17 @@ export function ChatMessageList({
     return () => { cancelAnimationFrame(frame); scroller.style.scrollBehavior = behavior; };
     // A reveal request is explicit navigation, not an instruction to re-center
     // the reader on every subsequent streaming or history update.
-  }, [revealMessage, scrollRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [revealMessage, scrollRef, syncViewport]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateMeasuredHeight = useCallback((messageId: string, height: number, top: number) => {
-    // Hidden A2UI rows are measured as zero; release their previous placeholder.
-    if (!messageId || !Number.isFinite(height) || height < 0) {
-      return;
-    }
-    const current = measuredHeightsRef.current;
-    const previousHeight = current.get(messageId) ?? DEFAULT_MESSAGE_ROW_HEIGHT;
-    if (previousHeight === height) return;
-    const next = new Map(current);
-    next.set(messageId, height);
-    measuredHeightsRef.current = next;
-    setMeasuredHeights(next);
-
-    const scroller = scrollRef.current;
-    if (scroller && top < scroller.scrollTop) {
-      scroller.scrollTop += height - previousHeight;
-      setScrollTop(scroller.scrollTop);
-      setScrollHeight(scroller.scrollHeight);
-    }
-  }, [scrollRef]);
-
-  const remainingDistance = distanceFromBottom({ scrollHeight, scrollTop, clientHeight: viewportHeight });
-  const showScrollToBottom = shouldShowScrollToBottom({
-    scrollHeight,
-    scrollTop,
-    clientHeight: viewportHeight,
-  });
+  const remainingDistance = distanceFromBottom(viewport);
+  const showScrollToBottom = shouldShowScrollToBottom(viewport);
 
   return (
     <div
       ref={scrollRef}
-      onScroll={(event) => {
-        setScrollTop(event.currentTarget.scrollTop);
-        setViewportHeight(event.currentTarget.clientHeight);
-        setScrollHeight(event.currentTarget.scrollHeight);
-      }}
+      onScroll={scheduleViewportSync}
       className={cn(
-        'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto scroll-smooth',
+        'custom-scrollbar relative min-h-0 flex-1 overflow-y-auto',
         isMobile ? 'px-3 py-3' : 'px-4 py-5',
         className,
       )}
@@ -1175,13 +1231,23 @@ export function ChatMessageList({
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <>
-            {messages.length > 0 && <div style={{ height: virtualWindow.totalHeight }} className="relative">
-              {visibleItems.map((entry) => (
+            {messages.length > 0 && <HistoryAnchoredRows
+              layout={layout}
+              window={virtualWindow}
+              scrollRef={scrollRef}
+              followLatest={followLatest}
+              historyScrollPending={historyScrollPending}
+              historyRevealPending={historyRevealPending}
+              sessionId={sessionId}
+              onAnchor={applyReadingAnchor}
+              onReset={resetHistoryReserve}
+              renderRow={(entry) => (
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}
                 messageId={entry.item.id || String(entry.index)}
+                role={entry.item.role}
+                run={entry.item.runId || entry.item.invocationId}
                 highlighted={entry.item.id === revealMessage?.id}
-                top={entry.top}
                 onMeasure={updateMeasuredHeight}
               >
                 {entry.item.readHistoryContent ? <DeferredHistoryContent key={entry.item.historyContentKey || entry.item.id} label={entry.item.content} read={entry.item.readHistoryContent} /> : entry.item.role === 'system' ? (
@@ -1215,45 +1281,51 @@ export function ChatMessageList({
                   </div>
                 ))}
               </MeasuredMessageRow>
-              ))}
-            </div>}
+              )}
+            />}
           </>
         )}
         {progressLabel && <div data-testid={showWaitingIndicator ? 'waiting-first-token' : undefined}>
           <RunProgressIndicator label={progressLabel} />
         </div>}
+        <div ref={historyReserveRef} aria-hidden="true" className="shrink-0" />
       </div>
       <StatusBanner />
       {showScrollToBottom ? (
-        <button
-          type="button"
-          aria-label="回到底部"
-          data-distance-from-bottom={Math.round(remainingDistance)}
-          onClick={() => {
-            if (onScrollToBottom) {
-              onScrollToBottom();
-              return;
-            }
-            const scroller = scrollRef.current;
-            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
-          }}
-          className="sticky bottom-4 left-1/2 z-20 mx-auto flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
-          title="回到底部"
-        >
-          {isStreaming ? (
-            <span aria-hidden="true" className="flex items-center gap-0.5" data-scroll-indicator="streaming">
-              {[0, 1, 2].map((index) => (
-                <span
-                  key={index}
-                  className="h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none"
-                  style={{ animationDelay: `${index * 120}ms` }}
-                />
-              ))}
-            </span>
-          ) : (
-            <ChevronDown aria-hidden="true" className="h-5 w-5" data-scroll-indicator="idle" />
-          )}
-        </button>
+        // Keep the button out of the scroll range. Removing it must not
+        // clamp the scroll position while a history anchor is being held.
+        <div className="pointer-events-none sticky bottom-0 z-20 h-0">
+          <button
+            type="button"
+            aria-label="回到底部"
+            data-distance-from-bottom={Math.round(remainingDistance)}
+            onClick={() => {
+              resetHistoryReserve();
+              if (onScrollToBottom) {
+                onScrollToBottom();
+                return;
+              }
+              const scroller = scrollRef.current;
+              if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
+            }}
+            className="pointer-events-auto absolute bottom-4 left-1/2 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
+            title="回到底部"
+          >
+            {isStreaming ? (
+              <span aria-hidden="true" className="flex items-center gap-0.5" data-scroll-indicator="streaming">
+                {[0, 1, 2].map((index) => (
+                  <span
+                    key={index}
+                    className="h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none"
+                    style={{ animationDelay: `${index * 120}ms` }}
+                  />
+                ))}
+              </span>
+            ) : (
+              <ChevronDown aria-hidden="true" className="h-5 w-5" data-scroll-indicator="idle" />
+            )}
+          </button>
+        </div>
       ) : null}
     </div>
   );

@@ -83,6 +83,7 @@ export class AguiRunClient {
   private activeRunId = '';
   private logicalRunId = '';
   private executionEpoch = 0;
+  private onAdmission?: (commandId: string) => void;
   private readonly threadId: string;
   private forwardedProps: Record<string, unknown>;
   private catalogRegistry: A2uiCatalogRegistry;
@@ -92,7 +93,13 @@ export class AguiRunClient {
       url: options.url,
       agentId: options.agentId,
       threadId: options.threadId,
-      fetch: options.fetch,
+      fetch: async (input, init) => {
+        const admission = this.onAdmission;
+        const response = await (options.fetch ?? globalThis.fetch)(input, init);
+        const id = response.headers.get('X-AgentEngine-AGUI-Command-Id');
+        if (response.ok && admission && admission === this.onAdmission && id) admission(id);
+        return response;
+      },
     });
     this.onEvent = options.onEvent;
     this.threadId = options.threadId;
@@ -125,7 +132,7 @@ export class AguiRunClient {
     }
   }
 
-  async run(text: string, runId: string, signal?: AbortSignal): Promise<AguiRunResult> {
+  async run(text: string, runId: string, signal?: AbortSignal, onAdmission?: (commandId: string) => void): Promise<AguiRunResult> {
     this.activeRunId = runId;
     this.logicalRunId = runId;
     this.agent.addMessage({
@@ -133,7 +140,12 @@ export class AguiRunClient {
       role: 'user',
       content: text,
     });
-    return this.execute({ runId, abortController: this.controllerFor(signal) });
+    this.onAdmission = onAdmission;
+    try {
+      return await this.execute({ runId, abortController: this.controllerFor(signal) });
+    } finally {
+      if (this.onAdmission === onAdmission) this.onAdmission = undefined;
+    }
   }
 
   async resume(

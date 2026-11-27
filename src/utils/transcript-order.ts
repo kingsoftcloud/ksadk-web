@@ -3,6 +3,7 @@ import { coalesceA2uiActivities } from '../core/a2ui/transcript.js';
 import { coalesceHistoryToolCalls } from './history-tool-facts.js';
 
 const runOf = (message: Message) => message.runId || message.invocationId;
+const isPendingInput = (message: Message) => message.role === 'user' && message.eventType === 'optimistic_user_message';
 
 export function preserveRecoveredUserInput(history: Message[], input?: Message): Message[] {
   if (!input) return history;
@@ -65,8 +66,26 @@ function contentChanged(message: Message, previous?: Message): boolean {
  * Feedback updates are presentation changes, not new runtime content. Keep
  * them without replacing the run's newly hydrated historical items. */
 export function mergeHistoryWithLive(
-  history: Message[], baseline: Message[], current: Message[], preserveOlderItems = false,
+  history: Message[], baseline: Message[], currentMessages: Message[], preserveOlderItems = false,
 ): Message[] {
+  const durableInputs = history.filter(message => message.role === 'user' && !isPendingInput(message));
+  const durableRuns = new Set(durableInputs.map(runOf).filter(Boolean));
+  const durableCommands = new Set(durableInputs.map(message => message.commandId).filter(Boolean));
+  const current = currentMessages.filter(message => !isPendingInput(message)
+    || (!durableRuns.has(runOf(message)) && !durableCommands.has(message.commandId)));
+  // A session switch restores the local echo before the history request. It
+  // can be unchanged for the entire request and still be absent upstream.
+  const pending = current.filter(message => isPendingInput(message) && !history.some(row => row.id === message.id));
+  if (pending.length) {
+    history = [...history];
+    for (const input of pending) {
+      const run = runOf(input);
+      const first = run ? history.findIndex(message => runOf(message) === run) : -1;
+      if (first < 0) history.push(input);
+      else history.splice(first, 0, input);
+    }
+    history = orderTranscript(history);
+  }
   const before = new Map(baseline.map(message => [message.id, message]));
   const feedback = current.filter(message => before.has(message.id)
     && before.get(message.id)?.feedback !== message.feedback);

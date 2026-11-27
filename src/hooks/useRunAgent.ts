@@ -10,7 +10,7 @@ import type { RuntimeApiFormat } from '../types/api.js';
 import type { UiCapabilities } from '../types/capabilities.js';
 import type { ApiFacade } from '../core/api/types.js';
 import { RunEngineImpl, dispatchRunEventToStores, resetDispatcherState } from '../core/run/index.js';
-import type { ModelCatalogItem, Session } from '../components/chat/types.js';
+import type { Message, ModelCatalogItem, Session } from '../components/chat/types.js';
 import { writePersistedSessionId } from '../utils/session.js';
 import { resolveHostedChatTransport } from '../utils/capabilities.js';
 import type { A2UIClientEventMessage } from '../core/a2ui/catalog.js';
@@ -43,6 +43,7 @@ type RunAgentContext = {
   agentIdRef: React.MutableRefObject<string>;
   queuedDraftRef: React.MutableRefObject<QueuedDraft[]>;
   onRunSettled?: (sessionId: string | null, agentId?: string, outcome?: import('../core/run/types.js').RunSettlement) => void;
+  onUserInputBound?: (sessionId: string, messageId: string, binding: Pick<Message, 'commandId' | 'invocationId'>) => void;
   onRunRecovered?: (sessionId: string, invocationId: string) => void;
   onSessionCreated?: (sessionId: string, conversationId?: string, agentId?: string) => void;
   /** Stable owner before native creation. Omit for the legacy Hosted shell. */
@@ -112,6 +113,7 @@ export function useRunAgent(ctx: RunAgentContext) {
     conversationIdRef,
     queuedDraftRef,
     onRunSettled,
+    onUserInputBound,
     onRunRecovered,
     onSessionCreated,
     waitForPendingSessionCreation,
@@ -286,6 +288,16 @@ export function useRunAgent(ctx: RunAgentContext) {
       ? new Promise<boolean>(resolve => { confirmDispatch = resolve; })
       : null;
 
+    const bindUserInput = (binding: Pick<Message, 'commandId' | 'invocationId'>) => {
+      const messageId = draft.optimisticMessageId;
+      if (!messageId) return;
+      if (owner.sessionId && ctx.agentIdRef.current === owner.agentId) {
+        onUserInputBound?.(owner.sessionId, messageId, binding);
+      }
+      if (owner.isVisible()) useMessageStore.getState().patchMessages(rows => rows.map(message =>
+        message.id === messageId ? { ...message, ...binding } : message));
+    };
+
     const launch = (): boolean => {
       if (owner.engine.stage !== 'idle') return false;
       owner.engine.updateConfig(config);
@@ -302,13 +314,9 @@ export function useRunAgent(ctx: RunAgentContext) {
         sessionId: owner.sessionId,
         onInvocationCreated: invocationId => {
           if (outboxEntry && ledger) ledger.update(outboxEntry.requestId, { invocationId });
-          // Bind the submitted input by identity, never by text or by the last
-          // user row (which can belong to a queued turn or another session).
-          if (owner.isVisible()) {
-            useMessageStore.getState().patchMessages(rows => rows.map(message =>
-              message.id === draft.optimisticMessageId ? { ...message, invocationId } : message));
-          }
+          bindUserInput({ invocationId });
         },
+        onCommandAdmitted: commandId => bindUserInput({ commandId }),
         onSessionCreated: sessionId => {
           const wasVisible = owner.isVisible();
           const previousKey = owner.sessionId || owner.conversationId;
@@ -357,7 +365,7 @@ export function useRunAgent(ctx: RunAgentContext) {
       return dispatch;
     }
     return started;
-  }, [appendOptimisticAssistant, appendOptimisticMessage, config, currentSessionIdRef, drainQueue, getOwner, onRunRecovered, onRunSettled, onSessionCreated, outbox, publishQueue, waitForPendingSessionCreation]);
+  }, [appendOptimisticAssistant, appendOptimisticMessage, config, ctx.agentIdRef, currentSessionIdRef, drainQueue, getOwner, onRunRecovered, onRunSettled, onSessionCreated, onUserInputBound, outbox, publishQueue, waitForPendingSessionCreation]);
 
   const stopGeneration = useCallback(() => {
     const engine = getEngine(currentSessionIdRef.current);

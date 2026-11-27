@@ -10,7 +10,7 @@ import { useBootstrapStore } from '../../stores/bootstrap.js';
 import { ChatMessageList } from './ChatMessageList';
 import { AttachmentPreview } from './AttachmentPreview';
 import { buildComposerContextIndicator } from '../../utils/context.js';
-import { ownsOlderMessageScrollRequest } from '../../utils/session-message-history.js';
+import { ownsOlderMessageScrollRequest, prefetchHistoryCursor } from '../../utils/session-message-history.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
 import type { ModelStore } from '../../stores/model.js';
 import type { SessionStore } from '../../stores/session.js';
@@ -34,6 +34,7 @@ export type ConnectedMessageListProps = {
   checkpointResumeEnabled?: boolean;
   onResumeCheckpoint?: (params: { sessionId: string; runId: string; checkpointId: string }) => void;
   onLoadOlderSessionMessages?: (sessionId: string) => Promise<void>;
+  onPrefetchOlderSessionMessages?: (sessionId: string) => void;
   onRetryHistory?: (sessionId: string) => Promise<void>;
   interactionRecords?: readonly import('../../core/interaction/types.js').Interaction[];
   className?: string;
@@ -55,6 +56,7 @@ export function ConnectedMessageList({
   checkpointResumeEnabled = false,
   onResumeCheckpoint,
   onLoadOlderSessionMessages,
+  onPrefetchOlderSessionMessages,
   onRetryHistory,
   interactionRecords,
   className,
@@ -93,6 +95,7 @@ export function ConnectedMessageList({
   const previousScrollTopRef = useRef(0);
   const isStreamingRef = useRef(isStreaming);
   const loadingOlderRef = useRef(false);
+  const revealOlderRef = useRef(false);
   const olderLoadTokenRef = useRef<symbol | null>(null);
   const needsInitialScrollRef = useRef(true);
   const previousLastMessageIdRef = useRef('');
@@ -163,6 +166,7 @@ export function ConnectedMessageList({
     userDetachedFromBottomRef.current = false;
     previousScrollTopRef.current = 0;
     loadingOlderRef.current = false;
+    revealOlderRef.current = false;
     olderLoadTokenRef.current = null;
     previousLastMessageIdRef.current = '';
   }, [currentSessionId]);
@@ -190,74 +194,70 @@ export function ConnectedMessageList({
     }
   }, [messages, scrollToBottom]);
 
-  const loadOlderHistory = useCallback((revealOlder = false) => {
-    const scroller = scrollRef.current;
-    if (!scroller || !currentSessionId || !currentMessageHistory?.hasMore
+  const loadOlderHistory = useCallback((fromScroll = false) => {
+    if (!scrollRef.current || !currentSessionId || !currentMessageHistory?.hasMore
       || currentMessageHistory.isLoadingOlder || loadingOlderRef.current
       || !onLoadOlderSessionMessages) return;
-    const previousScrollHeight = scroller.scrollHeight;
-    const requestedSessionId = currentSessionId;
-    const requestToken = Symbol(requestedSessionId);
+    const requestToken = Symbol(currentSessionId);
     loadingOlderRef.current = true;
+    revealOlderRef.current = fromScroll;
     olderLoadTokenRef.current = requestToken;
-    if (revealOlder) {
-      stickToBottomRef.current = false;
-      userDetachedFromBottomRef.current = true;
-    }
-    void onLoadOlderSessionMessages(requestedSessionId)
-      .then(() => {
-        if (!ownsOlderMessageScrollRequest({
-          requestedSessionId,
+    stickToBottomRef.current = false;
+    userDetachedFromBottomRef.current = true;
+    void onLoadOlderSessionMessages(currentSessionId).finally(() => {
+      // A layout adjustment can dispatch a native scroll event after the
+      // history store has committed. Do not treat it as another gesture.
+      requestAnimationFrame(() => {
+        if (!ownsOlderMessageScrollRequest({ requestedSessionId: currentSessionId,
           activeSessionId: useSessionStore.getState().currentSessionId,
-          requestToken,
-          activeRequestToken: olderLoadTokenRef.current,
-        })) return;
-        if (useSessionStore.getState().messageHistory[requestedSessionId]?.retryOlderPage) return;
-        requestAnimationFrame(() => {
-          if (!ownsOlderMessageScrollRequest({
-            requestedSessionId,
-            activeSessionId: useSessionStore.getState().currentSessionId,
-            requestToken,
-            activeRequestToken: olderLoadTokenRef.current,
-          })) return;
-          const nextScroller = scrollRef.current;
-          if (!nextScroller) return;
-          const delta = nextScroller.scrollHeight - previousScrollHeight;
-          if (revealOlder) nextScroller.scrollTop = 0;
-          else nextScroller.scrollTop += delta;
-          previousScrollTopRef.current = nextScroller.scrollTop;
-          nextScroller.dispatchEvent(new Event('scroll'));
-        });
-      })
-      .finally(() => {
-        if (olderLoadTokenRef.current === requestToken) {
-          olderLoadTokenRef.current = null;
-          loadingOlderRef.current = false;
-        }
+          requestToken, activeRequestToken: olderLoadTokenRef.current })) return;
+        previousScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
+        olderLoadTokenRef.current = null;
+        loadingOlderRef.current = false;
+        revealOlderRef.current = false;
       });
+    });
   }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
+
+  const prefetchCursor = prefetchHistoryCursor(currentMessageHistory ?? undefined);
+  const canPrefetchHistory = prefetchCursor !== null && Boolean(onPrefetchOlderSessionMessages);
+  const canAutoLoadHistory = Boolean(currentSessionId && currentMessageHistory?.hasMore
+    && !currentMessageHistory.retryOlderPage && !isLoadingInitialHistory && onLoadOlderSessionMessages);
+
+  useEffect(() => {
+    if (!currentSessionId || !canPrefetchHistory || isLoadingInitialHistory || isStreaming
+      || currentMessageHistory?.isLoadingOlder || revealMessage) return;
+    // Let the first paint settle, then keep one batch ahead of the reader.
+    const timer = window.setTimeout(() => onPrefetchOlderSessionMessages?.(currentSessionId), 120);
+    return () => window.clearTimeout(timer);
+  }, [currentSessionId, canPrefetchHistory, prefetchCursor, currentMessageHistory?.isLoadingOlder,
+    isLoadingInitialHistory, isStreaming, onPrefetchOlderSessionMessages, revealMessage]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return undefined;
 
-    const updateStickiness = () => {
+    const updateStickiness = (event?: Event) => {
       const distanceFromBottom =
         scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       const scrolledUp = scroller.scrollTop < previousScrollTopRef.current - 2;
+      const scrolledDown = scroller.scrollTop > previousScrollTopRef.current + 2;
       previousScrollTopRef.current = scroller.scrollTop;
+      // A short viewport may be at both edges while older messages load.
+      // Its resize/scroll events cannot reattach it to the live edge.
+      if (loadingOlderRef.current) return;
 
+      const historyLoadDistance = canPrefetchHistory ? Math.max(200, scroller.clientHeight) : 200;
       if (
+        event &&
         !needsInitialScrollRef.current &&
         scrolledUp &&
-        scroller.scrollTop < 200 &&
-        currentSessionId &&
-        currentMessageHistory?.hasMore &&
-        !currentMessageHistory.isLoadingOlder &&
-        !loadingOlderRef.current &&
-        onLoadOlderSessionMessages
+        scroller.scrollTop < historyLoadDistance &&
+        canAutoLoadHistory &&
+        !currentMessageHistory?.isLoadingOlder &&
+        !loadingOlderRef.current
       ) {
-        loadOlderHistory();
+        loadOlderHistory(true);
       }
 
       if (isStreamingRef.current && scrolledUp) {
@@ -267,7 +267,7 @@ export function ConnectedMessageList({
       }
 
       if (userDetachedFromBottomRef.current) {
-        const returnedToBottom = distanceFromBottom <= 12;
+        const returnedToBottom = Boolean(event && scrolledDown && distanceFromBottom <= 12);
         userDetachedFromBottomRef.current = !returnedToBottom;
         stickToBottomRef.current = returnedToBottom;
         return;
@@ -276,10 +276,32 @@ export function ConnectedMessageList({
       stickToBottomRef.current = distanceFromBottom < 96;
     };
 
+    const loadAtTop = () => {
+      if (canAutoLoadHistory && scroller.scrollTop <= 1) loadOlderHistory(true);
+    };
+    const onWheel = (event: WheelEvent) => {
+      // A scroller already at its upper edge emits no further scroll events.
+      if (event.deltaY < 0) loadAtTop();
+    };
+    let touchY: number | undefined;
+    const onTouchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY; };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY;
+      if (y != null && touchY != null && y > touchY) loadAtTop();
+      touchY = y;
+    };
     updateStickiness();
     scroller.addEventListener('scroll', updateStickiness, { passive: true });
-    return () => scroller.removeEventListener('scroll', updateStickiness);
-  }, [currentMessageHistory, currentSessionId, loadOlderHistory, onLoadOlderSessionMessages]);
+    scroller.addEventListener('wheel', onWheel, { passive: true });
+    scroller.addEventListener('touchstart', onTouchStart, { passive: true });
+    scroller.addEventListener('touchmove', onTouchMove, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', updateStickiness);
+      scroller.removeEventListener('wheel', onWheel);
+      scroller.removeEventListener('touchstart', onTouchStart);
+      scroller.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [canAutoLoadHistory, canPrefetchHistory, currentMessageHistory, loadOlderHistory]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -290,7 +312,7 @@ export function ConnectedMessageList({
     // only while the reader is attached to the bottom; a manual upward scroll
     // flips stickToBottomRef and leaves the viewport alone.
     const keepAttachedToBottom = () => {
-      if (!needsInitialScrollRef.current && !stickToBottomRef.current) return;
+      if (loadingOlderRef.current || (!needsInitialScrollRef.current && !stickToBottomRef.current)) return;
       scroller.scrollTop = scroller.scrollHeight;
       previousScrollTopRef.current = scroller.scrollTop;
       scroller.dispatchEvent(new Event('scroll'));
@@ -305,7 +327,7 @@ export function ConnectedMessageList({
 
   useEffect(() => {
     const scroller = scrollRef.current;
-    if (!scroller) return;
+    if (!scroller || loadingOlderRef.current) return;
 
     // Initial session load: bypass the stickiness gate. The gate is unreliable
     // here because effect A (updateStickiness) runs first and, seeing scrollTop=0
@@ -318,9 +340,6 @@ export function ConnectedMessageList({
       const revealAtStart = revealRef.current;
       const sessionAtStart = useSessionStore.getState().currentSessionId;
       const node = scrollRef.current;
-      // 临时禁用 CSS scroll-smooth:平滑滚动会让 scrollTop=scrollHeight 变成动画,
-      // rAF 读到中间值导致 pin 逻辑误判,最终停在中间位置。
-      // pin 期间用 instant,finish 后恢复(让 CSS class 重新生效)。
       const prevScrollBehavior = node ? node.style.scrollBehavior : '';
       if (node) {
         node.style.scrollBehavior = 'auto';
@@ -432,7 +451,7 @@ export function ConnectedMessageList({
           {currentMessageHistory.error}
           {currentMessageHistory.retryOlderPage && onLoadOlderSessionMessages ? (
             <button type="button" className="ml-3 underline" disabled={currentMessageHistory.isLoadingOlder}
-              onClick={() => loadOlderHistory(true)}>重试</button>
+              onClick={() => loadOlderHistory()}>重试</button>
           ) : onRetryHistory && currentSessionId && (
             <button type="button" className="ml-3 underline" onClick={() => void onRetryHistory(currentSessionId)}>重试</button>
           )}
@@ -446,7 +465,7 @@ export function ConnectedMessageList({
           <button type="button" data-testid="history-load-older"
             className="text-sm text-text-secondary underline disabled:opacity-50"
             disabled={currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing}
-            onClick={() => loadOlderHistory(true)}>
+            onClick={() => loadOlderHistory()}>
             {currentMessageHistory.isLoadingOlder || currentMessageHistory.preparing ? '正在加载…' : '加载更早的消息'}
           </button>
         </div>
@@ -476,6 +495,10 @@ export function ConnectedMessageList({
         checkpoints={checkpointResumeEnabled ? checkpoints : []}
         onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}
+        followLatest={stickToBottomRef}
+        historyScrollPending={loadingOlderRef}
+        historyRevealPending={revealOlderRef}
+        sessionId={currentSessionId}
         className={className}
       />
       <AttachmentPreview

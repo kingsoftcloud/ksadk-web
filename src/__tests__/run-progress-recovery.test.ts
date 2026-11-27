@@ -84,6 +84,31 @@ describe('trailing feedback reconciles with durable session state', () => {
     expect(useStreamingStore.getState().getSessionActivity('a')).toMatchObject({ source: 'run', phase: '正在处理' });
   });
 
+  it('clears completed progress while supplementary history is still loading', async () => {
+    start();
+    let release!: (page: Awaited<ReturnType<ApiFacade['listSessionEvents']>>) => void;
+    const detail = new Promise<Awaited<ReturnType<ApiFacade['listSessionEvents']>>>(resolve => { release = resolve; });
+    const { actions } = lifecycle({ getSession: vi.fn().mockResolvedValue({ ActiveInvocationId: 'run-a', ActiveRunStatus: 'completed' }),
+      listSessionEvents: vi.fn().mockReturnValue(detail) });
+    const loading = actions.loadSession('a');
+    try {
+      await vi.waitFor(() => expect(useStreamingStore.getState().isSessionStreaming('a')).toBe(false));
+    } finally {
+      release({ Events: [], Total: 0 } as Awaited<ReturnType<ApiFacade['listSessionEvents']>>);
+      await loading;
+    }
+  });
+
+  it('does not reattach a completed local run in response to a stale active projection', async () => {
+    start('run-a', 'run');
+    useStreamingStore.getState().setSessionStreaming('a', false);
+    useStreamingStore.getState().updateActivity({ sessionId: 'a', status: 'completed', phase: '运行完成' });
+    const { actions, api } = lifecycle({ getSession: vi.fn().mockResolvedValue({ ActiveInvocationId: 'run-a', ActiveRunStatus: 'running' }) });
+    await actions.loadSession('a');
+    expect(api.subscribeRunEvents).not.toHaveBeenCalled();
+    expect(useStreamingStore.getState().isSessionStreaming('a')).toBe(false);
+  });
+
   it('reports an unconfirmed state when the session query fails', async () => {
     start();
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});

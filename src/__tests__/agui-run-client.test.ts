@@ -12,6 +12,19 @@ function sse(events: Array<Record<string, unknown>>): Response {
 }
 
 describe('AguiRunClient', () => {
+  it('binds the initial user input to its admitted command before consuming the stream', async () => {
+    const admit = vi.fn();
+    const client = new AguiRunClient({ url: '/agui', agentId: 'a', threadId: 's', onEvent: () => {},
+      fetch: (async () => {
+        const response = sse([{ type: 'RUN_STARTED', threadId: 's', runId: 'wire' },
+          { type: 'RUN_FINISHED', threadId: 's', runId: 'wire', outcome: { type: 'success' } }]);
+        response.headers.set('X-AgentEngine-AGUI-Command-Id', 'command-of-wire');
+        return response;
+      }) as typeof fetch });
+    expect((await client.run('input', 'wire', undefined, admit)).status).toBe('completed');
+    expect(admit).toHaveBeenCalledExactlyOnceWith('command-of-wire');
+  });
+
   it.each([false, true])('keeps activity ownership on the original logical run through resume, rehydrated=%s', async rehydrated => {
     const projected: RunEvent[] = [];
     const bodies: Array<Record<string, unknown>> = [];

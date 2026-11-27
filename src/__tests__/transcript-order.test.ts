@@ -4,6 +4,8 @@ import { mapBackendMessages } from '../utils/messages.js';
 import { rebuildPersistedSessionHistory } from '../utils/persisted-session-history.js';
 import { mergeHistoryWithLive, orderTranscript, preserveRecoveredUserInput } from '../utils/transcript-order.js';
 import type { Message } from '../components/chat/types.js';
+import type { ApiFacade } from '../core/api/types.js';
+import { prependItemHistory } from '../utils/session-items.js';
 
 const row = (id: string, seq: number, run: string, role = 'assistant') => ({
   MessageId: id, SeqId: seq, InvocationId: run, Role: role,
@@ -77,6 +79,29 @@ describe('transcript order independent of wall clocks', () => {
 });
 
 describe('history/live merge', () => {
+  it('uses the AG-UI command identity when the wire and durable run IDs differ', () => {
+    const history = prependItemHistory([{ ItemId: 'durable', SeqId: 1, InvocationId: 'kernel-run',
+      EventType: 'user_message', Event: { SessionId: 's', EventId: 'durable', SeqId: 1, InvocationId: 'kernel-run',
+        Timestamp: 1, EventType: 'user_message', Content: { text: 'repeat' },
+        Metadata: { runtime_metadata: { command_id: 'accepted-command' } } } }],
+    {} as ApiFacade, 's', { HistoryEpoch: 'epoch', SnapshotSeqId: 1, CursorSource: 'runtime' }, 'flat-v1').messages;
+    const local: Message = { id: 'local', role: 'user', content: 'repeat', timestamp: 1,
+      invocationId: 'wire-run', commandId: 'accepted-command', eventType: 'optimistic_user_message' };
+    const other = { ...local, id: 'other', invocationId: 'other-wire', commandId: 'other-command' };
+    expect(ids(mergeHistoryWithLive(history, [local, other], [local, other]))).toEqual(['durable', 'other']);
+  });
+
+  it('keeps cached inputs across a stale session reload and replaces each with its own durable echo', () => {
+    const [first, firstAnswer, second, secondAnswer] = rounds();
+    const local = { ...second, id: 'local-2', eventType: 'optimistic_user_message', historyOrder: undefined };
+    const queued = { ...local, id: 'local-3', invocationId: undefined };
+    const cached = [first, firstAnswer, local, queued];
+    expect(ids(mergeHistoryWithLive([first, firstAnswer], cached, cached))).toEqual(['q1', 'a1', 'local-2', 'local-3']);
+    expect(ids(mergeHistoryWithLive([first, firstAnswer, secondAnswer], cached, cached)))
+      .toEqual(['q1', 'a1', 'local-2', 'a2', 'local-3']);
+    expect(ids(mergeHistoryWithLive(rounds(), cached, cached))).toEqual(['q1', 'a1', 'q2', 'a2', 'local-3']);
+  });
+
   it('preserves the recovered run input until its durable row arrives without merging identical text from other turns', () => {
     const [previousInput, previousAnswer, durableInput, answer] = rounds();
     const optimisticInput = { ...durableInput, id: 'optimistic', content: previousInput.content };

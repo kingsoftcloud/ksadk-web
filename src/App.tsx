@@ -143,8 +143,10 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     loadMoreSessions,
     loadSession,
     recoverSessionRun,
+    bindCachedUserInput,
     followAcceptedInteraction,
     loadOlderSessionMessages,
+    prefetchOlderSessionMessages,
     createNewSession,
     adoptCreatedSession,
     waitForPendingSessionCreation,
@@ -206,6 +208,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
     queuedDraftRef,
     onRunSettled: refreshSettledRun,
     onRunRecovered: recoverSessionRun,
+    onUserInputBound: bindCachedUserInput,
     onSessionCreated: (sessionId) => adoptCreatedSession(sessionId, true),
     waitForPendingSessionCreation,
   });
@@ -517,6 +520,7 @@ function AgentWorkbenchContent({ apiAdapter, initialSurface = 'chat', routeShell
               }
               onResumeCheckpoint={resumeCheckpoint}
               onLoadOlderSessionMessages={loadOlderSessionMessages}
+              onPrefetchOlderSessionMessages={prefetchOlderSessionMessages}
               onRetryHistory={loadSession}
               interactionRecords={interactionRecords}
             />

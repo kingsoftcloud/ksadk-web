@@ -61,6 +61,309 @@ test('short-page history has an explicit bounded loader without scrolling', asyn
   await expect(page.getByTestId('history-load-older')).toHaveCount(0);
 });
 
+test('explicit older pages keep the reading position in an overflowing transcript', async ({ page }) => {
+  const recent = Array.from({ length: 28 }, (_, index) =>
+    message(`recent-${index}`, `Recent reply ${index}\n\n` + '- detail line\n'.repeat(index % 6 + 2), index + 28));
+  const older = Array.from({ length: 20 }, (_, index) =>
+    message(`older-${index}`, `Earlier reply ${index}\n\n` + '- detail line\n'.repeat(index % 5 + 2), index + 1));
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok({ ...first(), Messages: recent, LatestSeqId: 55, NextCursor: 28 }) };
+    await held;
+    return { body: ok({ ...first(), Messages: older, HasMore: true, NextCursor: 1, LatestSeqId: 55 }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const latest = page.getByText('Recent reply 27', { exact: true });
+  await expect(latest).toBeInViewport();
+  const offset = () => latest.evaluate(element =>
+    element.getBoundingClientRect().top - element.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByTestId('history-load-older')).toBeDisabled();
+  await expect(latest).toBeInViewport();
+  release();
+  await expect(page.getByTestId('history-load-older')).toBeEnabled();
+  await expect(latest).toBeInViewport();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
+test('scroll-triggered older pages keep the visible message at the same offset', async ({ page }) => {
+  const recent = Array.from({ length: 25 }, (_, index) =>
+    message(`recent-${index}`, `Recent model text ${index}\n\n` + '- details\n'.repeat(index % 4 + 3), index + 21));
+  const older = Array.from({ length: 20 }, (_, index) =>
+    message(`older-${index}`, `Earlier model text ${index}\n\n` + '- details\n'.repeat(index % 5 + 2), index + 1));
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok({ ...first(), Messages: recent, LatestSeqId: 45, NextCursor: 21 }) };
+    await held;
+    return { body: ok({ ...first(), Messages: older, HasMore: false, NextCursor: null, LatestSeqId: 45 }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  await expect(page.getByText('Recent model text 24', { exact: true })).toBeInViewport();
+  const scroller = page.locator('[data-slot="message-list"]');
+  await expect.poll(() => scroller.evaluate(element => (element as HTMLElement).style.scrollBehavior)).toBe('');
+  await scroller.evaluate(element => { element.scrollTop = 100; });
+  await expect(page.getByTestId('history-load-older')).toBeDisabled();
+  const anchor = page.getByText('Recent model text 1', { exact: true });
+  await expect(anchor).toBeInViewport();
+  const relativeOffset = () => anchor.evaluate(element => {
+    const viewport = element.closest('[data-slot="message-list"]')!;
+    return element.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+  });
+  const before = await relativeOffset();
+  release();
+  await expect(page.getByTestId('history-load-older')).toHaveCount(0);
+  await expect(anchor).toBeInViewport();
+  await expect.poll(async () => Math.abs(await relativeOffset() - before)).toBeLessThanOrEqual(2);
+});
+
+test('an upward gesture at the edge reveals a small part of the newly prepended history', async ({ page }) => {
+  const recent = [
+    { ...message('reading', 'I am reading this turn', 9), Role: 'user' },
+    message('last', 'Recent reply\n'.repeat(60), 10),
+  ];
+  const earlier = message('earlier', 'Earlier reply\n'.repeat(15) + '\n\nEnd of the earlier reply', 4);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok({ ...first(), Messages: recent }) };
+    await held;
+    return { body: ok({ ...first(), Messages: [earlier], HasMore: false, NextCursor: null }) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const list = page.locator('[data-slot="message-list"]');
+  await expect.poll(() => list.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+  await expect.poll(() => list.evaluate(el => el.style.scrollBehavior)).toBe('');
+  await list.evaluate(el => { el.scrollTop = 0; });
+  const loader = page.getByTestId('history-load-older');
+  await expect(loader).toBeDisabled();
+  const anchor = list.locator('[data-message-id="reading"]');
+  const position = () => anchor.evaluate(el => {
+    const viewport = el.closest('[data-slot="message-list"]')!;
+    return { offset: el.getBoundingClientRect().top - viewport.getBoundingClientRect().top,
+      reveal: Math.min(48, viewport.clientHeight * 0.08) };
+  });
+  const before = await position();
+  release();
+  await expect(loader).toHaveCount(0);
+  await expect.poll(async () => Math.abs((await position()).offset - before.offset - before.reveal))
+    .toBeLessThanOrEqual(2);
+  await expect(list.getByText('End of the earlier reply', { exact: true })).toBeInViewport();
+});
+
+test('one prefetched cursor is consumed by an upward gesture at the top of a short viewport', async ({ page }) => {
+  const itemPage = (seq: number, text: string, cursor: string | null) => ({
+    HistoryView: 'items-v1', CursorSource: 'runtime', HistoryEpoch: 'pinned', SnapshotSeqId: 2,
+    HasMore: Boolean(cursor), NextItemCursor: cursor, NextCursor: null, LatestSeqId: 2, Messages: [],
+    Items: [{ ItemId: `item-${seq}`, SeqId: seq, EventType: 'user_message',
+      Event: { SessionId: 's', EventId: `event-${seq}`, SeqId: seq, EventType: 'user_message',
+        Content: { parts: [{ text }] } } }],
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(itemPage(2, 'Recent short turn', 'before-2')) };
+    await held;
+    return { body: ok(itemPage(1, 'Older short turn', null)) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const recent = page.getByText('Recent short turn');
+  const older = page.getByTestId('history-load-older');
+  await expect(recent).toBeInViewport();
+  await expect.poll(() => calls.filter(call => call.action === 'ListSessionMessages').length).toBe(2);
+  await expect(older).toBeEnabled();
+  await page.locator('[data-slot="message-list"]').hover();
+  await page.mouse.wheel(0, -120);
+  await expect(older).toBeDisabled();
+  release();
+  await expect(page.getByText('Older short turn')).toBeInViewport();
+  await expect(older).toHaveCount(0);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
+test('a pinned Messages page is prefetched and upward input loads it at the scroll edge', async ({ page }) => {
+  const pinned = { ...first(), CursorSource: 'runtime', HistoryEpoch: 'pinned-messages',
+    SnapshotSeqId: 9, DataSource: 'runtime', Degraded: false, PersistenceDegraded: false,
+    CursorCompatibleWithRuntime: true };
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(pinned) };
+    await held;
+    return { body: ok({ ...pinned, Messages: [message('earlier', 'Earlier pinned message', 1)],
+      HasMore: false, NextCursor: null }) };
+  }, () => ({ body: ok({ Events: [], Total: 0, CursorSource: pinned.CursorSource,
+    HistoryEpoch: pinned.HistoryEpoch, SnapshotSeqId: pinned.SnapshotSeqId }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const loader = page.getByTestId('history-load-older');
+  await expect(page.getByText('Old history')).toBeInViewport();
+  await expect.poll(() => calls.filter(call => call.action === 'ListSessionMessages').length).toBe(2);
+  await expect(loader).toBeEnabled();
+  const list = page.locator('[data-slot="message-list"]');
+  expect(await list.evaluate(el => el.scrollTop)).toBe(0);
+  await list.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(loader).toBeDisabled();
+  release();
+  await expect(page.getByText('Earlier pinned message')).toBeVisible();
+  await expect(loader).toHaveCount(0);
+  const reads = calls.filter(call => call.action === 'ListSessionMessages');
+  expect(reads).toHaveLength(2);
+  expect(reads[1].body).toMatchObject({ BeforeSeqId: 8, SnapshotSeqId: 9, HistoryEpoch: 'pinned-messages' });
+});
+
+test('showing or hiding the bottom button leaves the scroll range unchanged', async ({ page }) => {
+  const tall = Array.from({ length: 120 }, (_, index) => `Reading line ${index}`).join('\n');
+  await intercept(page, () => ({ body: ok({ ...first(), HasMore: false, NextCursor: null,
+    Messages: [message('tall', tall, 9)] }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const scroller = page.locator('[data-slot="message-list"]');
+  await expect(scroller.getByText('Reading line 119', { exact: false })).toBeVisible();
+  await expect.poll(() => scroller.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  const bottom = page.getByRole('button', { name: '回到底部' });
+  await expect(bottom).toHaveCount(0);
+  const height = () => scroller.evaluate(el => el.scrollHeight);
+  const range = await height();
+  await scroller.evaluate(el => { el.scrollTop -= 220; });
+  await expect(bottom).toBeInViewport();
+  expect(await height()).toBe(range);
+  await bottom.click();
+  await expect(bottom).toHaveCount(0);
+  expect(await height()).toBe(range);
+});
+
+test('keeps the visible line when a long reply gains earlier text within its paragraph', async ({ page }) => {
+  const marker = 'The exact reading line stays in place';
+  const lines = (label: string, count: number) =>
+    Array.from({ length: count }, (_, index) => `${label} line ${index} has distinct diagnostic text.`).join('\n');
+  const visible = lines('Retained intro', 70) + '\n**' + marker + '**\n' + lines('Retained tail', 55);
+  const prefix = lines('Earlier paragraph', 15) + '\n\n' + lines('Earlier within the same paragraph', 40) + '\n';
+  const itemPage = (seq: number, text: string, cursor: string | null) => ({
+    HistoryView: 'items-v1', CursorSource: 'runtime', HistoryEpoch: 'partial-reply', SnapshotSeqId: 2,
+    HasMore: Boolean(cursor), NextItemCursor: cursor, NextCursor: null, LatestSeqId: 2, Messages: [],
+    Items: [{ ItemId: `item-${seq}`, SeqId: seq, EventType: 'assistant_stream_delta', InvocationId: 'same-run',
+      Event: { SessionId: 's', EventId: `event-${seq}`, SeqId: seq,
+        EventType: 'assistant_stream_delta', InvocationId: 'same-run', Content: { parts: [{ text }] } } }],
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(itemPage(2, visible, 'before-2')) };
+    await held;
+    return { body: ok(itemPage(1, prefix, null)) };
+  });
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const list = page.locator('[data-slot="message-list"]');
+  const line = list.getByText(marker, { exact: true });
+  await expect(line).toBeVisible();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  await line.evaluate(el => {
+    const scroll = el.closest<HTMLElement>('[data-slot="message-list"]')!;
+    scroll.scrollTop += el.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+  });
+  const offset = () => line.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  const older = page.getByTestId('history-load-older');
+  await older.click();
+  await expect(older).toBeDisabled();
+  release();
+  await expect(older).toHaveCount(0);
+  await expect(list.getByText('Earlier paragraph line 0 has distinct diagnostic text.', { exact: false })).toBeVisible();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
+test('keeps the reader anchored when older detail inserts rows after the first loaded message', async ({ page }) => {
+  const marker = 'Read this line beside the restored detail';
+  const line = (i: number) => `Tall reply line ${i} supports stable reading.`;
+  const text = Array.from({ length: 75 }, (_, i) => i === 45 ? '**' + marker + '**' : line(i)).join('\n');
+  const calls = await intercept(page, (_body, index) => ({
+    body: ok(index === 1 ? { ...first(), Messages: [message('retained-first', 'Retained first row', 1),
+      message('reading', text, 9)] } : { ...first(),
+      Messages: [message('restored', 'Restored detail\n'.repeat(9), 4)], HasMore: false, NextCursor: null }),
+  }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const target = page.getByText(marker, { exact: true });
+  const list = page.locator('[data-slot="message-list"]');
+  await expect(target).toBeVisible();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  await target.evaluate(el => {
+    const scroll = el.closest<HTMLElement>('[data-slot="message-list"]')!;
+    scroll.scrollTop += el.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+  });
+  const offset = () => target.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  const loader = page.getByTestId('history-load-older');
+  await loader.click();
+  await expect(loader).toHaveCount(0);
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
+test('remeasuring a clipped row keeps the visible content below it in place before paint', async ({ page }, testInfo) => {
+  const marker = 'Visible text below the clipped message';
+  const clipped = Array.from({ length: 85 }, (_, i) => `Earlier model text line ${i}`).join('\n');
+  const tail = Array.from({ length: 85 }, (_, i) => `Visible model reply line ${i}`).join('\n');
+  await intercept(page, () => ({ body: ok({ ...first(), HasMore: false, NextCursor: null,
+    Messages: [message('clipped', clipped, 4), message('reading', marker + '\n' + tail, 9)] }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const target = page.locator('[data-message-id="reading"]');
+  const list = page.locator('[data-slot="message-list"]');
+  await expect(target).toBeVisible();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  await list.evaluate(el => {
+    const row = el.querySelector('[data-message-id="reading"]')!;
+    el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - 100;
+  });
+  await expect(target).toBeInViewport();
+  const offset = () => target.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  const beforeScroll = await list.evaluate(el => el.scrollTop);
+  const growth = Number(testInfo.project.metadata.growth ?? 183);
+  const firstFrame = await list.locator('[data-message-id="clipped"]').evaluate((row, delta) => {
+    const height = row.getBoundingClientRect().height;
+    const firstText = row.querySelector('p')?.firstChild;
+    if (!firstText) throw new Error('Clipped text node not found');
+    // Reproduce the browser choosing a caret above the visible reading line.
+    Object.defineProperty(document, 'caretPositionFromPoint', {
+      configurable: true, value: () => ({ offsetNode: firstText, offset: 0 }),
+    });
+    (row as HTMLElement).style.height = `${height + delta}px`;
+    return new Promise<number>(resolve => requestAnimationFrame(() =>
+      resolve(row.closest('[data-slot="message-list"]')!.scrollTop)));
+  }, growth);
+  expect(Math.abs(firstFrame - beforeScroll - growth)).toBeLessThanOrEqual(2);
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+});
+
+test('a short viewport stays detached from the live edge while prepending', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 850 });
+  const current = 'Current view stays in the same place';
+  const recent = 'Latest model reply\n'.repeat(16);
+  const older = 'Older tall model reply\n'.repeat(35);
+  await intercept(page, (_body, index) => ({ body: ok(index === 1 ? { ...first(),
+    Messages: [{ ...message('current', current, 9), Role: 'user' }, message('latest', recent, 10)],
+  } : { ...first(), Messages: [message('earlier', older, 4)], HasMore: false, NextCursor: null }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const list = page.locator('[data-slot="message-list"]');
+  const target = list.getByText(current, { exact: true });
+  await expect(target).toBeInViewport();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  const offset = () => target.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  await page.getByTestId('history-load-older').click();
+  await expect(page.getByTestId('history-load-older')).toHaveCount(0);
+  await expect(target).toBeInViewport();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+});
+
 test('short-page loader disables repeats and ignores a response after switching sessions', async ({ page }) => {
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });

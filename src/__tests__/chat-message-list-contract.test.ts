@@ -12,7 +12,7 @@ describe('chat message list contracts', () => {
 
     expect(source).toContain('stickToBottomRef');
     expect(source).toContain('userDetachedFromBottomRef');
-    expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('scroller.scrollTop < historyLoadDistance');
     expect(source).toContain('!needsInitialScrollRef.current');
     expect(source).toContain('scrolledUp &&');
     expect(source).toContain('const keepAttachedToBottom');
@@ -98,13 +98,13 @@ describe('chat message list contracts', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ConnectedMessageList.tsx'), 'utf8');
 
     // Preload trigger near the top of the transcript.
-    expect(source).toContain('scroller.scrollTop < 200');
+    expect(source).toContain('scroller.scrollTop < historyLoadDistance');
     expect(source).toContain('loadingOlderRef');
-    // Keep the viewport anchored when prepending older events: capture the
-    // prior scrollHeight and shift scrollTop by the delta.
-    expect(source).toContain('previousScrollHeight');
-    expect(source).toMatch(/nextScroller\.scrollTop\s*\+=\s*delta/);
-    expect(source).toMatch(/previousScrollTopRef\.current\s*=\s*nextScroller\.scrollTop/);
+    const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
+    const anchorSource = readFileSync(resolve(repoRoot, 'src/components/chat/HistoryAnchoredRows.tsx'), 'utf8');
+    expect(listSource).toContain('scroller.scrollTop + delta');
+    expect(anchorSource).toContain('getSnapshotBeforeUpdate');
+    expect(anchorSource).toContain('readingAnchorDelta(scroller, snapshot.anchors)');
   });
 
   it('preloads additional session pages before the sidebar reaches the bottom', () => {
@@ -172,15 +172,18 @@ describe('chat message list contracts', () => {
     expect(source).toContain('new ResizeObserver(measure)');
     expect(source).toContain('observer.observe(node)');
     expect(source).toContain('observer.disconnect()');
-    expect(source).toContain('scroller.scrollTop += height - previousHeight');
+    expect(source).toContain('pendingHeightsRef');
   });
 
   it('virtualizes long message transcripts instead of mapping the full list directly', () => {
     const source = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
 
     expect(source).toContain('calculateVirtualMessageWindow');
-    expect(source).toContain('visibleItems.map((entry)');
-    expect(source).toContain('style={{ height: virtualWindow.totalHeight }}');
+    expect(source).toContain('window={virtualWindow}');
+    const rows = readFileSync(resolve(repoRoot, 'src/components/chat/HistoryAnchoredRows.tsx'), 'utf8');
+    expect(rows).toContain('window.visibleItems');
+    expect(rows).toContain('const gap = layout.offsets[row.index] - layout.offsets[end]');
+    expect(rows).toContain('const tail = window.totalHeight - layout.offsets[end]');
     expect(source).not.toContain('messages.map((message, index) =>');
   });
 
@@ -225,7 +228,7 @@ describe('chat message list contracts', () => {
     const lifecycleSource = readFileSync(resolve(repoRoot, 'src/hooks/useSessionLifecycle.ts'), 'utf8');
 
     expect(lifecycleSource).toContain('loadOlderSessionMessages');
-    expect(lifecycleSource).toContain('beforeSeqId: historyState.nextCursor');
+    expect(lifecycleSource).toContain('beforeSeqId: history.nextCursor');
     expect(lifecycleSource).toContain('SESSION_MESSAGES_PAGE_SIZE');
     // Canonical RuntimeEvent/v2 replay owns new-run transcripts. The latest
     // event page hydrates after the readable message projection, and older
