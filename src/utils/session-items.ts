@@ -241,7 +241,8 @@ function projectSemanticItems(
   const missingInputs = items.filter(item => item.InboxInput && !nativeInputs.has(item.InboxInput.CommandId));
   const inputs = missingInputs.flatMap(item => item.InboxInput?.Text !== undefined
     ? [{ ...item.Event, EventId: 'inbox:' + item.InboxInput.CommandId, EventType: 'user_message',
-      Content: { parts: [{ text: item.InboxInput.Text }] } }] : []);
+      Content: { parts: [{ text: item.InboxInput.Text }] },
+      Metadata: { ...item.Event.Metadata, runtime_metadata: { command_id: item.InboxInput.CommandId } } }] : []);
   const legacy = legacyRows([...records, ...inputs].sort((a, b) => Number(a.SeqId) - Number(b.SeqId)));
   const fallback = [...buildMessagesFromSessionEvents(legacy, { preserveDistinctEvents: true }), ...legacyApprovalRows(legacy), ...legacyActivityRows(legacy)] as Message[];
   const result = rebuildPersistedSessionHistory(fallback, records, sessionId, profile, firstSourceSeqId);
@@ -253,7 +254,7 @@ function projectSemanticItems(
     deferred.push({ id: 'inbox:' + input.CommandId, role: 'user', content: '用户输入',
       timestamp: Number(item.Event.Timestamp) || 0, historyOrder: { seq: item.SeqId },
       historyContentKey: JSON.stringify([sessionId, scope.HistoryEpoch, scope.SnapshotSeqId, scope.CursorSource, item.SeqId, 'inbox']),
-      invocationId: item.InvocationId, readHistoryContent: async (signal, checkpoint) =>
+      invocationId: item.InvocationId, commandId: input.CommandId, readHistoryContent: async (signal, checkpoint) =>
         inputText(await readItemJson(api, sessionId, item.SeqId, scope, signal, checkpoint, 'inbox')) });
   }
   // Historical adapters can carry extension event types. Keep their positions

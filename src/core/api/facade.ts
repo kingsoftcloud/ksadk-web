@@ -176,7 +176,7 @@ export class ApiFacadeImpl implements ApiFacade {
     }, opts);
   }
 
-  async runAgent(body: Record<string, unknown>, opts?: { signal?: AbortSignal }) {
+  async runAgent(body: Record<string, unknown>, opts?: Parameters<ApiFacade['runAgent']>[1]) {
     return this.client.streamAction('RunAgent', body, opts);
   }
 

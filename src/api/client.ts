@@ -204,7 +204,7 @@ export class AgentEngineClient {
   async streamAction(
     action: string,
     body: Record<string, unknown>,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; onCommandAdmitted?: (id: string) => void },
   ): Promise<ReadableStream<Uint8Array>> {
     let response: Response;
     try {
@@ -241,6 +241,8 @@ export class AgentEngineClient {
       throw new ApiError(-1, '无法获取响应流');
     }
 
+    const admittedCommand = response.headers.get('x-agentengine-command-id');
+    if (admittedCommand) options?.onCommandAdmitted?.(admittedCommand);
     return response.body;
   }
 
