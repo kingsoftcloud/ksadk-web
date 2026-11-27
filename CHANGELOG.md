@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.20 - 2026-11-27
+
+- Keep the visible message and reading position steady while loading older conversation history. Prefetch older pages and use a smaller continuation page when a transfer stalls.
+- Recover admitted Hosted AG-UI runs after a connection loss and restore replies without resubmitting the original input.
+- Preserve the user's message and its place in the timeline when switching conversations or reconciling a live response with saved history.
+
 ## 0.3.19 - 2026-11-26
 
 - Page through long conversations while preserving the order of messages and the pairing of tool calls with their results.
