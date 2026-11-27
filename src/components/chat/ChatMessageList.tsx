@@ -1045,7 +1045,7 @@ export function ChatMessageList({
   const pendingHeightsRef = useRef(new Map<string, number>());
   const measurementsFrameRef = useRef(0);
   const viewportFrameRef = useRef(0);
-  const rowsRef = useRef<HTMLDivElement>(null);
+  const historyAnchorRef = useRef<{ key: string; offset: number; scrollTop: number } | null>(null);
 
   const syncViewport = useCallback(() => {
     const scroller = scrollRef.current;
@@ -1086,7 +1086,9 @@ export function ChatMessageList({
     const scroller = scrollRef.current;
     if (!scroller || previous === layout || !previous.items.length) return;
 
-    if (previous.items !== layout.items) {
+    const transcriptChanged = previous.items !== layout.items;
+    if (transcriptChanged) {
+      historyAnchorRef.current = null;
       const firstKey = previous.items[0].id || '0';
       const previousFirstSeq = previous.items[0].historyOrder?.seq;
       const firstSeq = layout.items[0]?.historyOrder?.seq;
@@ -1094,17 +1096,31 @@ export function ChatMessageList({
         || (firstSeq != null && previousFirstSeq != null && firstSeq < previousFirstSeq);
       if (!prepended) return;
     }
-    const top = Math.max(0, scroller.scrollTop - (rowsRef.current?.offsetTop ?? 0));
-    const start = findVirtualMessageIndex(previous.offsets, top);
-    // A partial row can be replaced when its earlier events arrive. Use the
-    // next retained row as the anchor if the first visible row disappeared.
+
+    const scrollTop = scroller.scrollTop;
+    const retainedAnchor = historyAnchorRef.current;
+    if (retainedAnchor && Math.abs(retainedAnchor.scrollTop - scrollTop) < 1) {
+      const index = layout.keyIndex.get(retainedAnchor.key);
+      if (index != null) {
+        scroller.scrollTop = layout.offsets[index] - retainedAnchor.offset;
+        retainedAnchor.scrollTop = scroller.scrollTop;
+        syncViewport();
+        return;
+      }
+    }
+    historyAnchorRef.current = null;
+    const start = findVirtualMessageIndex(previous.offsets, scrollTop);
+    // Keep the same anchor when the next layout replaces estimates above it.
+    // A partial boundary row can disappear, so find the next retained row.
     for (let index = start; index < previous.items.length; index++) {
-      const row = previous.items[index];
-      const nextIndex = layout.keyIndex.get(row.id || String(index));
+      const key = previous.items[index].id || String(index);
+      const nextIndex = layout.keyIndex.get(key);
       if (nextIndex == null) continue;
-      const delta = layout.offsets[nextIndex] - previous.offsets[index];
-      if (delta) {
-        scroller.scrollTop += delta;
+      const offset = previous.offsets[index] - scrollTop;
+      const target = layout.offsets[nextIndex] - offset;
+      if (target !== scrollTop) {
+        scroller.scrollTop = target;
+        if (transcriptChanged) historyAnchorRef.current = { key, offset, scrollTop: scroller.scrollTop };
         syncViewport();
       }
       break;
@@ -1212,7 +1228,7 @@ export function ChatMessageList({
         emptyState === undefined ? <EmptyState agentName={agentName} /> : emptyState
         ) : (
           <>
-            {messages.length > 0 && <div ref={rowsRef} style={{ height: virtualWindow.totalHeight }} className="relative">
+            {messages.length > 0 && <div style={{ height: virtualWindow.totalHeight }} className="relative">
               {visibleItems.map((entry) => (
               <MeasuredMessageRow
                 key={entry.item.id || entry.index}

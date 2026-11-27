@@ -101,8 +101,8 @@ describe('chat message list contracts', () => {
     expect(source).toContain('scroller.scrollTop < historyLoadDistance');
     expect(source).toContain('loadingOlderRef');
     const listSource = readFileSync(resolve(repoRoot, 'src/components/chat/ChatMessageList.tsx'), 'utf8');
-    expect(listSource).toContain('findVirtualMessageIndex(previous.offsets, top)');
-    expect(listSource).toContain('layout.offsets[nextIndex] - previous.offsets[index]');
+    expect(listSource).toContain('findVirtualMessageIndex(previous.offsets, scrollTop)');
+    expect(listSource).toContain('layout.offsets[nextIndex] - offset');
   });
 
   it('preloads additional session pages before the sidebar reaches the bottom', () => {
