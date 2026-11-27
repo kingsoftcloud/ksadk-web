@@ -1046,6 +1046,25 @@ export function ChatMessageList({
   const measurementsFrameRef = useRef(0);
   const viewportFrameRef = useRef(0);
   const historyAnchorRef = useRef<{ key: string; offset: number; scrollTop: number } | null>(null);
+  const historyReserveRef = useRef<HTMLDivElement>(null);
+
+  const positionHistoryAnchor = useCallback((scroller: HTMLDivElement, target: number) => {
+    const reserve = historyReserveRef.current;
+    if (reserve) {
+      let reserved = reserve.offsetHeight;
+      let range = scroller.scrollHeight - scroller.clientHeight;
+      if (target > 0 && range === 0) {
+        // scrollHeight is clamped to the viewport when the transcript fits.
+        // Temporarily measure it with extra space to find the exact shortfall.
+        reserved += scroller.clientHeight + Math.ceil(target);
+        reserve.style.height = `${reserved}px`;
+        range = scroller.scrollHeight - scroller.clientHeight;
+      }
+      const needed = target > 0 ? Math.max(0, Math.ceil(target - range + reserved)) : 0;
+      reserve.style.height = `${needed}px`;
+    }
+    scroller.scrollTop = target;
+  }, []);
 
   const syncViewport = useCallback(() => {
     const scroller = scrollRef.current;
@@ -1094,7 +1113,10 @@ export function ChatMessageList({
       const firstSeq = layout.items[0]?.historyOrder?.seq;
       const prepended = (layout.keyIndex.get(firstKey) ?? 0) > 0
         || (firstSeq != null && previousFirstSeq != null && firstSeq < previousFirstSeq);
-      if (!prepended) return;
+      if (!prepended) {
+        if (historyReserveRef.current) historyReserveRef.current.style.height = '0px';
+        return;
+      }
     }
 
     const scrollTop = scroller.scrollTop;
@@ -1102,7 +1124,7 @@ export function ChatMessageList({
     if (retainedAnchor && Math.abs(retainedAnchor.scrollTop - scrollTop) < 1) {
       const index = layout.keyIndex.get(retainedAnchor.key);
       if (index != null) {
-        scroller.scrollTop = layout.offsets[index] - retainedAnchor.offset;
+        positionHistoryAnchor(scroller, layout.offsets[index] - retainedAnchor.offset);
         retainedAnchor.scrollTop = scroller.scrollTop;
         syncViewport();
         return;
@@ -1119,13 +1141,14 @@ export function ChatMessageList({
       const offset = previous.offsets[index] - scrollTop;
       const target = layout.offsets[nextIndex] - offset;
       if (target !== scrollTop) {
-        scroller.scrollTop = target;
+        if (transcriptChanged) positionHistoryAnchor(scroller, target);
+        else scroller.scrollTop = target;
         if (transcriptChanged) historyAnchorRef.current = { key, offset, scrollTop: scroller.scrollTop };
         syncViewport();
       }
       break;
     }
-  }, [layout, scrollRef, syncViewport]);
+  }, [layout, positionHistoryAnchor, scrollRef, syncViewport]);
 
   const flushMeasurements = useCallback(() => {
     cancelAnimationFrame(measurementsFrameRef.current);
@@ -1156,9 +1179,15 @@ export function ChatMessageList({
     if (viewportFrameRef.current) return;
     viewportFrameRef.current = requestAnimationFrame(() => {
       viewportFrameRef.current = 0;
+      const scroller = scrollRef.current;
+      const reserve = historyReserveRef.current;
+      if (scroller && reserve?.offsetHeight
+        && scroller.scrollTop <= Math.max(0, scroller.scrollHeight - reserve.offsetHeight - scroller.clientHeight)) {
+        reserve.style.height = '0px';
+      }
       syncViewport();
     });
-  }, [syncViewport]);
+  }, [scrollRef, syncViewport]);
 
   const visibleItems = virtualWindow.visibleItems;
   const unprojectedInputHistory = useMemo(
@@ -1275,6 +1304,7 @@ export function ChatMessageList({
         {progressLabel && <div data-testid={showWaitingIndicator ? 'waiting-first-token' : undefined}>
           <RunProgressIndicator label={progressLabel} />
         </div>}
+        <div ref={historyReserveRef} aria-hidden="true" className="shrink-0" />
       </div>
       <StatusBanner />
       {showScrollToBottom ? (
@@ -1283,6 +1313,7 @@ export function ChatMessageList({
           aria-label="回到底部"
           data-distance-from-bottom={Math.round(remainingDistance)}
           onClick={() => {
+            if (historyReserveRef.current) historyReserveRef.current.style.height = '0px';
             if (onScrollToBottom) {
               onScrollToBottom();
               return;
