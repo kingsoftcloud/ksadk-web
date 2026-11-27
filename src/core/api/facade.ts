@@ -5,7 +5,10 @@ import {
   type AgentEngineClientOptions,
 } from '../../api/client.js';
 import { decodeActionReceipt } from '../../types/agent-control.js';
-import { normalizeSessionMessagesResponse, type ListSessionMessagesResponse, type ListSessionMessagesOptions } from '../../api/messages.js';
+import {
+  normalizeSessionMessagesResponse, readSessionMessagePage,
+  type ListSessionMessagesResponse, type ListSessionMessagesOptions,
+} from '../../api/messages.js';
 
 type ListSessionsData = {
   Sessions?: unknown[];
@@ -129,7 +132,7 @@ export class ApiFacadeImpl implements ApiFacade {
     sessionId: string,
     opts?: ListSessionMessagesOptions,
   ) {
-    const data = await this.client.postJsonAction<ListSessionMessagesResponse>('ListSessionMessages', {
+    const data = await readSessionMessagePage(opts, (limit, signal) => this.client.postJsonAction<ListSessionMessagesResponse>('ListSessionMessages', {
       AgentId: opts?.agentId,
       SessionId: sessionId,
       HistoryView: opts?.historyView,
@@ -142,11 +145,11 @@ export class ApiFacadeImpl implements ApiFacade {
       CursorSource: opts?.cursorSource,
       HistoryEpoch: opts?.historyEpoch,
       SnapshotSeqId: opts?.snapshotSeqId,
-      Limit: opts?.limit,
+      Limit: limit,
       IncludeReasoning: opts?.includeReasoning,
       IncludeToolEvents: opts?.includeToolEvents,
       IncludeAttachments: opts?.includeAttachments,
-    }, opts);
+    }, { signal }));
     return normalizeSessionMessagesResponse(data);
   }
 

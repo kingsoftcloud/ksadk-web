@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { listSessionMessages } from '../api/messages.js';
+import { listSessionMessages, readSessionMessagePage } from '../api/messages.js';
 import { listSessionEvents } from '../api/events.js';
 import { ApiFacadeImpl } from '../core/api/facade.js';
 
@@ -11,6 +11,35 @@ const page = {
 };
 
 describe('session message history API contract', () => {
+  it('uses a smaller page when the primary response body stalls', async () => {
+    vi.useFakeTimers();
+    const read = vi.fn((limit: number | undefined, signal: AbortSignal | undefined) => {
+      if (limit === 50) return Promise.resolve('smaller-page');
+      return new Promise<string>((_, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    try {
+      const result = readSessionMessagePage({ itemCursor: 'opaque', limit: 200 }, read);
+      expect(read).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2500);
+      await expect(result).resolves.toBe('smaller-page');
+      expect(read.mock.calls.map(([limit]) => limit)).toEqual([200, 50]);
+      expect(read.mock.calls[0]?.[1]?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not start a fallback for a fast success or an immediate error', async () => {
+    const read = vi.fn(async () => 'original-page');
+    await expect(readSessionMessagePage({ itemCursor: 'opaque', limit: 200 }, read)).resolves.toBe('original-page');
+    expect(read).toHaveBeenCalledOnce();
+    read.mockRejectedValueOnce(new Error('denied'));
+    await expect(readSessionMessagePage({ itemCursor: 'opaque', limit: 200 }, read)).rejects.toThrow('denied');
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['hosted action', listSessionMessages],
     ['embedded facade', new ApiFacadeImpl().listSessionMessages.bind(new ApiFacadeImpl())],
