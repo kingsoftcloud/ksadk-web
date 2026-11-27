@@ -150,6 +150,57 @@ test('one prefetched cursor is consumed by an upward gesture at the top of a sho
   expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });
 
+test('a pinned Messages page is prefetched and upward input loads it at the scroll edge', async ({ page }) => {
+  const pinned = { ...first(), CursorSource: 'runtime', HistoryEpoch: 'pinned-messages',
+    SnapshotSeqId: 9, DataSource: 'runtime', Degraded: false, PersistenceDegraded: false,
+    CursorCompatibleWithRuntime: true };
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const calls = await intercept(page, async (_body, index) => {
+    if (index === 1) return { body: ok(pinned) };
+    await held;
+    return { body: ok({ ...pinned, Messages: [message('earlier', 'Earlier pinned message', 1)],
+      HasMore: false, NextCursor: null }) };
+  }, () => ({ body: ok({ Events: [], Total: 0, CursorSource: pinned.CursorSource,
+    HistoryEpoch: pinned.HistoryEpoch, SnapshotSeqId: pinned.SnapshotSeqId }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const loader = page.getByTestId('history-load-older');
+  await expect(page.getByText('Old history')).toBeInViewport();
+  await expect.poll(() => calls.filter(call => call.action === 'ListSessionMessages').length).toBe(2);
+  await expect(loader).toBeEnabled();
+  const list = page.locator('[data-slot="message-list"]');
+  expect(await list.evaluate(el => el.scrollTop)).toBe(0);
+  await list.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(loader).toBeDisabled();
+  release();
+  await expect(page.getByText('Earlier pinned message')).toBeVisible();
+  await expect(loader).toHaveCount(0);
+  const reads = calls.filter(call => call.action === 'ListSessionMessages');
+  expect(reads).toHaveLength(2);
+  expect(reads[1].body).toMatchObject({ BeforeSeqId: 8, SnapshotSeqId: 9, HistoryEpoch: 'pinned-messages' });
+});
+
+test('showing or hiding the bottom button leaves the scroll range unchanged', async ({ page }) => {
+  const tall = Array.from({ length: 120 }, (_, index) => `Reading line ${index}`).join('\n');
+  await intercept(page, () => ({ body: ok({ ...first(), HasMore: false, NextCursor: null,
+    Messages: [message('tall', tall, 9)] }) }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const scroller = page.locator('[data-slot="message-list"]');
+  await expect(scroller.getByText('Reading line 119', { exact: false })).toBeVisible();
+  await expect.poll(() => scroller.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  const bottom = page.getByRole('button', { name: '回到底部' });
+  await expect(bottom).toHaveCount(0);
+  const height = () => scroller.evaluate(el => el.scrollHeight);
+  const range = await height();
+  await scroller.evaluate(el => { el.scrollTop -= 220; });
+  await expect(bottom).toBeInViewport();
+  expect(await height()).toBe(range);
+  await bottom.click();
+  await expect(bottom).toHaveCount(0);
+  expect(await height()).toBe(range);
+});
+
 test('keeps the visible line when a long reply gains earlier text within its paragraph', async ({ page }) => {
   const marker = 'The exact reading line stays in place';
   const lines = (label: string, count: number) =>
@@ -188,6 +239,34 @@ test('keeps the visible line when a long reply gains earlier text within its par
   release();
   await expect(older).toHaveCount(0);
   await expect(list.getByText('Earlier paragraph line 0 has distinct diagnostic text.', { exact: false })).toBeVisible();
+  await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
+  expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
+});
+
+test('keeps the reader anchored when older detail inserts rows after the first loaded message', async ({ page }) => {
+  const marker = 'Read this line beside the restored detail';
+  const line = (i: number) => `Tall reply line ${i} supports stable reading.`;
+  const text = Array.from({ length: 75 }, (_, i) => i === 45 ? '**' + marker + '**' : line(i)).join('\n');
+  const calls = await intercept(page, (_body, index) => ({
+    body: ok(index === 1 ? { ...first(), Messages: [message('retained-first', 'Retained first row', 1),
+      message('reading', text, 9)] } : { ...first(),
+      Messages: [message('restored', 'Restored detail\n'.repeat(9), 4)], HasMore: false, NextCursor: null }),
+  }));
+  await page.getByRole('button', { name: 'Open S' }).click();
+  const target = page.getByText(marker, { exact: true });
+  const list = page.locator('[data-slot="message-list"]');
+  await expect(target).toBeVisible();
+  await expect.poll(() => list.evaluate(el => (el as HTMLElement).style.scrollBehavior)).toBe('');
+  await target.evaluate(el => {
+    const scroll = el.closest<HTMLElement>('[data-slot="message-list"]')!;
+    scroll.scrollTop += el.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+  });
+  const offset = () => target.evaluate(el => el.getBoundingClientRect().top
+    - el.closest('[data-slot="message-list"]')!.getBoundingClientRect().top);
+  const before = await offset();
+  const loader = page.getByTestId('history-load-older');
+  await loader.click();
+  await expect(loader).toHaveCount(0);
   await expect.poll(async () => Math.abs(await offset() - before)).toBeLessThanOrEqual(2);
   expect(calls.filter(call => call.action === 'ListSessionMessages')).toHaveLength(2);
 });

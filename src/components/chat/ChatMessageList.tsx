@@ -94,6 +94,8 @@ export type ChatMessageListProps = {
   /** Interaction records for the current session, used for read-only status and anchors. */
   interactionRecords?: readonly Interaction[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  historyScrollPending?: RefObject<boolean>;
+  sessionId?: string | null;
   className?: string;
   /** Explicit navigation to a row that may be outside the virtual window. */
   revealMessage?: { id: string; request: number } | null;
@@ -1028,6 +1030,8 @@ export function ChatMessageList({
   onResumeCheckpoint,
   interactionRecords,
   scrollRef,
+  historyScrollPending,
+  sessionId,
   className,
   revealMessage,
 }: ChatMessageListProps) {
@@ -1229,6 +1233,8 @@ export function ChatMessageList({
               layout={layout}
               window={virtualWindow}
               scrollRef={scrollRef}
+              historyScrollPending={historyScrollPending}
+              sessionId={sessionId}
               onAnchor={applyReadingAnchor}
               onReset={resetHistoryReserve}
               renderRow={(entry) => (
@@ -1283,36 +1289,40 @@ export function ChatMessageList({
       </div>
       <StatusBanner />
       {showScrollToBottom ? (
-        <button
-          type="button"
-          aria-label="回到底部"
-          data-distance-from-bottom={Math.round(remainingDistance)}
-          onClick={() => {
-            resetHistoryReserve();
-            if (onScrollToBottom) {
-              onScrollToBottom();
-              return;
-            }
-            const scroller = scrollRef.current;
-            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
-          }}
-          className="sticky bottom-4 left-1/2 z-20 mx-auto flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
-          title="回到底部"
-        >
-          {isStreaming ? (
-            <span aria-hidden="true" className="flex items-center gap-0.5" data-scroll-indicator="streaming">
-              {[0, 1, 2].map((index) => (
-                <span
-                  key={index}
-                  className="h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none"
-                  style={{ animationDelay: `${index * 120}ms` }}
-                />
-              ))}
-            </span>
-          ) : (
-            <ChevronDown aria-hidden="true" className="h-5 w-5" data-scroll-indicator="idle" />
-          )}
-        </button>
+        // Keep the button out of the scroll range. Removing it must not
+        // clamp the scroll position while a history anchor is being held.
+        <div className="pointer-events-none sticky bottom-0 z-20 h-0">
+          <button
+            type="button"
+            aria-label="回到底部"
+            data-distance-from-bottom={Math.round(remainingDistance)}
+            onClick={() => {
+              resetHistoryReserve();
+              if (onScrollToBottom) {
+                onScrollToBottom();
+                return;
+              }
+              const scroller = scrollRef.current;
+              if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
+            }}
+            className="pointer-events-auto absolute bottom-4 left-1/2 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-text-secondary shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:text-text-primary"
+            title="回到底部"
+          >
+            {isStreaming ? (
+              <span aria-hidden="true" className="flex items-center gap-0.5" data-scroll-indicator="streaming">
+                {[0, 1, 2].map((index) => (
+                  <span
+                    key={index}
+                    className="h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none"
+                    style={{ animationDelay: `${index * 120}ms` }}
+                  />
+                ))}
+              </span>
+            ) : (
+              <ChevronDown aria-hidden="true" className="h-5 w-5" data-scroll-indicator="idle" />
+            )}
+          </button>
+        </div>
       ) : null}
     </div>
   );

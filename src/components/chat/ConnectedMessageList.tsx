@@ -10,7 +10,7 @@ import { useBootstrapStore } from '../../stores/bootstrap.js';
 import { ChatMessageList } from './ChatMessageList';
 import { AttachmentPreview } from './AttachmentPreview';
 import { buildComposerContextIndicator } from '../../utils/context.js';
-import { ownsOlderMessageScrollRequest } from '../../utils/session-message-history.js';
+import { ownsOlderMessageScrollRequest, prefetchHistoryCursor } from '../../utils/session-message-history.js';
 import type { ComposerContextIndicator, Message, MessageAttachment } from './types';
 import type { ModelStore } from '../../stores/model.js';
 import type { SessionStore } from '../../stores/session.js';
@@ -215,10 +215,10 @@ export function ConnectedMessageList({
     });
   }, [currentMessageHistory, currentSessionId, onLoadOlderSessionMessages]);
 
-  const prefetchCursor = currentMessageHistory?.historyView === 'items-v1'
-    && currentMessageHistory.hasMore && !currentMessageHistory.retryOlderPage
-    ? currentMessageHistory.nextItemCursor : null;
-  const canPrefetchHistory = Boolean(prefetchCursor && onPrefetchOlderSessionMessages);
+  const prefetchCursor = prefetchHistoryCursor(currentMessageHistory ?? undefined);
+  const canPrefetchHistory = prefetchCursor !== null && Boolean(onPrefetchOlderSessionMessages);
+  const canAutoLoadHistory = Boolean(currentSessionId && currentMessageHistory?.hasMore
+    && !currentMessageHistory.retryOlderPage && !isLoadingInitialHistory && onLoadOlderSessionMessages);
 
   useEffect(() => {
     if (!currentSessionId || !canPrefetchHistory || isLoadingInitialHistory || isStreaming
@@ -245,12 +245,9 @@ export function ConnectedMessageList({
         !needsInitialScrollRef.current &&
         scrolledUp &&
         scroller.scrollTop < historyLoadDistance &&
-        currentSessionId &&
-        currentMessageHistory?.hasMore &&
-        !currentMessageHistory.isLoadingOlder &&
-        !currentMessageHistory.retryOlderPage &&
-        !loadingOlderRef.current &&
-        onLoadOlderSessionMessages
+        canAutoLoadHistory &&
+        !currentMessageHistory?.isLoadingOlder &&
+        !loadingOlderRef.current
       ) {
         loadOlderHistory();
       }
@@ -272,7 +269,7 @@ export function ConnectedMessageList({
     };
 
     const loadAtTop = () => {
-      if (canPrefetchHistory && scroller.scrollTop <= 1) loadOlderHistory();
+      if (canAutoLoadHistory && scroller.scrollTop <= 1) loadOlderHistory();
     };
     const onWheel = (event: WheelEvent) => {
       // A scroller already at its upper edge emits no further scroll events.
@@ -296,7 +293,7 @@ export function ConnectedMessageList({
       scroller.removeEventListener('touchstart', onTouchStart);
       scroller.removeEventListener('touchmove', onTouchMove);
     };
-  }, [canPrefetchHistory, currentMessageHistory, currentSessionId, loadOlderHistory, onLoadOlderSessionMessages]);
+  }, [canAutoLoadHistory, canPrefetchHistory, currentMessageHistory, loadOlderHistory]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -490,6 +487,8 @@ export function ConnectedMessageList({
         checkpoints={checkpointResumeEnabled ? checkpoints : []}
         onResumeCheckpoint={onResumeCheckpoint}
         scrollRef={scrollRef}
+        historyScrollPending={loadingOlderRef}
+        sessionId={currentSessionId}
         className={className}
       />
       <AttachmentPreview

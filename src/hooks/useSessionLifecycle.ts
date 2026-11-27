@@ -31,6 +31,7 @@ import {
   resolveSessionToRestore,
 } from '../utils/session.js';
 import { resolveNextSessionsPage } from '../utils/session-pagination.js';
+import { prefetchHistoryCursor } from '../utils/session-message-history.js';
 import type { Message, Session } from '../components/chat/types.js';
 import type { SessionEventRecord } from '../types/session-events.js';
 import type { UiCapabilities } from '../types/capabilities.js';
@@ -176,10 +177,10 @@ type OlderItemBatch = Awaited<ReturnType<typeof readOlderItemBatch>>;
 type OlderHistoryPrefetch = {
   sessionId: string;
   generation: number;
-  cursor: string;
-  projection: ItemProjection;
+  cursor: string | number;
+  projection?: ItemProjection;
   controller: AbortController;
-  result: Promise<OlderItemBatch | null>;
+  result: Promise<{ page: MessageHistoryPage; batch: OlderItemBatch | null } | null>;
 };
 
 function historyPageMetadata(page: Omit<ListSessionMessagesResponse, 'Messages'>) {
@@ -1326,11 +1327,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
   const prefetchOlderSessionMessages = useCallback((sessionId: string) => {
     const history = useSessionStore.getState().messageHistory[sessionId];
     const projection = eventHistoryBySessionRef.current.get(sessionId)?.itemProjection;
-    if (currentSessionIdRef.current !== sessionId || history?.historyView !== 'items-v1'
-      || !history.nextItemCursor || !history.hasMore || !projection || history.isLoadingInitial
-      || history.isLoadingOlder || history.retryOlderPage) return;
+    const cursor = prefetchHistoryCursor(history);
+    if (currentSessionIdRef.current !== sessionId || !history || cursor === null
+      || history.isLoadingInitial || history.isLoadingOlder
+      || (history.historyView === 'items-v1' && !projection)) return;
     const generation = loadSessionGenerationRef.current;
-    const cursor = history.nextItemCursor;
     const outstanding = olderPrefetchRef.current;
     if (outstanding?.sessionId === sessionId && outstanding.generation === generation
       && outstanding.cursor === cursor && outstanding.projection === projection) return;
@@ -1342,9 +1343,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       controller.signal.throwIfAborted();
       return api.listSessionMessages(sessionId, pageOptions);
     };
-    const result = read(options).then(page =>
-      readOlderItemBatch(api, sessionId, options, projection, profile, read, page),
-    ).catch(() => null);
+    const result = read(options).then(async page => {
+      const batch = projection && options.itemCursor
+        ? await readOlderItemBatch(api, sessionId, options, projection, profile, read, page) : null;
+      return { page: batch?.page ?? page, batch };
+    }).catch(() => null);
     olderPrefetchRef.current = { sessionId, generation, cursor, projection, controller, result };
   }, [api]);
 
@@ -1381,10 +1384,11 @@ export function useSessionLifecycle(ctx: SessionLifecycleContext) {
       const readMessages = async () => {
         const pending = olderPrefetchRef.current;
         if (!signal && pending?.sessionId === sessionId && pending.generation === generation
-          && pending.cursor === options.itemCursor && pending.projection === cachedEvents?.itemProjection) {
-          const batch = await pending.result;
+          && pending.cursor === (options.itemCursor ?? options.beforeSeqId)
+          && pending.projection === cachedEvents?.itemProjection) {
+          const prefetched = await pending.result;
           if (olderPrefetchRef.current === pending) olderPrefetchRef.current = null;
-          if (batch) return { page: batch.page, batch };
+          if (prefetched) return prefetched;
         }
         return { page: await read(options), batch: null };
       };

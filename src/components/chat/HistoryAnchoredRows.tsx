@@ -11,6 +11,8 @@ type Props = {
   layout: Layout;
   window: Window;
   scrollRef: RefObject<HTMLDivElement | null>;
+  historyScrollPending?: RefObject<boolean>;
+  sessionId?: string | null;
   onAnchor: (scroller: HTMLDivElement, delta: number, historyChanged: boolean) => void;
   onReset: () => void;
   renderRow: (entry: Row) => ReactNode;
@@ -38,7 +40,7 @@ function precedes(previous: Layout, next: Layout): boolean {
 // The virtual window keeps those rows mounted for the corresponding commit.
 export class HistoryAnchoredRows extends Component<Props> {
   private committed: Props | undefined;
-  private retained: { snapshot: Snapshot; scrollTop: number } | undefined;
+  private retained: { snapshot: Snapshot; scrollTop: number; range: number } | undefined;
 
   componentDidMount() {
     this.committed = this.props;
@@ -47,13 +49,22 @@ export class HistoryAnchoredRows extends Component<Props> {
   getSnapshotBeforeUpdate(previous: Props): Snapshot | null {
     const { layout, scrollRef } = this.props;
     const scroller = scrollRef.current;
-    if (!scroller || previous.layout === layout || !previous.layout.items.length) return null;
+    if (!scroller) return null;
+    if (previous.sessionId !== this.props.sessionId) return { anchors: [], historyChanged: false, reset: true };
+    if (previous.layout === layout || !previous.layout.items.length) return null;
     const historyChanged = previous.layout.items !== layout.items;
-    if (historyChanged && !precedes(previous.layout, layout)) {
+    if (historyChanged && !this.props.historyScrollPending?.current && !precedes(previous.layout, layout)) {
       return { anchors: [], historyChanged, reset: true };
     }
-    if (!historyChanged && this.retained && Math.abs(scroller.scrollTop - this.retained.scrollTop) < 1) {
-      return this.retained.snapshot;
+    if (!historyChanged && this.retained) {
+      const range = scroller.scrollHeight - scroller.clientHeight;
+      // A shrinking scroll range can clamp scrollTop while the reader has
+      // stayed still. Retain the original reading anchor across that clamp.
+      const clamped = range < this.retained.range && range < this.retained.scrollTop
+        && Math.abs(scroller.scrollTop - range) < 1;
+      if (clamped || Math.abs(scroller.scrollTop - this.retained.scrollTop) < 1) {
+        return this.retained.snapshot;
+      }
     }
     const anchors = captureReadingAnchors(scroller, historyChanged);
     return { anchors, historyChanged };
@@ -72,14 +83,18 @@ export class HistoryAnchoredRows extends Component<Props> {
     const delta = readingAnchorDelta(scroller, snapshot.anchors);
     if (delta === undefined) return;
     if (Math.abs(delta) >= 0.5) this.props.onAnchor(scroller, delta, snapshot.historyChanged);
-    if (snapshot.historyChanged) this.retained = { snapshot, scrollTop: scroller.scrollTop };
+    if (snapshot.historyChanged) this.retained = {
+      snapshot, scrollTop: scroller.scrollTop, range: scroller.scrollHeight - scroller.clientHeight,
+    };
   }
 
   render() {
     const { layout, window, renderRow } = this.props;
     const previous = this.committed;
     let rows = window.visibleItems;
-    if (previous && previous.layout !== layout && (previous.layout.items === layout.items || precedes(previous.layout, layout))) {
+    if (previous && previous.sessionId === this.props.sessionId && previous.layout !== layout
+      && (previous.layout.items === layout.items
+      || this.props.historyScrollPending?.current || precedes(previous.layout, layout))) {
       const indices = new Set(rows.map(row => row.index));
       for (const row of previous.window.visibleItems) {
         const index = layout.keyIndex.get(row.item.id || String(row.index));
