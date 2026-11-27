@@ -250,6 +250,20 @@ describe('RunEngineImpl', () => {
     await waitForEngineIdle(engine);
   });
 
+  it('sends only the selected KSXC catalog ID as model information', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const engine = createRunEngine(createApiFacade(calls));
+    engine.updateConfig({ agentId: 'agent', agentFramework: 'ksxc', apiFormats: ['responses'],
+      selectedModel: 'kscc', selectedModelMetadata: { model: 'kscc' }, thinkingMode: 'auto',
+      hostedChatTransport: { Protocol: 'responses', Runtime: 'dsh', Version: 'v1', Endpoint: '/RunAgent',
+        Capabilities: { A2UI: false, Interrupt: false, Cancel: true, SessionEventReplay: true } } });
+    engine.start({ text: 'hello', sessionId: 'session', attachments: [] });
+    await waitForCalls(calls);
+    expect(calls[0].Model).toBe('kscc');
+    expect(calls[0]).not.toHaveProperty('ModelMetadata');
+    await waitForEngineIdle(engine);
+  });
+
   it('keeps each tool call in place when same-name results complete out of order', () => {
     const ids = { sessionId: 'tools-session', messageId: 'tools-message' };
     useSessionStore.getState().setCurrentSessionId(ids.sessionId);

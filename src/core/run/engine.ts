@@ -1308,6 +1308,7 @@ export class RunEngineImpl implements RunEngine {
     invocationId: string,
   ): Record<string, unknown> {
     const executionMetadata = this.buildExecutionMetadata(draft);
+    const framework = this.config.agentFramework.trim().toLowerCase();
     const approvalMode = this.config.hostedChatTransport?.Runtime === 'dsh'
       ? this.config.dshApprovalMode : this.config.permissionMode || 'risk';
     const extensions: Record<string, unknown> = {};
@@ -1315,7 +1316,7 @@ export class RunEngineImpl implements RunEngine {
       extensions['ksadk.presentation'] = { profile: 'agent-block-v1' };
     }
     const declared = this.config.mcpAuthorization;
-    if (this.config.agentFramework.trim().toLowerCase() === 'langgraph'
+    if (framework === 'langgraph'
       && declared?.schema === MCP_AUTHORIZATION_CAPABILITY.schema
       && declared.digest === MCP_AUTHORIZATION_CAPABILITY.digest) {
       extensions['mcp.authorization'] = MCP_AUTHORIZATION_CAPABILITY;
@@ -1330,7 +1331,9 @@ export class RunEngineImpl implements RunEngine {
       ...(Object.keys(extensions).length ? { Extensions: extensions } : {}),
       ApiFormat: apiFormat,
       Model: this.config.selectedModel || undefined,
-      ModelMetadata: this.config.selectedModelMetadata || undefined,
+      // KSXC resolves the chosen ID from the caller's enterprise catalog.
+      ...(framework !== 'ksxc' && this.config.selectedModelMetadata
+        ? {ModelMetadata: this.config.selectedModelMetadata} : {}),
       ModelOptions: buildModelOptionsFromThinkingMode(normalizeThinkingMode(this.config.thinkingMode)),
       // Keep client-selected permission semantics namespaced as runtime controls;
       // the server can validate them and still apply a stricter deployment policy.
