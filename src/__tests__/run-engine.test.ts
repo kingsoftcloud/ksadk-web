@@ -980,6 +980,57 @@ describe('RunEngineImpl', () => {
     ]);
   });
 
+  it.each(['disconnect', 'early EOF'] as const)('replays the admitted AG-UI command after %s', async (failure) => {
+    const sessionId = 'session-agui-replay';
+    const commandId = 'admitted-agui-command';
+    const runId = 'original-runtime-run';
+    const encode = (event: Record<string, unknown>) =>
+      new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+    let stream: ReadableStreamDefaultController<Uint8Array>;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { stream = controller; },
+    }), {
+      headers: { 'content-type': 'text/event-stream', 'X-AgentEngine-AGUI-Command-Id': commandId },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = createApiFacade([]);
+    api.subscribeSessionEvents = vi.fn(async () => new ReadableStream({
+      start(controller) {
+        controller.enqueue(encode({ seq: 4, family: 'runtime', event_type: 'run.started', run_id: runId, session_id: sessionId }));
+        controller.enqueue(encode({ seq: 8, family: 'runtime', event_type: 'run.completed', run_id: runId, session_id: sessionId }));
+        controller.close();
+      },
+    }));
+    const engine = createRunEngine(api);
+    engine.updateConfig({
+      agentId: 'agent-live', apiFormats: ['responses'], agentFramework: 'langgraph',
+      selectedModel: '', thinkingMode: 'auto', kernelCommandEventsEnabled: true,
+      hostedChatTransport: {
+        Protocol: 'ag-ui', Runtime: 'copilotkit', Endpoint: '/agentengine/agui', Version: '1.0',
+        Capabilities: { A2UI: true, Interrupt: true, Cancel: true },
+      },
+    });
+    const onCommandAdmitted = vi.fn();
+    const onRecovered = vi.fn();
+    const onSettled = vi.fn();
+    const onInvocationCreated = vi.fn();
+    engine.start({ sessionId, text: 'Keep the original run', attachments: [], onCommandAdmitted,
+      onRecovered, onSettled, onInvocationCreated });
+    await vi.waitFor(() => expect(onCommandAdmitted).toHaveBeenCalledWith(commandId));
+    stream!.enqueue(encode({ type: 'RUN_STARTED', threadId: sessionId,
+      runId: onInvocationCreated.mock.calls[0][0] }));
+    if (failure === 'disconnect') stream!.error(new TypeError('network lost'));
+    else stream!.close();
+    await waitForEngineIdle(engine);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(api.subscribeSessionEvents).toHaveBeenCalledExactlyOnceWith(
+      sessionId, 0, { commandId, signal: expect.any(AbortSignal) },
+    );
+    expect(onInvocationCreated).toHaveBeenLastCalledWith(runId);
+    expect(onRecovered).toHaveBeenCalledExactlyOnceWith(sessionId, runId);
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith(sessionId, 'completed');
+  });
+
   it('settles session streaming when AG-UI finishes with an approval interrupt', async () => {
     const absentConversationClient: ConversationClient = {
       getSurface: vi.fn(async () => {

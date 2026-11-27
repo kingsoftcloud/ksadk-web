@@ -694,6 +694,7 @@ export function dispatchRunEventToStores(event: RunEvent, projection?: { visible
         previous,
         event.result,
         event.optimisticMessageId,
+        event.replacesInvocationId,
       ));
       bumpEventCount(event.sessionId);
       break;

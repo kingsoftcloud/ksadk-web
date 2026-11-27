@@ -89,7 +89,7 @@ export type RunEvent =
   | { type: 'rate_limited'; retryAfterSec?: number; message?: string; sessionId?: string | null }
   | { type: 'terminal'; status: string; sessionId?: string | null }
   | { type: 'stream_event'; event: import('../../types/session-events.js').SessionEventRecord; sessionId?: string | null }
-  | { type: 'conversation_snapshot'; result: ConversationStreamResult; sessionId?: string | null; optimisticMessageId?: string }
+  | { type: 'conversation_snapshot'; result: ConversationStreamResult; sessionId?: string | null; optimisticMessageId?: string; replacesInvocationId?: string }
   | { type: 'a2ui_surface_begin'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }
   | { type: 'a2ui_surface_update'; surfaceId: string; surface: import('../stream/types.js').A2UISurface; sessionId?: string | null }
   | { type: 'a2ui_surface_end'; surfaceId: string; sessionId?: string | null }

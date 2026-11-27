@@ -481,19 +481,51 @@ export class RunEngineImpl implements RunEngine {
         if (aguiClient && hostedTransport) {
           this.setStage('streaming');
           this.emit({ type: 'activity', phase: '等待 AG-UI 输出', status: 'waiting', countEvent: false });
-          const aguiResult = await aguiClient.run(
-            draft.text,
-            invocationId,
-            this.abortController?.signal,
-            draft.onCommandAdmitted,
-          );
-          if (aguiResult.status === 'interrupted') {
+          let commandId: string | undefined;
+          const signal = this.abortController?.signal;
+          let status: string | undefined;
+          try {
+            const result = await aguiClient.run(draft.text, invocationId, signal, admitted => {
+              commandId = admitted;
+              draft.onCommandAdmitted?.(admitted);
+              reportDispatch(true);
+            });
+            status = result.status;
+          } catch (error) {
+            if (!commandId || signal?.aborted || !this.config.kernelCommandEventsEnabled) throw error;
+            status = 'incomplete';
+          }
+          if (this.operationEpoch !== operationEpoch) return;
+          if (status === 'incomplete' && commandId && this.config.kernelCommandEventsEnabled) {
+            this.setStage('recovering');
+            this.emit({ type: 'activity', phase: '网络异常，尝试重连', status: 'waiting', countEvent: false });
+            // AG-UI has no session cursor. The admission ID scopes the replay
+            // to the original command without resending the user's input.
+            this.recordCursor(0);
+            const recovered = await this.consumeKernelRunEvents(
+              sessionId,
+              { commandId, status: 'accepted' },
+              draft.onInvocationCreated,
+              'flat-v1',
+              { invocationId, optimisticMessageId: draft.optimisticMessageId },
+            );
+            if (this.operationEpoch !== operationEpoch) return;
+            if (recovered.awaitingInput || recovered.outcomeUnknown) {
+              settlement = recovered.awaitingInput ? 'awaiting-input' : 'unknown';
+              return;
+            }
+            status = recovered.terminalStatus;
+            if (status && status !== 'cancelled' && this.invocationId) {
+              draft.onRecovered?.(sessionId, this.invocationId);
+            }
+          }
+          if (status === 'interrupted' || status === 'cancelled' || status === 'canceled') {
             settlement = 'cancelled';
             this.setStage('completing');
             this.emit({ type: 'stream_ended' });
             return;
           }
-          if (aguiResult.status !== 'completed') {
+          if (status !== 'completed') {
             settlement = 'failed';
             this.setStage('error');
             this.emit({ type: 'activity', phase: 'AG-UI 运行失败', status: 'failed', countEvent: false });
@@ -1398,6 +1430,7 @@ export class RunEngineImpl implements RunEngine {
     receipt: import('../stream/kernel-events.js').KernelRunReceipt,
     onInvocationCreated?: (runId: string) => void,
     requestedProfile: 'flat-v1' | 'agent-block-v1' = 'flat-v1',
+    replacingAgui?: { invocationId: string; optimisticMessageId?: string },
   ): Promise<StreamConsumeResult> {
     if (receipt.status === 'rejected' || receipt.status === 'unsupported') {
       this.setStage('error');
@@ -1451,11 +1484,14 @@ export class RunEngineImpl implements RunEngine {
     while (terminalStatus === undefined && consecutiveErrors < maxConsecutiveErrors) {
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
+        const signal = this.abortController?.signal;
+        if (signal && replacingAgui) await waitWhileOffline(signal);
+        if (signal?.aborted) return { terminalStatus: 'cancelled' };
         const afterSeq = this.lastSeqId;
         const stream = await this.api.subscribeSessionEvents(
           sessionId,
           afterSeq,
-          { signal: this.abortController?.signal, ...(scopedCommand ? { commandId: scopedCommand } : {}) },
+          { signal, ...(scopedCommand ? { commandId: scopedCommand } : {}) },
         );
         consecutiveErrors = 0;
         reader = stream.getReader();
@@ -1512,6 +1548,8 @@ export class RunEngineImpl implements RunEngine {
                     type: 'conversation_snapshot', sessionId,
                     result: { state, presentation: projectConversationItems(state, { profile }),
                       runId: kernelRunId, cursor: this.lastSeqId },
+                    replacesInvocationId: replacingAgui?.invocationId,
+                    optimisticMessageId: replacingAgui?.optimisticMessageId,
                   });
                 }
               }
@@ -1533,6 +1571,7 @@ export class RunEngineImpl implements RunEngine {
           }
         }
         if (terminalStatus === undefined) {
+          if (replacingAgui && pendingInteractions.size) return { awaitingInput: true };
           // Kernel subscriptions replay the backlog and close; poll until the
           // run reaches a terminal state (it may wait on an interaction).
           await new Promise((resolve) => setTimeout(resolve, 3000));

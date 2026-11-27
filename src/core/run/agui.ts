@@ -10,7 +10,7 @@ import { a2uiAgentContext, normalizeA2uiOperations } from './a2ui.js';
 import { defaultA2uiCatalogRegistry, type A2uiCatalogRegistry } from '../a2ui/registry.js';
 import { isTerminalInteraction, type Interaction } from '../interaction/types.js';
 
-type AguiRunStatus = 'completed' | 'interrupted' | 'failed' | 'cancelled';
+type AguiRunStatus = 'completed' | 'interrupted' | 'failed' | 'cancelled' | 'incomplete';
 
 type AguiRunResult = {
   status: AguiRunStatus;
@@ -260,7 +260,11 @@ export class AguiRunClient {
       this.pendingByRun.set(parameters.runId, pending);
       if (status !== 'failed') status = 'interrupted';
     }
-    return { status: finished ? status : 'failed', result, pendingInterruptIds: pending.map(item => item.id) };
+    return {
+      status: finished || status === 'failed' ? status : 'incomplete',
+      result,
+      pendingInterruptIds: pending.map(item => item.id),
+    };
   }
 
   private project(event: BaseEvent, fallbackRunId: string, resuming = false, logicalRunId = fallbackRunId): { events: RunEvent[]; status?: AguiRunStatus } {
@@ -284,7 +288,11 @@ export class AguiRunClient {
     } else if (type === 'TOOL_CALL_START') {
       const toolCallId = String(payload.toolCallId || 'tool');
       this.tools.set(toolCallId, { name: String(payload.toolCallName || 'tool'), args: '' });
-      events.push({ type: 'tool_upsert', messageId: this.runMessageIds.get(runId) || `${runId}:assistant`, name: String(payload.toolCallName || 'tool'), args: '', status: 'running' });
+      const toolMessageId = this.runMessageIds.get(runId) || `${runId}:assistant`;
+      events.push(
+        { type: 'assistant_message_created', messageId: toolMessageId, invocationId: logicalRunId },
+        { type: 'tool_upsert', messageId: toolMessageId, name: String(payload.toolCallName || 'tool'), args: '', status: 'running' },
+      );
     } else if (type === 'TOOL_CALL_ARGS') {
       const toolCallId = String(payload.toolCallId || 'tool');
       const tool = this.tools.get(toolCallId) || { name: 'tool', args: '' };
